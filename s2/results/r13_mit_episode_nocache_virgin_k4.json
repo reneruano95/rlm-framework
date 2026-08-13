@@ -1,0 +1,16 @@
+{
+ "mode": "episode",
+ "policy": "virgin",
+ "cache_prompt": false,
+ "windows": 20,
+ "questions": 2,
+ "window_tokens": 1024,
+ "concurrency": 4,
+ "n_predict": 512,
+ "episode_wall_s": 49.08,
+ "per_window_wall_s_median": 7.766,
+ "s_per_window": 2.454,
+ "s_per_call": 1.227,
+ "slot_mismatches": 0,
+ "slot_mismatch_examples": []
+}

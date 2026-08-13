@@ -1,0 +1,16 @@
+{
+ "mode": "throughput",
+ "window": 1024,
+ "k": {
+  "1": {
+   "wall_s": 3.672,
+   "prompt_tokens": 1117,
+   "predicted_tokens": 128,
+   "aggregate_prefill_tps": 304.2,
+   "aggregate_total_tps": 339.1,
+   "per_stream_prefill_tps_median": 837.3,
+   "per_stream_decode_tps_median": 54.9,
+   "wall_per_window_s": 3.672
+  }
+ }
+}
