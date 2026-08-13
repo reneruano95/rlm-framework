@@ -398,3 +398,222 @@ async def test_the_corpus_reaches_c4_so_every_leaf_answer_is_leak_checked(
     assert len(calls) == 1
     assert calls[0]["leak_detected"] is False   # checked, no foreign identifier
     assert calls[0]["leak_detail"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Slot-pool ROTATION (spec §5 C4, v0.2.6).
+#
+# R13's mitigation spends one slot per window, so a pool of `--parallel` slots
+# dies at window `--parallel` while a 200K corpus needs 261 -- the mitigation is
+# inert without a rotation. §5 C4 permits exactly one shape of it: on pool
+# exhaustion, never on an error; quiesce, replace the process, RE-RUN §4's
+# /props handshake, resume; logged as a lifecycle event and stamped on the step
+# that triggered it; and its wall-clock counted inside the episode's.
+#
+# The runner drives it; the process is owned by an injected manager
+# (`rlm.serverproc.ProcessManager`), so these tests need no llama-server -- and
+# C4 keeps having no code path that restarts anything.
+# --------------------------------------------------------------------------- #
+
+
+class FakeLeafProcess:
+    """A `ProcessManager` that replaces nothing and records everything."""
+
+    def __init__(self, *, delay: float = 0.0, fail: Exception | None = None,
+                 on_restart=None) -> None:
+        self.restarts = 0
+        self._delay = delay
+        self._fail = fail
+        self._on_restart = on_restart
+
+    async def restart(self) -> None:
+        self.restarts += 1
+        if self._delay:
+            await asyncio.sleep(self._delay)
+        if self._on_restart is not None:
+            self._on_restart()
+        if self._fail is not None:
+            raise self._fail
+
+
+class DeadLeafDispatcher:
+    """C4 against a server that is gone: every call exhausts its retries."""
+
+    def __init__(self) -> None:
+        self.semaphore = asyncio.Semaphore(8)
+        self.steps: list[dict] = []
+
+    async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
+        return (len(text) + 3) // 4
+
+    def set_corpus(self, chunks) -> None:
+        pass
+
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                    chunk: str | None = None) -> str:
+        from rlm.errors import DispatchError
+
+        self.steps.append({"call_id": call_id, "retry_idx": 0, "status": "error",
+                           "error_detail": "connection refused"})
+        raise DispatchError("dispatch failed after 3 attempts: connection refused")
+
+
+FANOUT = ("```repl\n"
+          "for i in range(3):\n"
+          "    print(await llm_query('Q?', chunk=f'window {i}'))\n"
+          "```")
+FINAL = "```repl\nfinal_answer('42')\n```"
+
+
+async def test_pool_exhaustion_rotates_the_leaf_and_the_episode_continues(
+        episode_env, mock_server):
+    """Without this the R13 mitigation is inert: window `--parallel` + 1 ends
+    the episode. Two windows fit the pool, the third rotates."""
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert pm.restarts == 1
+    assert mock_server.requested_slots() == [0, 1, 0]     # virgin again after it
+    ok = [s for s in env.steps()
+          if s["action_type"] == "llm_call" and s["status"] == "ok"]
+    assert len(ok) == 3                                    # all three answered
+
+
+async def test_the_rotation_is_a_lifecycle_event_and_a_stamp_on_its_trigger(
+        episode_env, mock_server):
+    """Both channels, because each covers the other's blind spot: the S3 gate
+    deletes the lifecycle log, and the log is the only place a rotation that
+    never reached a step could appear."""
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    await env.run()
+
+    rotating = [e for e in env.lifecycle_events()
+                if e["kind"] == "server_health" and e.get("state") == "rotating"]
+    assert len(rotating) == 1
+    assert rotating[0]["reason"] == "slot_pool_exhausted"
+    assert rotating[0]["role"] == "leaf"
+    assert [e for e in env.lifecycle_events()
+            if e["kind"] == "server_health" and e.get("state") == "rotated"]
+
+    stamped = [s for s in env.steps() if s["server_rotation"] is not None]
+    assert len(stamped) == 1
+    assert stamped[0]["server_rotation"] == 1
+    assert stamped[0]["status"] == "error"
+    assert "slot pool exhausted" in stamped[0]["error_detail"]
+
+
+async def test_the_props_handshake_re_runs_before_the_episode_resumes(
+        episode_env, mock_server):
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    before = mock_server.props_count
+    await env.run()
+    assert mock_server.props_count > before
+
+
+async def test_a_leaf_that_comes_back_with_different_flags_stops_the_episode(
+        episode_env, mock_server):
+    """The failure the handshake exists to catch (§4): a rotation that silently
+    returns a server configured differently. Continuing would measure one
+    topology while reporting another, and at `total_slots` it would hand out
+    slot ids the server silently reassigns onto used slots (R13)."""
+    pm = FakeLeafProcess(
+        on_restart=lambda: setattr(mock_server, "total_slots", 4))
+    env = episode_env(root_script=[FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+    assert pm.restarts == 1
+    assert res.outcome == Outcome.ERROR
+    assert res.reason == "rotation_failed"
+    assert mock_server.requested_slots() == [0, 1]   # nothing dispatched after
+
+
+async def test_a_failed_server_is_never_restarted(episode_env):
+    """§5 C4's original rule, intact: rotation fires on POOL EXHAUSTION only.
+    Relaunching a server that just failed would mask the fault the trace exists
+    to record."""
+    pm = FakeLeafProcess()
+    env = episode_env(
+        root_script=["```repl\nprint(await llm_query('Q?', chunk='w'))\n```", FINAL],
+        answer="42", process_manager=pm, dispatcher=DeadLeafDispatcher())
+    await env.run()
+    assert pm.restarts == 0
+    assert any(s["status"] == "error" for s in env.steps())
+
+
+async def test_rotation_time_is_inside_the_episodes_measured_wall_clock(
+        episode_env, mock_server):
+    """§5 C4: "its wall-clock is included in the episode's measured time" --
+    2 rotations ~ 13.4 s per 200K corpus, and §8 excludes between-ARM relaunch
+    time, never this."""
+    pm = FakeLeafProcess(delay=1.0)
+    env = episode_env(root_script=[FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    await env.run()
+    row = env.episode_row()
+    assert (row["ended_at"] - row["started_at"]).total_seconds() >= 1.0
+
+
+async def test_a_rotation_that_outlives_the_wall_clock_is_killed_by_c5(
+        episode_env, mock_server):
+    """The other half of "counted": the clock keeps running THROUGH a rotation,
+    so a rotation that overruns the budget ends the episode like any other
+    overrun instead of quietly extending it."""
+    pm = FakeLeafProcess(delay=30.0)
+    env = episode_env(root_script=[FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      max_wall_clock_s=5,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+    assert res.outcome == Outcome.BUDGET_KILL
+    assert res.reason == "wall_clock"
+
+
+async def test_without_a_process_manager_exhaustion_still_refuses_to_reuse(
+        episode_env, mock_server):
+    """No manager injected (today's `rlm run` against externally launched
+    servers): the refusal reaches the cell unchanged. What must NOT happen is a
+    silent wrap-around onto a used slot."""
+    env = episode_env(root_script=[FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    await env.run()
+    assert mock_server.requested_slots() == [0, 1]
+    assert any(e.get("state") == "rotation_unavailable"
+               for e in env.lifecycle_events())
+
+
+async def test_both_questions_about_a_window_precede_its_retirement(
+        episode_env, mock_server):
+    """A rotation discards every warm slot, so both questions about a window
+    have to be asked before that window's slot is retired. What guarantees it
+    is intra-window grouping: `window_key` is the chunk's bytes, so a second
+    question takes the window's own slot and consumes no virgin one. A pool of
+    N therefore serves N windows x 2 questions with NO rotation -- and a change
+    that keys windows by call_id instead would rotate at N/2 windows, which is
+    what this test fails on."""
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[
+        "```repl\n"
+        "for i in range(2):\n"
+        "    w = f'window {i}'\n"
+        "    print(await llm_query('first?', chunk=w))\n"
+        "    print(await llm_query('second?', chunk=w))\n"
+        "```",
+        FINAL,
+    ], answer="42", leaf_port=mock_server.port, process_manager=pm,
+        dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert pm.restarts == 0
+    assert mock_server.requested_slots() == [0, 0, 1, 1]

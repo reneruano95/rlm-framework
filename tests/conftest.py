@@ -277,6 +277,7 @@ class MockLlamaServer:
         # so a test can prove that derivation costs ONE round trip per
         # dispatcher, not one per call.
         self.props_count = 0
+        self.healthy = True
         self.chat_template = "mock-template"
         self._concurrent = 0
         self._fail_remaining = 0
@@ -291,7 +292,13 @@ class MockLlamaServer:
                 pass
 
             def do_GET(self):
-                if self.path == "/props":
+                if self.path == "/health":
+                    # llama-server answers 200 {"status":"ok"} once loaded and
+                    # 503 while loading; `healthy` lets a test stage the wait a
+                    # rotation's readiness poll actually sits through.
+                    _send_json(self, 200 if outer.healthy else 503,
+                               {"status": "ok" if outer.healthy else "loading model"})
+                elif self.path == "/props":
                     with outer._lock:
                         outer.props_count += 1
                     _send_json(self, 200, {
@@ -708,6 +715,19 @@ class CannedDispatcher:
                                         chunk=chunk)
 
 
+def _point_at_mock_leaf(raw: dict, port: int) -> None:
+    """Re-point the leaf at a `MockLlamaServer`, matching what its /props
+    reports (model, total_slots, per-slot n_ctx) so the §4 handshake -- the one
+    a slot-pool rotation must re-run before resuming -- is genuinely exercised
+    rather than skipped."""
+    leaf = raw["servers"]["leaf"]
+    leaf["port"] = port
+    leaf["model"] = "mock-leaf.gguf"          # == MockLlamaServer /props
+    leaf["parallel"] = 8                      # == /props total_slots
+    leaf["ctx"] = 8 * 4096                    # per-slot 4096 == /props n_ctx
+    raw["scaffold"]["dispatch_concurrency"] = 8
+
+
 def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> dict:
     """The shipped config, re-pointed at a fake root server and a tmp trace
     store. Prompt paths are absolutized so the registry's sha256 pins resolve
@@ -733,6 +753,8 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
         raw["scaffold"]["budgets"]["max_subcalls"] = over["max_subcalls"]
     if over.get("max_total_tokens") is not None:
         raw["scaffold"]["budgets"]["max_total_tokens"] = over["max_total_tokens"]
+    if over.get("leaf_port") is not None:
+        _point_at_mock_leaf(raw, over["leaf_port"])
     return raw
 
 
@@ -765,6 +787,13 @@ class _EpisodeEnv:
         self._run_kwargs = run_kwargs
         self._episode: dict | None = None
         self._steps: list[dict] = []
+        self._lifecycle_stream = io.StringIO()
+
+    def lifecycle_events(self) -> list[dict]:
+        """The JSONL lifecycle log this episode wrote (spec §5): the narrow
+        channel for what the trace store structurally cannot record."""
+        return [json.loads(line) for line in
+                self._lifecycle_stream.getvalue().splitlines() if line.strip()]
 
     async def run(self):
         from rlm.episode import run_episode
@@ -773,7 +802,7 @@ class _EpisodeEnv:
 
         tl = TraceLogger(self.cfg.trace.db_path, self.cfg.trace.blob_root)
         await tl.start()
-        lifecycle = Lifecycle(None, stream=io.StringIO())
+        lifecycle = Lifecycle(None, stream=self._lifecycle_stream)
         try:
             result = await run_episode(self.task, self.cfg, dispatcher=self.dispatcher,
                                        trace=tl, lifecycle=lifecycle, **self._run_kwargs)
@@ -817,13 +846,15 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
     def factory(*, root_script=None, context="", task_text="What is the answer?",
                 category="default", answer=None, truncation_cap=None,
                 max_wall_clock_s=None, max_subcalls=None, max_total_tokens=None,
-                max_turns=None, leaf_fixtures=None, dispatcher=None):
+                max_turns=None, leaf_fixtures=None, dispatcher=None,
+                leaf_port=None, process_manager=None):
         server = FakeRootServer(minimal_cfg_dict, script=root_script)
         raw = _episode_cfg_dict(minimal_cfg_dict, tmp_path=tmp_path,
                                  root_port=server.port, truncation_cap=truncation_cap,
                                  max_wall_clock_s=max_wall_clock_s,
                                  max_subcalls=max_subcalls,
-                                 max_total_tokens=max_total_tokens)
+                                 max_total_tokens=max_total_tokens,
+                                 leaf_port=leaf_port)
         cfg = Config.model_validate(raw)
         task = Task(task_id="fixture-task", text=task_text, context=context,
                     category=category, answer=answer)
@@ -832,7 +863,8 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
             dispatcher=dispatcher or CannedDispatcher(
                 leaf_fixtures, parallel=cfg.scaffold.dispatch_concurrency),
             server=server,
-            run_kwargs={"max_turns": max_turns},
+            run_kwargs={"max_turns": max_turns,
+                        "process_manager": process_manager},
         )
         built.append(env)
         return env

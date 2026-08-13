@@ -69,8 +69,10 @@ from rlm.errors import (
     Actor,
     BudgetBreach,
     ConfigError,
+    DispatchError,
     Outcome,
     RlmError,
+    SlotPoolExhausted,
     StepStatus,
 )
 from rlm.rootclient import RootConversation
@@ -88,6 +90,25 @@ CHECKER_FAILED = "checker_failed"
 OPERATOR_ABORT = "operator_abort"
 SERVER_UNREACHABLE = "server_unreachable"
 NO_CELL_EXTRACTED = "no_cell_extracted"
+#: A planned slot-pool rotation could not be completed (§5 C4). Distinct from
+#: `server_unreachable` on purpose: the leaf may be perfectly reachable and
+#: still be the WRONG leaf -- a process that came back with different flags is
+#: exactly what the re-run handshake exists to catch, and calling that
+#: "unreachable" would hide it in the one column §8 reads to explain errors.
+ROTATION_FAILED = "rotation_failed"
+
+#: The reason a rotation ever fires. There is exactly one (§5 C4): pool
+#: exhaustion. Named as a constant so the lifecycle log and this module cannot
+#: drift, and so `grep slot_pool_exhausted` finds every site that can restart a
+#: server.
+SLOT_POOL_EXHAUSTED = "slot_pool_exhausted"
+
+#: Termination guard on the rotate-and-retry loop for ONE call. A rotation
+#: frees a whole pool (`--parallel` slots), so a single call needs a second one
+#: only when other calls in the same wave took every slot first; needing 16 of
+#: them means a fan-out wider than 16 x --parallel windows, which is a
+#: structural problem the wall clock should not have to discover slowly.
+MAX_ROTATIONS_PER_CALL = 16
 
 
 # --------------------------------------------------------------------------- #
@@ -354,10 +375,17 @@ class _EpisodeRun:
     def __init__(self, task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                  registry, props: dict, max_turns: int | None,
                  scaffold_instance_id: str, scaffold_git_sha: str,
-                 benchmark_version: str | None) -> None:
+                 benchmark_version: str | None,
+                 process_manager: Any = None) -> None:
         self.task = task
         self.cfg = cfg
         self.dispatcher = dispatcher
+        # Who owns the leaf PROCESS (rlm.serverproc.ProcessManager), or None
+        # when nobody does -- the servers were launched outside `rlm run`, and
+        # a rotation is then impossible rather than optional.
+        self.process_manager = process_manager
+        self._rotations = 0
+        self._rotation_lock = asyncio.Lock()
         self.trace = trace
         self.lifecycle = lifecycle
         self.registry = registry
@@ -487,8 +515,7 @@ class _EpisodeRun:
             raise
 
         try:
-            answer = await self.dispatcher.query(question, role="leaf",
-                                                  call_id=call_id, chunk=chunk)
+            answer = await self._dispatch_leaf(question, chunk, call_id)
         except asyncio.CancelledError:
             self._settle(reservation, call_id)
             self._log_attempts(call_id, parent, prompt)
@@ -500,6 +527,135 @@ class _EpisodeRun:
         self._settle(reservation, call_id)
         self._log_attempts(call_id, parent, prompt, answer=answer)
         return answer
+
+    async def _dispatch_leaf(self, question: str, chunk: str | None,
+                              call_id: str) -> str:
+        """One leaf call, rotating the leaf server if its slot pool is spent.
+
+        §5 C4 (v0.2.6): the R13 mitigation gives every window a never-reused
+        slot, so a pool of `--parallel` slots is spent after `--parallel`
+        windows -- window 9 on the shipped config, against 261 windows for a
+        200K corpus. Without a rotation the mitigation is inert. With one, the
+        distinction that keeps §5 C4's original rule intact is PLANNED versus
+        REACTIVE: this fires on `SlotPoolExhausted` and on nothing else, so a
+        server that FAILED is still never restarted (that would mask the fault
+        the trace exists to record -- `DispatchError` propagates untouched,
+        below).
+
+        The retry re-dispatches the SAME `call_id`: a rotation does not make a
+        new sub-call, it makes the same one land on a virgin slot, and §5 C4
+        counts a re-dispatched call once against `max_subcalls`. C4 continues
+        that call's `retry_idx` sequence so both the refusal and the answer
+        survive in the trace.
+        """
+        for _ in range(MAX_ROTATIONS_PER_CALL + 1):
+            try:
+                return await self.dispatcher.query(question, role="leaf",
+                                                    call_id=call_id, chunk=chunk)
+            except SlotPoolExhausted:
+                if self.process_manager is None:
+                    # Nobody owns the leaf process (it was launched outside
+                    # `rlm run`), so there is nothing to rotate. The refusal
+                    # reaches the cell unchanged -- which is the honest
+                    # degradation, because the alternative the pool is
+                    # protecting against is a silent wrap-around onto a slot
+                    # that has held another document.
+                    self.lifecycle.event(
+                        "server_health", role="leaf", state="rotation_unavailable",
+                        episode_id=self.episode_id, reason=SLOT_POOL_EXHAUSTED)
+                    raise
+                rotation = await self._rotate_leaf()
+                self._stamp_rotation(call_id, rotation)
+        raise DispatchError(
+            f"leaf call {call_id} could not obtain a virgin slot after "
+            f"{MAX_ROTATIONS_PER_CALL} rotations; the fan-out is wider than "
+            f"{MAX_ROTATIONS_PER_CALL} x --parallel windows (spec §5 C4)")
+
+    async def _rotate_leaf(self) -> int:
+        """Replace the healthy leaf process and resume on a virgin pool.
+
+        Serialized: concurrent calls that all exhausted the pool queue here,
+        and whoever gets in second finds the pool already refilled and returns
+        without rotating again. The sequence is §5 C4's, in order, and none of
+        it is optional:
+
+          quiesce C4  -> no call may be mid-flight while the process it is
+                         talking to is replaced;
+          restart     -> the injected process manager's, never C4's;
+          /props      -> §4's handshake, RE-RUN. A rotation that silently comes
+                         back with different flags is exactly the failure the
+                         handshake exists to catch, and at `total_slots` it
+                         would make C4 request slot ids the server silently
+                         reassigns onto used slots (R13);
+          rotate_pool -> a new process means a new pool;
+          resume      -> on every path, including failure, so parked calls take
+                         a refusal instead of hanging.
+
+        The wall clock keeps running throughout, deliberately: §5 C4 says the
+        rotation's time is included in the episode's measured time (2 rotations
+        ≈ 13.4 s per 200K corpus), and §8 excludes between-ARM relaunch, never
+        this. The C5 watchdog therefore ends an episode whose rotation outlives
+        its budget, which is the correct reading of an overrun.
+        """
+        async with self._rotation_lock:
+            if not self.dispatcher.restart_required:
+                # Someone rotated while this call queued on the lock; the pool
+                # already has virgin slots, and rotating again would throw away
+                # a whole process's worth of them.
+                return self._rotations
+            rotation = self._rotations + 1
+            started = time.perf_counter()
+            self.lifecycle.event("server_health", role="leaf", state="rotating",
+                                  episode_id=self.episode_id, rotation=rotation,
+                                  reason=SLOT_POOL_EXHAUSTED)
+            await self.dispatcher.quiesce()
+            try:
+                await self.process_manager.restart()
+                await self._rehandshake_leaf()
+                self.dispatcher.rotate_pool()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- any failure here is
+                # terminal for the episode: the alternative to a completed
+                # rotation is reusing a slot that has held another document.
+                self.lifecycle.event("server_health", role="leaf",
+                                      state="rotation_failed",
+                                      episode_id=self.episode_id,
+                                      rotation=rotation, error=repr(exc))
+                await self._trip(Outcome.ERROR, ROTATION_FAILED)
+                raise
+            finally:
+                self.dispatcher.resume()
+            self._rotations = rotation
+            self.lifecycle.event(
+                "server_health", role="leaf", state="rotated",
+                episode_id=self.episode_id, rotation=rotation,
+                duration_ms=round((time.perf_counter() - started) * 1000, 1))
+            return rotation
+
+    async def _rehandshake_leaf(self) -> None:
+        """§4's handshake against the process that just came up."""
+        leaf_cfg = self.cfg.servers.leaf
+        client = ServerClient(f"http://127.0.0.1:{leaf_cfg.port}",
+                               timeout=self.cfg.scaffold.retries.per_call_timeout_s)
+        try:
+            self.props["leaf"] = await handshake(client, leaf_cfg, "leaf",
+                                                  self.lifecycle)
+        finally:
+            await client.aclose()
+
+    def _stamp_rotation(self, call_id: str, rotation: int) -> None:
+        """Mark the step that triggered a rotation (§5 C4).
+
+        The lifecycle log carries the event, but the S3 gate runs with that log
+        deleted, so the trace has to hold the fact by itself -- and only the
+        step ties a rotation to the window whose slot request could not be
+        served. Stamped on the refusal attempt, which C4 has already recorded
+        by the time this runs; `_log_attempts` then writes it out.
+        """
+        attempts = self._attempts(call_id)
+        if attempts:
+            attempts[-1]["server_rotation"] = rotation
 
     def _attempts(self, call_id: str) -> list[dict]:
         return [s for s in self.dispatcher.steps if s.get("call_id") == call_id]
@@ -958,7 +1114,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                        probe: bool = True, max_turns: int | None = None,
                        scaffold_instance_id: str = "",
                        scaffold_git_sha: str = "",
-                       benchmark_version: str | None = None) -> EpisodeResult:
+                       benchmark_version: str | None = None,
+                       process_manager: Any = None) -> EpisodeResult:
     """Run ONE episode end to end and return its §6 outcome.
 
     `dispatcher`, `trace` and `lifecycle` are injected because their lifetimes
@@ -999,7 +1156,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                            max_turns=max_turns,
                            scaffold_instance_id=scaffold_instance_id,
                            scaffold_git_sha=scaffold_git_sha,
-                           benchmark_version=benchmark_version)
+                           benchmark_version=benchmark_version,
+                           process_manager=process_manager)
         try:
             return await run.execute(manager, root)
         except asyncio.CancelledError:

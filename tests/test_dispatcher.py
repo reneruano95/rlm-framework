@@ -905,3 +905,45 @@ async def test_a_second_dispatch_of_one_call_id_keeps_its_own_retry_idx(mock_ser
     c2 = [s for s in d.steps if s["call_id"] == "c2"]
     assert [s["retry_idx"] for s in c2] == [0, 1]
     assert [s["status"] for s in c2] == [StepStatus.ERROR, StepStatus.OK]
+
+async def test_a_windows_second_question_costs_no_slot_and_no_rotation(mock_server):
+    """A rotation discards every warm slot, so both questions about a window
+    must be asked before that window's slot is retired. What guarantees it is
+    window identity: `window_key` is the CHUNK'S BYTES, so a re-query lands on
+    the window's own slot and consumes no virgin one. A pool of N therefore
+    serves N windows x k questions in any interleaving, and only NEW windows
+    can ever exhaust it.
+
+    This is the test that fails if a later change breaks the grouping: key
+    windows by call_id and the pool empties k times faster, so the interleaved
+    second pass below raises SlotPoolExhausted instead of reusing slots 0..3.
+    """
+    d = mock_server.dispatcher(parallel=4, slot_pool=4)
+    windows = [f"window {i}" for i in range(4)]
+    for question in ("first?", "second?"):
+        for i, w in enumerate(windows):          # interleaved across windows
+            await d.query(question, role="leaf", call_id=f"{question}-{i}", chunk=w)
+    assert mock_server.requested_slots() == [0, 1, 2, 3, 0, 1, 2, 3]
+    assert d.slots.remaining == 0                # exactly spent, never overdrawn
+
+async def test_health_is_a_poll_not_an_assertion(mock_server):
+    """A rotation's readiness wait sits through both "not yet" cases -- 503
+    while the model loads, and a refused connection in the seconds after the
+    old process is killed -- so `health()` returns False for them instead of
+    raising. Raising would fail every rotation that actually worked."""
+    from rlm.dispatcher import ServerClient
+
+    client = ServerClient(mock_server.base_url, timeout=5.0)
+    try:
+        assert await client.health() is True
+        mock_server.healthy = False
+        assert await client.health() is False          # 503, still loading
+    finally:
+        await client.aclose()
+
+    mock_server.kill()
+    dead = ServerClient(mock_server.base_url, timeout=2.0)
+    try:
+        assert await dead.health() is False            # connection refused
+    finally:
+        await dead.aclose()
