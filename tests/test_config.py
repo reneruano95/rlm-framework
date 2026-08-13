@@ -21,11 +21,55 @@ def test_extra_keys_are_forbidden(tmp_path):
         Config.model_validate({"scaffold": {"budgets": {"max_subcals": 32}}})
 
 
-def test_leaf_ctx_must_equal_parallel_times_slot(minimal_cfg_dict):
+def test_a_leaf_slot_too_small_for_one_window_is_refused(minimal_cfg_dict):
     bad = minimal_cfg_dict
-    bad["servers"]["leaf"]["ctx"] = 12345
+    bad["servers"]["leaf"]["ctx"] = 12345          # 1,543 tokens per slot
     with pytest.raises(ConfigError, match="ctx"):
         Config.model_validate(bad)
+
+
+def test_an_over_provisioned_leaf_slot_is_allowed(minimal_cfg_dict):
+    """The rule WAS `leaf.ctx == parallel * (size + overhead)`, which was right
+    while chunk size was the parallelism lever. Under R13 the lever is slot
+    COUNT (§4/§5 C4: `-np 128` -> 2,560 tok/slot), and §7 #2 fixed the window
+    at 1,024 -- so equality would now force either a 32K window (falsified) or
+    a 39,936-token "overhead" (fiction). What must hold is that a slot can hold
+    a window plus its overhead; anything above that is measured headroom, and
+    `-np` is pending measurement (§4)."""
+    cfg = Config.model_validate(minimal_cfg_dict)
+    leaf = cfg.servers.leaf
+    chunk = cfg.scaffold.chunk
+    assert leaf.ctx // leaf.parallel >= chunk.size_tokens + chunk.overhead_tokens
+
+
+def test_the_shipped_chunk_geometry_is_the_measured_one(valid_cfg):
+    """§7 #2 (v0.2.5): window 1,024 / stride 768. The overhead is re-derived so
+    that window + overhead = 2,560 -- R13's measured dense-slot budget, which
+    also makes 128 * 2,560 == leaf.ctx exactly, i.e. the config is arithmetic-
+    ready for the `-np 128` §4 says to measure before pinning."""
+    chunk = valid_cfg.scaffold.chunk
+    assert (chunk.size_tokens, chunk.stride_tokens) == (1024, 768)
+    assert chunk.size_tokens + chunk.overhead_tokens == 2560
+    assert 128 * (chunk.size_tokens + chunk.overhead_tokens) == valid_cfg.servers.leaf.ctx
+
+
+def test_a_stride_longer_than_the_window_is_refused(minimal_cfg_dict):
+    """A stride above the window leaves tokens in NO window -- silent partial
+    coverage, which is how §7 #2's `max_subcalls` shortfall failed before."""
+    minimal_cfg_dict["scaffold"]["chunk"]["stride_tokens"] = 2048
+    with pytest.raises(ConfigError, match="stride"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_max_subcalls_covers_a_full_pass_at_the_shipped_geometry(valid_cfg):
+    """§7 #2/§8.3: coverage of a 200K-token corpus is
+    ceil((200,000 - size) / stride) + 1 windows, two questions each, and the
+    budget is spent per QUESTION. A budget below that breaks coverage
+    quietly rather than loudly."""
+    chunk = valid_cfg.scaffold.chunk
+    windows = -(-(200_000 - chunk.size_tokens) // chunk.stride_tokens) + 1
+    assert windows == 261
+    assert valid_cfg.scaffold.budgets.max_subcalls >= windows * 2
 
 
 def test_semaphore_equals_leaf_parallel(valid_cfg):

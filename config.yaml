@@ -59,7 +59,24 @@ servers:
 
 scaffold:
   dispatcher: real
-  chunk: { size_tokens: 32768, overhead_tokens: 8192, snap_to_boundary: true, snap_tolerance: 0.10 }
+  # §7 #2 (v0.2.5): WINDOW 1,024 / STRIDE 768 (25% overlap). Retrieval does not
+  # degrade with chunk size -- it falls off a cliff at absolute needle-to-
+  # question DISTANCE (38/39 correct within ~1,000 tokens, 0/39 beyond;
+  # bracket [967 pass, 1022 fail]). A 32,768-token chunk with the needle 967
+  # from the end scored 6/6 while a 1,024-token chunk with it 1,022 from the
+  # end scored 0/3, so `size_tokens: 1024` alone would still leave the HEAD of
+  # every chunk outside the horizon: the geometry is the fix, not the size.
+  # This stride puts every token within 768 tokens of the end of some window
+  # containing it, at the same sub-call count as non-overlapping 768-chunking
+  # and ~24% more prefill.
+  #
+  # overhead_tokens RE-DERIVED 8192 -> 1536 so that window + overhead = 2,560,
+  # R13's measured dense-slot budget (`-np 128 -c 327680`): 128 x 2,560 is
+  # exactly servers.leaf.ctx, so this block is arithmetic-ready for the `-np`
+  # §4 requires to be measured before pinning. It covers the rendered leaf
+  # prefix (311 tokens measured), the question, the chat template's markup,
+  # max_predict.leaf (512) and the ±10% snap slack on the window.
+  chunk: { size_tokens: 1024, stride_tokens: 768, overhead_tokens: 1536, snap_to_boundary: true, snap_tolerance: 0.10 }
   truncation_cap_chars: 2000
   budgets:
     max_depth: 1

@@ -11,6 +11,15 @@ The chunker is the other half of C2 and lives in `rlm.chunker` (it has to,
 so the injected token counter keeps this module free of any LLM client —
 `tests/test_import_rules.py` lints both).
 
+**`context` is the corpus; `chunks` is a set of VIEWS of it, and since §7 #2
+those views OVERLAP.** At window 1,024 / stride 768 every token appears in one
+or two windows, so `chunks` is no longer a partition: concatenating it repeats
+text, `sum(len(c) for c in chunks) > len(context)`, and anything that counts
+occurrences must count them over `context` (or de-duplicate by position),
+never by summing over windows. This module's output is the single
+non-repeating view, which is exactly why the sandbox gets both and why the
+raw corpus — not the window list — is what the trace stores as ground truth.
+
 **A `str` spec is always literal text, never a path.** Sniffing a string for
 path-likeness would make a corpus that happens to contain a filename load a
 different document than the one the task declared, silently and only

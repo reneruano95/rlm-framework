@@ -607,7 +607,12 @@ class _EpisodeRun:
         chunk_cfg = ChunkConfig(size_tokens=cfg.scaffold.chunk.size_tokens,
                                  overhead_tokens=cfg.scaffold.chunk.overhead_tokens,
                                  snap_to_boundary=cfg.scaffold.chunk.snap_to_boundary,
-                                 snap_tolerance=cfg.scaffold.chunk.snap_tolerance)
+                                 snap_tolerance=cfg.scaffold.chunk.snap_tolerance,
+                                 # §7 #2: `stride < size` makes `chunks`
+                                 # OVERLAPPING windows, not a partition --
+                                 # `context` remains the only non-repeating
+                                 # view of the corpus.
+                                 stride_tokens=cfg.scaffold.chunk.stride_tokens)
         chunks = await asyncio.to_thread(split, context_text, chunk_cfg, counter)
         # R13 detection (§5 C4): C4 holds the corpus so it can run the
         # foreign-string check on every leaf answer -- an identifier absent

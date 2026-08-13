@@ -87,10 +87,26 @@ class ServersConfig(_Strict):
 
 
 class ChunkCfg(_Strict):
+    """C2's window geometry (spec §5 C2, §7 #2).
+
+    `stride_tokens` is the distance between one window's end and the next
+    one's. `None` means "same as `size_tokens`" -- a partition, today's
+    behaviour -- so a config that never mentions stride keeps it. Below
+    `size_tokens` the windows overlap, which is what puts every token within
+    `stride` tokens of the end of some window containing it: the measured
+    retrieval cliff is at ~1,000 tokens of needle-to-question DISTANCE
+    (38/39 correct inside, 0/39 outside), not at any chunk size.
+    """
+
     size_tokens: int
     overhead_tokens: int
     snap_to_boundary: bool = True
     snap_tolerance: float = 0.10
+    stride_tokens: int | None = None
+
+    @property
+    def stride(self) -> int:
+        return self.size_tokens if self.stride_tokens is None else self.stride_tokens
 
 
 class MaxPredict(_Strict):
@@ -250,12 +266,41 @@ class Config(_Strict):
         leaf = self.servers.leaf
         root = self.servers.root
 
-        expected_leaf_ctx = leaf.parallel * (s.chunk.size_tokens + s.chunk.overhead_tokens)
-        if leaf.ctx != expected_leaf_ctx:
+        # A leaf slot must hold one window plus its overhead.
+        #
+        # This WAS `leaf.ctx == leaf.parallel * (size + overhead)`, and that
+        # equality was right while chunk size was the parallelism lever (§4).
+        # It is not right any more, for two independent reasons, and it is
+        # relaxed rather than deleted:
+        #   * §7 #2 (v0.2.5) fixed the window at 1,024 tokens -- retrieval
+        #     falls off a cliff at ~1,000 tokens of needle-to-question
+        #     distance, not at any chunk size -- so the equality would force
+        #     either a falsified 32K window or a fictional 39,936-token
+        #     "overhead" to absorb the difference;
+        #   * R13's mitigation makes slot COUNT the lever (`-np 128` ->
+        #     2,560 tok/slot at the same total KV budget), and §4 says that
+        #     count must be MEASURED before it is pinned -- so the leaf runs
+        #     deliberately over-provisioned per slot until it is.
+        # What must still hold is the thing the arithmetic was protecting: a
+        # prompt of one window plus overhead has to fit in a slot, or C4's
+        # pre-flight rejects every call the chunker produces.
+        slot_capacity = leaf.ctx // leaf.parallel
+        window_budget = s.chunk.size_tokens + s.chunk.overhead_tokens
+        if slot_capacity < window_budget:
             raise ValueError(
-                f"servers.leaf.ctx ({leaf.ctx}) must equal leaf.parallel * "
-                f"(chunk.size_tokens + chunk.overhead_tokens) = {expected_leaf_ctx}"
+                f"servers.leaf.ctx ({leaf.ctx}) / leaf.parallel ({leaf.parallel}) "
+                f"= {slot_capacity} tokens per slot, which cannot hold "
+                f"chunk.size_tokens + chunk.overhead_tokens = {window_budget}"
             )
+
+        if s.chunk.stride > s.chunk.size_tokens:
+            raise ValueError(
+                f"scaffold.chunk.stride_tokens ({s.chunk.stride}) must not exceed "
+                f"chunk.size_tokens ({s.chunk.size_tokens}): a stride longer than "
+                "the window leaves tokens in no window at all (§7 #2)"
+            )
+        if s.chunk.stride <= 0:
+            raise ValueError("scaffold.chunk.stride_tokens must be positive")
 
         if root.ctx != s.root.window_tokens:
             raise ValueError(
