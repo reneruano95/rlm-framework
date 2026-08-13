@@ -71,8 +71,22 @@ model loading, `s2/R13-mitigations.md` §8.2).
 
 So C4 owns slot assignment: `SlotPool`, sized by the server's `--parallel`,
 hands each window one slot that no other window will ever get, and REFUSES
-when the pool is empty (`SlotPoolExhausted`) so the caller restarts the
-server instead of wrapping around into the defect. Both questions about the
+when the pool is empty (`SlotPoolExhausted`) so the caller rotates the
+server instead of wrapping around into the defect.
+
+ROTATION, AND WHAT C4 DOES *NOT* OWN (v0.2.6). A pool of `--parallel` slots
+dies at window `--parallel` while a 200K corpus needs 261 windows, so the
+mitigation is inert without a rotation. §5 C4 permits one, narrowly: on pool
+exhaustion only, never on an error -- restarting a FAILED server would mask
+the fault the trace exists to record, while rotating a HEALTHY one on a
+deterministic, scaffold-owned schedule is a resource-lifecycle operation.
+This module still has no code path that starts or stops a process: it owns
+the three primitives that make someone else's rotation safe --
+`quiesce()` (no call may be mid-flight while the process it is talking to is
+replaced), `rotate_pool()` (a new process means a new pool; carrying old
+assignments onto it would be R13 reintroduced by R13's own mitigation), and
+`resume()`. The episode runner drives them and a process manager injected by
+the CLI owns the process (`rlm.serverproc`). Both questions about the
 same window go to that window's own slot -- same-document reuse is warm and
 measured clean (0/72), and it is the one performance lever R13 leaves intact.
 Every reply's `id_slot` is ASSERTED against the requested one, because an
@@ -555,6 +569,20 @@ class LLMDispatcher:
         # `from_config` is the only production construction and ties the two.
         self.slots = slots if slots is not None else SlotPool(parallel)
         self._chunk_index: ChunkIndex | None = None
+        # Rotation plumbing (v0.2.6). `_gate` is open except while a rotation
+        # is in progress; a call waits on it in the same step in which it takes
+        # its slot, so no call can be holding an assignment from a pool that is
+        # about to be replaced. `_idle` is what `quiesce()` waits on.
+        self._gate = asyncio.Event()
+        self._gate.set()
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._in_flight = 0
+        self._pool_generation = 0
+        # How many steps each call_id has already recorded, so a re-dispatch of
+        # one logical call after a rotation continues its `retry_idx` sequence
+        # instead of colliding with the refusal that triggered the rotation.
+        self._recorded: dict[str, int] = {}
 
     @classmethod
     def from_config(cls, cfg: Config, *,
@@ -611,9 +639,61 @@ class LLMDispatcher:
     @property
     def restart_required(self) -> bool:
         """True once the slot pool has no virgin slot left for a new window.
-        The signal exists so exhaustion is handled by restarting the leaf,
+        The signal exists so exhaustion is handled by rotating the leaf,
         never by reusing a slot (R13)."""
         return self.slots.restart_required
+
+    # -- rotation primitives (spec §5 C4, v0.2.6) ---------------------------- #
+
+    @property
+    def in_flight(self) -> int:
+        """Calls that hold a slot on the CURRENT leaf process right now."""
+        return self._in_flight
+
+    @property
+    def pool_generation(self) -> int:
+        """How many pools this dispatcher has had; equivalently, how many leaf
+        processes it has talked to. Stamped nowhere by C4 -- exposed so the
+        runner can tell "someone already rotated while I was queued" from "I am
+        the one who has to rotate"."""
+        return self._pool_generation
+
+    async def quiesce(self) -> None:
+        """Close the gate and wait until no call holds a slot.
+
+        After this returns, every call that was talking to the leaf has
+        finished and every new one is parked BEFORE it takes a slot -- which is
+        the precondition for replacing the process underneath. Deliberately
+        without a timeout of its own: a call can legitimately be mid-retry for
+        `max_attempts x per_call_timeout_s`, and the thing that must bound this
+        wait is C5's wall clock (whose budget the rotation is spending), not a
+        second, quieter deadline here.
+        """
+        self._gate.clear()
+        await self._idle.wait()
+
+    def rotate_pool(self) -> None:
+        """Adopt a fresh pool: a new process has every slot virgin again.
+
+        Refuses while a call is in flight. Replacing the pool underneath a live
+        call would hand that call's slot index straight back out to a different
+        window -- R13's defect, reintroduced by R13's own mitigation, and
+        invisible because the scaffold would believe both windows held virgin
+        slots.
+        """
+        if self._in_flight:
+            raise DispatchError(
+                f"cannot rotate the slot pool with {self._in_flight} call(s) in "
+                "flight; quiesce() first (spec §5 C4)")
+        self.slots = SlotPool(self.slots.size)
+        self._pool_generation += 1
+
+    def resume(self) -> None:
+        """Reopen the gate. Safe to call on any path, including a rotation that
+        failed: parked calls then take the refusal (or the exhaustion) they
+        would have taken anyway, instead of hanging on a gate nobody will
+        reopen."""
+        self._gate.set()
 
     def set_corpus(self, chunks: Any) -> None:
         """Hand C4 the corpus C2 chunked, ONCE per episode, so R13's detector
@@ -674,8 +754,24 @@ class LLMDispatcher:
 
     def _record(self, step: dict[str, Any]) -> None:
         self.steps.append(step)
+        call_id = step.get("call_id")
+        if call_id is not None:
+            self._recorded[call_id] = self._recorded.get(call_id, 0) + 1
         if self._on_step is not None:
             self._on_step(step)
+
+    def _retry_base(self, call_id: str) -> int:
+        """The `retry_idx` this dispatch's first attempt gets.
+
+        Normally 0. It is non-zero only when this logical call has already
+        recorded attempts -- which happens when a pool exhaustion refused it,
+        the runner rotated the leaf, and the SAME call (it counts once against
+        `max_subcalls`) is dispatched again. Continuing the sequence keeps one
+        trace row per attempt: the runner writes rows keyed by
+        (call_id, retry_idx), so restarting at 0 would drop the attempt that
+        actually answered in favour of the refusal that preceded it.
+        """
+        return self._recorded.get(call_id, 0)
 
     async def aclose(self) -> None:
         for target in self._targets.values():
@@ -707,6 +803,9 @@ class LLMDispatcher:
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
         layout = LAYOUT_QUESTION_ONLY if chunk is None else LAYOUT_CHUNK_QUESTION
+        # Where this dispatch's retry_idx sequence starts -- 0 unless a
+        # rotation is re-dispatching a call that already recorded attempts.
+        base = self._retry_base(call_id)
 
         # D14: render through the server's OWN chat template, never post the
         # caller's string raw -- that is base-model prompting against an
@@ -748,7 +847,7 @@ class LLMDispatcher:
         except Exception as exc:  # noqa: BLE001 -- same class as a failed
             # pre-flight /tokenize below: nothing has been dispatched, so
             # there is no attempt to retry, only a call that cannot be built.
-            step = _new_step(call_id, 0, role, layout=layout)
+            step = _new_step(call_id, base, role, layout=layout)
             step["status"] = StepStatus.ERROR
             step["error_detail"] = f"pre-flight /apply-template failed: {exc}"
             self._record(step)
@@ -770,7 +869,7 @@ class LLMDispatcher:
         except Exception as exc:  # noqa: BLE001 -- server unreachable at
             # the pre-flight stage is a distinct failure from "prompt too
             # big"; there is nothing to retry a dispatch attempt against.
-            step = _new_step(call_id, 0, role, layout=layout, rendered=rendered)
+            step = _new_step(call_id, base, role, layout=layout, rendered=rendered)
             step["status"] = StepStatus.ERROR
             step["error_detail"] = f"pre-flight /tokenize failed: {exc}"
             self._record(step)
@@ -794,7 +893,7 @@ class LLMDispatcher:
                     target.prefix_tokens = len(head)
 
         if len(tokens) > target.slot_capacity_tokens:
-            step = _new_step(call_id, 0, role, layout=layout, rendered=rendered,
+            step = _new_step(call_id, base, role, layout=layout, rendered=rendered,
                               prefix_tokens=target.prefix_tokens)
             step["status"] = StepStatus.REJECTED
             step["error_detail"] = (
@@ -803,6 +902,14 @@ class LLMDispatcher:
             )
             self._record(step)
             raise DispatchError(step["error_detail"])
+
+        # The rotation gate (v0.2.6). Waited on HERE, in the same step in which
+        # the slot is taken -- `Event.wait()` on a set event does not suspend,
+        # so nothing can run between the two and no call can end up holding an
+        # assignment from a pool that is being replaced. A gated call holds
+        # neither a slot nor a semaphore permit, so a rotation cannot deadlock
+        # against the traffic it is quiescing.
+        await self._gate.wait()
 
         # R13: this window's own never-reused slot, acquired AFTER admission
         # so a prompt rejected pre-flight (nothing sent, nothing prefilled)
@@ -813,16 +920,31 @@ class LLMDispatcher:
         try:
             slot = self.slots.acquire(window_key(chunk, call_id))
         except SlotPoolExhausted as exc:
-            step = _new_step(call_id, 0, role, layout=layout, rendered=rendered,
+            step = _new_step(call_id, base, role, layout=layout, rendered=rendered,
                               prefix_tokens=target.prefix_tokens)
             step["status"] = StepStatus.ERROR
             step["error_detail"] = str(exc)
             self._record(step)
             raise
+        self._in_flight += 1
+        self._idle.clear()
+        try:
+            return await self._attempts_loop(
+                target, role, call_id, base, layout, rendered, sent, slot)
+        finally:
+            # Every exit path, cancellation included: a call that no longer
+            # talks to the server must not keep a rotation waiting.
+            self._in_flight -= 1
+            if self._in_flight == 0:
+                self._idle.set()
 
+    async def _attempts_loop(self, target: DispatchTarget, role: str, call_id: str,
+                              base: int, layout: str, rendered: str, sent: str,
+                              slot: int) -> str:
+        """The retry loop for one call, on one already-acquired slot."""
         last_exc: Exception | None = None
         for attempt in range(self._retries.max_attempts):
-            step = _new_step(call_id, attempt, role, layout=layout,
+            step = _new_step(call_id, base + attempt, role, layout=layout,
                               rendered=rendered,
                               prefix_tokens=target.prefix_tokens)
             t_dispatch = utc_now()

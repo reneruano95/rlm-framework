@@ -797,3 +797,111 @@ async def test_with_no_corpus_the_verdict_is_null_not_a_clean_bill(mock_server):
     await d.query("Q?", role="leaf", call_id="c1", chunk="a window")
     assert d.steps[-1]["leak_detected"] is None
     assert d.steps[-1]["leak_detail"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Slot-pool ROTATION primitives (spec v0.2.6 §5 C4).
+#
+# The never-reuse rule consumes one slot per window, so a pool of `--parallel`
+# slots dies at window `--parallel` -- window 9 on the shipped config, against
+# 261 windows for a 200K corpus. §5 C4 now permits rotating a HEALTHY leaf on
+# pool exhaustion (planned, scaffold-owned) while still forbidding the restart
+# of a FAILED one (reactive, and it would mask the fault the trace exists to
+# record). C4 owns none of that policy: it owns the three primitives the
+# episode runner needs to do it safely -- quiesce (no call may be mid-flight
+# while the process it is talking to is replaced), rotate_pool (a new process
+# means a new pool, or the scaffold would carry old slot assignments onto it),
+# and resume.
+# --------------------------------------------------------------------------- #
+
+
+async def test_quiesce_waits_for_in_flight_calls_and_gates_new_ones(mock_server):
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=4)
+    # `chunk=None`: the mock server keys its slow stream on the exact user
+    # segment, and a chunk would prepend to it.
+    slow = asyncio.create_task(d.query("slow", role="leaf", call_id="c1"))
+    await asyncio.sleep(0.3)
+    assert d.in_flight == 1
+
+    quiesced = asyncio.create_task(d.quiesce())
+    await asyncio.sleep(0.1)
+    assert not quiesced.done()          # an in-flight call is still on a slot
+
+    blocked = asyncio.create_task(d.query("Q?", role="leaf", call_id="c2", chunk="w1"))
+    await asyncio.sleep(0.3)
+    assert d.slots.remaining == 3       # the gate held it BEFORE it took a slot
+
+    slow.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await slow
+    await asyncio.wait_for(quiesced, timeout=5)
+
+    assert not blocked.done()           # still gated: the pool has not been replaced
+    d.rotate_pool()
+    d.resume()
+    assert await asyncio.wait_for(blocked, timeout=5)
+    assert mock_server.requested_slots()[-1] == 0   # a virgin slot on the new pool
+
+
+async def test_rotating_the_pool_makes_every_slot_virgin_again(mock_server):
+    from rlm.errors import SlotPoolExhausted
+
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    await d.query("Q?", role="leaf", call_id="c1", chunk="w0")
+    await d.query("Q?", role="leaf", call_id="c2", chunk="w1")
+    with pytest.raises(SlotPoolExhausted):
+        await d.query("Q?", role="leaf", call_id="c3", chunk="w2")
+    assert d.restart_required
+
+    generation = d.pool_generation
+    d.rotate_pool()
+    assert d.pool_generation == generation + 1
+    assert not d.restart_required
+    await d.query("Q?", role="leaf", call_id="c3", chunk="w2")
+    assert mock_server.requested_slots() == [0, 1, 0]
+    # The old assignments are GONE with the process that held them: w0 does not
+    # keep slot 0 across a rotation, it takes the next virgin one.
+    await d.query("Q?", role="leaf", call_id="c4", chunk="w0")
+    assert mock_server.requested_slots()[-1] == 1
+
+
+async def test_rotating_the_pool_under_an_in_flight_call_is_refused(mock_server):
+    """Replacing the pool while a call is still talking to the old process
+    would hand that call's slot index to a different window on the new one --
+    R13, reintroduced by the mitigation for R13."""
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=4)
+    # `chunk=None`: the mock server keys its slow stream on the exact user
+    # segment, and a chunk would prepend to it.
+    slow = asyncio.create_task(d.query("slow", role="leaf", call_id="c1"))
+    await asyncio.sleep(0.3)
+    try:
+        with pytest.raises(DispatchError, match="quiesce"):
+            d.rotate_pool()
+    finally:
+        slow.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await slow
+
+
+async def test_a_second_dispatch_of_one_call_id_keeps_its_own_retry_idx(mock_server):
+    """A rotation re-dispatches the SAME logical call (it counts once against
+    `max_subcalls`), so the post-rotation attempt shares its `call_id`. It must
+    not reuse `retry_idx` 0: the episode runner writes one trace row per
+    (call_id, retry_idx), and a collision would silently drop the attempt that
+    actually answered in favour of the refusal that preceded it."""
+    from rlm.errors import SlotPoolExhausted
+
+    d = mock_server.dispatcher(parallel=1, slot_pool=1)
+    await d.query("Q?", role="leaf", call_id="c1", chunk="w0")
+    with pytest.raises(SlotPoolExhausted):
+        await d.query("Q?", role="leaf", call_id="c2", chunk="w1")
+    d.rotate_pool()
+    await d.query("Q?", role="leaf", call_id="c2", chunk="w1")
+
+    c2 = [s for s in d.steps if s["call_id"] == "c2"]
+    assert [s["retry_idx"] for s in c2] == [0, 1]
+    assert [s["status"] for s in c2] == [StepStatus.ERROR, StepStatus.OK]
