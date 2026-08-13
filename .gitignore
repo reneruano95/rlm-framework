@@ -3,3 +3,5 @@ tools/
 
 # Model weights (GGUF, ~tens of GBs)
 models/
+__pycache__/
+*.pyc
