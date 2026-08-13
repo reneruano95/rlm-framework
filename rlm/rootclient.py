@@ -54,6 +54,21 @@ _ASSISTANT_MARKER = "<|im_start|>assistant\n"
 _THINK_BLOCK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
 
 
+def assistant_prefix(rendered: str) -> str:
+    """The template's OWN text after the last assistant marker in `rendered`
+    (e.g. Qwen3.6's pre-closed `<think>\\n\\n</think>\\n\\n` block when
+    `enable_thinking` is false).
+
+    D26: the assistant history message is exactly this prefix plus the model's
+    raw completion, so the next render is a byte-for-byte prefix extension of
+    this one. Public because `rlm replay` has to reproduce the same message
+    array offline from the stored render -- re-deriving the think-block text
+    independently there would break the state-rule check for a reason that has
+    nothing to do with prompt-assembly drift."""
+    idx = rendered.rfind(_ASSISTANT_MARKER)
+    return rendered[idx + len(_ASSISTANT_MARKER):] if idx != -1 else ""
+
+
 def strip_reasoning(text: str) -> str:
     """Belt-and-braces reasoning strip (D16). With enable_thinking=false the
     model emits no think tags at all -- the prompt already closed the
@@ -153,9 +168,8 @@ class RootConversation:
         # assistant marker (e.g. a pre-closed think block), followed by the
         # model's raw completion -- so the NEXT turn's render is a
         # byte-for-byte prefix extension of this one.
-        idx = rendered.rfind(_ASSISTANT_MARKER)
-        assistant_prefix = rendered[idx + len(_ASSISTANT_MARKER):] if idx != -1 else ""
-        self.messages.append({"role": "assistant", "content": assistant_prefix + raw})
+        self.messages.append(
+            {"role": "assistant", "content": assistant_prefix(rendered) + raw})
 
         return RootTurn(raw=raw, cell=cell, view_hash=view_hash,
                          rendered=rendered, usage=result)

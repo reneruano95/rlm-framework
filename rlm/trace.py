@@ -160,6 +160,18 @@ _STEP_DEFAULTS: dict[str, Any] = {
 _STEP_TEXT_FIELDS = ("error_detail", "action_payload", "observation_view")
 
 
+def blob_rel(episode_id: Any, step_idx: int, col: str) -> str:
+    """The episode-relative path `put_step` will write `blobs[col]` to.
+
+    Public and pure so a caller that supplies its own `step_idx` can name a
+    blob BEFORE the writer commits it -- which is what lets the episode
+    runner point a terminal `final` step at the `root_request_ref` blob its
+    parent turn already wrote, instead of storing a second copy of a 32K-token
+    request. The format lives here, once: a caller re-deriving it from a
+    literal would drift silently the day this changes."""
+    return f"{episode_id}/step-{step_idx:06d}.{col}.blob"
+
+
 @dataclass(slots=True)
 class _OpenMsg:
     row: dict[str, Any]
@@ -388,7 +400,7 @@ class TraceLogger:
         # 1. blobs first, fsync'd: a crash can only ever ORPHAN a blob,
         #    never leave a row pointing at a file that is not there.
         for col, content in msg.blobs.items():
-            rel = f"{episode_id}/step-{idx:06d}.{col}.blob"
+            rel = blob_rel(episode_id, idx, col)
             self._write_blob(rel, content)
             row[col] = rel
         for k, v in _STEP_DEFAULTS.items():

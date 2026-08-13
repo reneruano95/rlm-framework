@@ -288,6 +288,23 @@ class LLMDispatcher:
     def last_step(self) -> dict[str, Any] | None:
         return self.steps[-1] if self.steps else None
 
+    async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
+        """Token count via the TARGET server's own tokenizer.
+
+        C2's chunker takes its counter injected precisely so it never imports
+        an LLM client, and "chunk size measured in target-leaf tokens" (spec
+        §5 C2) means this counter and no other -- a local approximation would
+        make `chunk_size` advisory again and de-calibrate the §7 #2 sweep.
+        Exposed here rather than reaching into `_targets` from the episode
+        runner: the semaphore, the retry policy and the token counter are all
+        C4's, and only C4 should know which client serves which role."""
+        target = self._targets.get(role)
+        if target is None:
+            raise DispatchError(f"unknown dispatch role {role!r}")
+        if not text:
+            return 0
+        return len(await target.client.tokenize(text))
+
     def _record(self, step: dict[str, Any]) -> None:
         self.steps.append(step)
         if self._on_step is not None:
@@ -412,6 +429,15 @@ class MockDispatcher:
     @property
     def last_step(self) -> dict[str, Any] | None:
         return self.steps[-1] if self.steps else None
+
+    async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
+        """A dry run has no server to ask, so this is a stated approximation,
+        not a measurement: ~4 chars per token, monotonic in prefix length
+        (which C2's binary search requires) and deterministic (which the
+        chunker's determinism contract requires). Dry-run chunk boundaries
+        therefore do NOT match a real run's, and no dry-run episode may be
+        scored -- which is already true for other reasons (`dry_run=true`)."""
+        return (len(text) + 3) // 4
 
     async def query(self, prompt: str, *, role: str, call_id: str) -> str:
         key = f"{role}:{hashlib.sha256(prompt.encode('utf-8')).hexdigest()}"

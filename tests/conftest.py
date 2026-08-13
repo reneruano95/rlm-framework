@@ -6,14 +6,17 @@ from __future__ import annotations
 import asyncio
 import copy
 import http.server
+import io
 import json
 import os
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import pytest
 import yaml
 
@@ -355,10 +358,20 @@ def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
 
 
 class FakeRootServer:
-    """Stub of the root-shaped llama-server endpoints rootclient talks to."""
+    """Stub of the root-shaped llama-server endpoints rootclient talks to.
 
-    def __init__(self, base_cfg_dict: dict) -> None:
+    `script`, when given, is the exact sequence of raw completions the fake
+    root emits, one per turn -- that is how `episode_env` drives a whole
+    episode deterministically. Running past the end of the script answers
+    HTTP 500 rather than looping: an episode that outlives its script is a
+    test bug, and it must surface as a loud `error` outcome instead of
+    spinning until the wall clock.
+    """
+
+    def __init__(self, base_cfg_dict: dict, script: list[str] | None = None) -> None:
         self._base_cfg_dict = base_cfg_dict
+        self.script = list(script) if script is not None else None
+        self.turns = 0
         self.last_completion_prompt: str | None = None
         self.last_completion_body: dict | None = None
         self.last_template_kwargs: dict | None = None
@@ -406,7 +419,14 @@ class FakeRootServer:
                 body = _read_json_body(self)
                 outer.last_completion_prompt = body.get("prompt", "")
                 outer.last_completion_body = body
-                content = "```repl\nfinal_answer(1)\n```"
+                if outer.script is None:
+                    content = "```repl\nfinal_answer(1)\n```"
+                elif outer.turns < len(outer.script):
+                    content = outer.script[outer.turns]
+                else:
+                    _send_json(self, 500, {"error": "root script exhausted"})
+                    return
+                outer.turns += 1
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Connection", "close")
@@ -468,3 +488,259 @@ async def fake_root_server(minimal_cfg_dict: dict):
     yield server
     await server.aclose_clients()
     server.shutdown()
+
+
+# --------------------------------------------------------------------------- #
+# Task 15/16: whole-episode fixtures.
+#
+# These run the REAL composition root: real sandbox (Job + AppContainer +
+# bridge), real C2/C3/C5/C6, a real loopback HTTP root server (`FakeRootServer`
+# driven by a script), and a canned dispatcher standing in for C4's leaf
+# traffic -- i.e. exactly spec §5's dry-run mode, which is why the config these
+# fixtures build carries `scaffold.dispatcher: mock` and every episode they
+# produce is flagged `dry_run=true`.
+# --------------------------------------------------------------------------- #
+
+
+class CannedDispatcher:
+    """`MockDispatcher`'s interface with a default answer.
+
+    `MockDispatcher` refuses a prompt it has no fixture for, which is the
+    right behaviour for a real dry run (an unkeyed prompt means the fixture
+    file is stale) but useless for tests that fan out over generated prompts.
+    This subclass mints a fixture on first sight; anything explicitly seeded
+    still wins.
+    """
+
+    def __init__(self, fixtures: dict[str, str] | None = None, *, parallel: int = 8) -> None:
+        from rlm.dispatcher import MockDispatcher
+
+        self._inner = MockDispatcher(dict(fixtures or {}), parallel=parallel)
+
+    def __getattr__(self, name):          # semaphore, steps, last_step, ...
+        return getattr(self._inner, name)
+
+    async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
+        return await self._inner.count_tokens(text, role=role)
+
+    async def query(self, prompt: str, *, role: str, call_id: str) -> str:
+        import hashlib
+
+        key = f"{role}:{hashlib.sha256(prompt.encode('utf-8')).hexdigest()}"
+        self._inner._fixtures.setdefault(key, f"LEAF:{prompt}")
+        return await self._inner.query(prompt, role=role, call_id=call_id)
+
+
+def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> dict:
+    """The shipped config, re-pointed at a fake root server and a tmp trace
+    store. Prompt paths are absolutized so the registry's sha256 pins resolve
+    regardless of the working directory; the model path is set to whatever
+    `FakeRootServer./props` reports, so the §4 startup handshake is genuinely
+    exercised rather than bypassed."""
+    raw = copy.deepcopy(base)
+    raw["servers"]["root"]["port"] = root_port
+    raw["servers"]["root"]["model"] = "mock-root.gguf"   # == FakeRootServer /props
+    raw["scaffold"]["dispatcher"] = "mock"
+    prompts = raw["scaffold"]["prompts"]
+    prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
+    prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+    for ref in prompts["strategy_templates"].values():
+        ref["path"] = str(REPO_ROOT / ref["path"])
+    raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
+    raw["trace"]["blob_root"] = str(tmp_path / "blobs")
+    if over.get("truncation_cap") is not None:
+        raw["scaffold"]["truncation_cap_chars"] = over["truncation_cap"]
+    if over.get("max_wall_clock_s") is not None:
+        raw["scaffold"]["budgets"]["max_wall_clock_s"] = over["max_wall_clock_s"]
+    if over.get("max_subcalls") is not None:
+        raw["scaffold"]["budgets"]["max_subcalls"] = over["max_subcalls"]
+    return raw
+
+
+def _rows(con, sql: str, params: list | None = None) -> list[dict]:
+    """DuckDB hands UUID columns back as `uuid.UUID`; the scaffold speaks in
+    strings (EpisodeResult.episode_id, blob paths), so normalise once here
+    rather than at every assertion."""
+    cur = con.execute(sql, params or [])
+    cols = [d[0] for d in cur.description]
+    return [
+        {c: (str(v) if isinstance(v, uuid.UUID) else v) for c, v in zip(cols, r)}
+        for r in cur.fetchall()
+    ]
+
+
+def _decode_episode_row(row: dict) -> dict:
+    row = dict(row)
+    snap = row.get("config_snapshot")
+    if isinstance(snap, str):
+        row["config_snapshot"] = json.loads(snap)
+    return row
+
+
+class _EpisodeEnv:
+    def __init__(self, *, cfg, task, dispatcher, server, run_kwargs: dict) -> None:
+        self.cfg = cfg
+        self.task = task
+        self.dispatcher = dispatcher
+        self.server = server
+        self._run_kwargs = run_kwargs
+        self._episode: dict | None = None
+        self._steps: list[dict] = []
+
+    async def run(self):
+        from rlm.episode import run_episode
+        from rlm.lifecycle import Lifecycle
+        from rlm.trace import TraceLogger
+
+        tl = TraceLogger(self.cfg.trace.db_path, self.cfg.trace.blob_root)
+        await tl.start()
+        lifecycle = Lifecycle(None, stream=io.StringIO())
+        try:
+            result = await run_episode(self.task, self.cfg, dispatcher=self.dispatcher,
+                                       trace=tl, lifecycle=lifecycle, **self._run_kwargs)
+        finally:
+            await tl.drain()
+            await tl.aclose()
+        self._load()
+        return result
+
+    def _load(self) -> None:
+        con = duckdb.connect(str(self.cfg.trace.db_path), read_only=True)
+        try:
+            eps = _rows(con, "SELECT * FROM episodes ORDER BY started_at")
+            self._episode = _decode_episode_row(eps[-1]) if eps else None
+            self._steps = _rows(con, "SELECT * FROM steps ORDER BY step_idx")
+        finally:
+            con.close()
+
+    def episode_row(self) -> dict:
+        assert self._episode is not None, "call await env.run() first"
+        return self._episode
+
+    def steps(self) -> list[dict]:
+        return self._steps
+
+    def blob(self, rel: str) -> bytes:
+        return (Path(self.cfg.trace.blob_root) / rel).read_bytes()
+
+    def close(self) -> None:
+        self.server.shutdown()
+
+
+@pytest.fixture
+def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
+    """Factory: `episode_env(root_script=[...]) -> env`, then `await env.run()`."""
+    from rlm.config import Config
+    from rlm.episode import Task
+
+    built: list[_EpisodeEnv] = []
+
+    def factory(*, root_script=None, context="", task_text="What is the answer?",
+                category="default", answer=None, truncation_cap=None,
+                max_wall_clock_s=None, max_subcalls=None, max_turns=None,
+                leaf_fixtures=None):
+        server = FakeRootServer(minimal_cfg_dict, script=root_script)
+        raw = _episode_cfg_dict(minimal_cfg_dict, tmp_path=tmp_path,
+                                 root_port=server.port, truncation_cap=truncation_cap,
+                                 max_wall_clock_s=max_wall_clock_s,
+                                 max_subcalls=max_subcalls)
+        cfg = Config.model_validate(raw)
+        task = Task(task_id="fixture-task", text=task_text, context=context,
+                    category=category, answer=answer)
+        env = _EpisodeEnv(
+            cfg=cfg, task=task,
+            dispatcher=CannedDispatcher(leaf_fixtures,
+                                         parallel=cfg.scaffold.dispatch_concurrency),
+            server=server,
+            run_kwargs={"max_turns": max_turns},
+        )
+        built.append(env)
+        return env
+
+    yield factory
+    for env in built:
+        env.close()
+
+
+# --------------------------------------------------------------------------- #
+# Task 16: CLI fixtures. `main()` is synchronous, so these are too -- the fake
+# root server is a stdlib threading HTTP server, and every asyncio object the
+# CLI builds lives and dies inside its own `asyncio.run`.
+# --------------------------------------------------------------------------- #
+
+
+def _write_cfg(path: Path, raw: dict) -> Path:
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def valid_config_file(minimal_cfg_dict: dict, tmp_path: Path) -> Path:
+    """The shipped config with only its trace paths redirected: `rlm validate`
+    must be exercised against the REAL sandbox interpreter and bootstrap dir,
+    since the D7 confinement probe is the point of it."""
+    raw = copy.deepcopy(minimal_cfg_dict)
+    prompts = raw["scaffold"]["prompts"]
+    prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
+    prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+    for ref in prompts["strategy_templates"].values():
+        ref["path"] = str(REPO_ROOT / ref["path"])
+    raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
+    raw["trace"]["blob_root"] = str(tmp_path / "blobs")
+    return _write_cfg(tmp_path / "config.yaml", raw)
+
+
+class _MockEpisodeEnv:
+    def __init__(self, *, config_file: Path, task_file: Path, server, tmp_path: Path) -> None:
+        self.config_file = config_file
+        self.task_file = task_file
+        self.server = server
+        self.tmp_path = tmp_path
+        self.db_path = tmp_path / "rlm.duckdb"
+        self.blob_root = tmp_path / "blobs"
+        self.lifecycle_log = tmp_path / "lifecycle.jsonl"
+
+    def last_episode_id(self) -> str:
+        con = duckdb.connect(str(self.db_path), read_only=True)
+        try:
+            return str(con.execute(
+                "SELECT episode_id FROM episodes ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()[0])
+        finally:
+            con.close()
+
+    def tamper_root_request_blob(self, episode_id: str) -> Path:
+        """Flip one byte INSIDE the stored request. Appending would not do:
+        the blob container slices its streams by declared length, so trailing
+        junk is never hashed and the tamper would go unnoticed -- which is
+        itself worth knowing about the container."""
+        blobs = sorted((self.blob_root / episode_id).glob("*.root_request_ref.blob"))
+        assert blobs, "no root_request_ref blob to tamper with"
+        target = blobs[0]
+        data = bytearray(target.read_bytes())
+        data[-1] = ord("Z") if data[-1] != ord("Z") else ord("Y")
+        target.write_bytes(bytes(data))
+        return target
+
+    def delete_lifecycle_log(self) -> None:
+        self.lifecycle_log.unlink(missing_ok=True)
+
+    def close(self) -> None:
+        self.server.shutdown()
+
+
+@pytest.fixture
+def mock_episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
+    server = FakeRootServer(minimal_cfg_dict,
+                             script=["```repl\nfinal_answer('42')\n```"])
+    raw = _episode_cfg_dict(minimal_cfg_dict, tmp_path=tmp_path, root_port=server.port)
+    config_file = _write_cfg(tmp_path / "config.yaml", raw)
+    task_file = tmp_path / "task.json"
+    task_file.write_text(json.dumps({
+        "task_id": "cli-fixture", "text": "What is the answer?",
+        "category": "default", "context": "a tiny context", "answer": "42",
+    }), encoding="utf-8")
+    env = _MockEpisodeEnv(config_file=config_file, task_file=task_file,
+                           server=server, tmp_path=tmp_path)
+    yield env
+    env.close()
