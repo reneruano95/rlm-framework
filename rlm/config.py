@@ -57,9 +57,27 @@ class ServerConfig(_Strict):
     extra_flags: list[str] = []
 
 
+class LeafServerConfig(ServerConfig):
+    """The leaf, which is the only server whose slots are allocated by the
+    scaffold -- hence the only one carrying a slot policy.
+
+    `slot_policy` has exactly ONE supported value, and the point of declaring
+    it anyway is that the choice becomes explicit and greppable instead of
+    implied by dispatcher code. R13 (spec §10): a slot that has held one
+    document injects that document's content into answers about the next one
+    (shared slot 24/54 vs virgin slot 0/54, p = 4.4e-9). Every cheaper option
+    was measured and leaks -- `cache_prompt: false` 15/18, `--parallel 1`
+    4/18 (it makes reuse mandatory), `action=erase` 33/54, and the
+    full-attention fallback leaf leaked MORE than the hybrid. There is
+    nothing else to put here.
+    """
+
+    slot_policy: Literal["never_reuse"] = "never_reuse"
+
+
 class ServersConfig(_Strict):
     root: ServerConfig
-    leaf: ServerConfig
+    leaf: LeafServerConfig
     fallback_leaf: ServerConfig | None = None
 
 
@@ -82,7 +100,11 @@ class MaxPredict(_Strict):
 
 class Budgets(_Strict):
     max_depth: int = 1
-    max_subcalls: int = 32
+    #: 522 = 261 windows x 2 questions, one full pass over a 200K-token corpus
+    #: at §7 #2's window 1,024 / stride 768 geometry. The old default of 32
+    #: covered 24,832 tokens -- 12.4% of such a corpus -- and coverage broke
+    #: silently rather than loudly (`s2/R13-mitigations.md` §8.3).
+    max_subcalls: int = 522
     max_wall_clock_s: int = 900
     max_total_tokens: int = 1_500_000
     max_predict: MaxPredict

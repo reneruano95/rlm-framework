@@ -35,7 +35,21 @@ servers:
     backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
     log_path: traces/logs/leaf-server.log
     ctx: 327680
+    # R13's mitigation wants `-np 128 -c 327680` (2,560 tok/slot, 128 windows
+    # per process, 2 restarts and 13.4 s per 200K corpus). `-np` is NOT raised
+    # here yet, deliberately: the memory bill for 128 slots is ARITHMETIC, not
+    # a measurement -- ~63 MB/slot of per-slot, context-INDEPENDENT recurrent
+    # state, so ~8.1 GB at 128 slots, taking the leaf to ~35 GiB and
+    # dual-residency to ~52 GiB of the 64 GiB carve. §4 says measure it before
+    # pinning `-np 128`; the fallback if it does not fit is `-np 64`
+    # (4 restarts per 200K corpus instead of 2, +13.5 s).
+    # Until then the pool is 8 slots = 8 windows per leaf process, and the
+    # dispatcher raises SlotPoolExhausted rather than reusing one.
     parallel: 8
+    # R13 (§10, §5 C4). The only measured-clean policy, and the only supported
+    # value: one never-reused slot per window, both questions about a window on
+    # that window's slot, a server restart when the pool is exhausted.
+    slot_policy: never_reuse
     cache_type: q8_0
     flash_attn: "on"
     ub: 512
@@ -49,7 +63,18 @@ scaffold:
   truncation_cap_chars: 2000
   budgets:
     max_depth: 1
-    max_subcalls: 32
+    # RAISED 32 -> 522 (s2/R13-mitigations.md §8.3). At §7 #2's window 1,024 /
+    # stride 768, a 200,000-token corpus is
+    #     windows = ceil((200,000 - 1,024) / 768) + 1 = 261
+    # and the budget is spent per QUESTION, so a full pass at 2 questions per
+    # window is 261 x 2 = 522 subcalls. The old 32 covered
+    # 1,024 + 31 x 768 = 24,832 tokens = 12.4% of such a corpus, and the
+    # shortfall showed up as quietly partial coverage, never as a breach.
+    # The other two budgets are checked against the same pass and stand:
+    # ~590K prompt tokens against max_total_tokens 1.5M, and 11.9 min of leaf
+    # work against max_wall_clock_s 900 (which leaves under 4 min for root
+    # turns -- re-derive it when §7 #2's geometry actually lands).
+    max_subcalls: 522
     max_wall_clock_s: 900
     max_total_tokens: 1500000
     # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths

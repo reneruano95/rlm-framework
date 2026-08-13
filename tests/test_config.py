@@ -218,3 +218,43 @@ def test_config_prompt_registry_builds_a_loadable_registry(tmp_path, minimal_cfg
     assert "ROOT BODY" in reg.render_root("default")
     assert "DEFAULT BLOCK" in reg.render_root("default")
     assert reg.leaf_prefix() == "LEAF PREFIX BODY"
+
+
+# --------------------------------------------------------------------------- #
+# R13 (spec v0.2.6 §10): slot policy and the subcall budget it exposed.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_leaf_declares_its_slot_policy_explicitly(valid_cfg):
+    """One supported value, declared rather than implied, so the choice is
+    greppable: `never_reuse` is the ONLY configuration measured clean
+    (virgin slot 0/54 against a shared slot's 24/54, p = 4.4e-9). The options
+    it replaces both leak -- `cache_prompt: false` 15/18, `--parallel 1`
+    4/18 -- so there is nothing else to offer."""
+    assert valid_cfg.servers.leaf.slot_policy == "never_reuse"
+
+
+def test_an_unmeasured_slot_policy_is_refused(minimal_cfg_dict):
+    minimal_cfg_dict["servers"]["leaf"]["slot_policy"] = "reuse_freely"
+    with pytest.raises(ConfigError, match="slot_policy"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_the_root_has_no_slot_policy_to_set(minimal_cfg_dict):
+    """Slot discipline is the leaf's: the root is one conversation on one
+    slot of a `--parallel 1` server, and a policy key there would suggest a
+    knob that does nothing."""
+    minimal_cfg_dict["servers"]["root"]["slot_policy"] = "never_reuse"
+    with pytest.raises(ConfigError, match="slot_policy"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_max_subcalls_covers_a_full_200k_corpus(valid_cfg):
+    """s2/R13-mitigations.md §8.3: at window 1,024 / stride 768 a 200K-token
+    corpus is ceil((200,000 - 1,024) / 768) + 1 = 261 windows, and the budget
+    is spent per QUESTION, not per window -- 2 questions each is 522 calls.
+    The old default of 32 covered 1,024 + 31 x 768 = 24,832 tokens, i.e.
+    12.4% of the corpus, and coverage broke silently rather than loudly."""
+    windows = -(-(200_000 - 1_024) // 768) + 1
+    assert windows == 261
+    assert valid_cfg.scaffold.budgets.max_subcalls == 2 * windows == 522
