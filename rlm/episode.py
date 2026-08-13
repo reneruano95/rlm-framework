@@ -653,6 +653,8 @@ class _EpisodeRun:
         served. Stamped on the refusal attempt, which C4 has already recorded
         by the time this runs; `_log_attempts` then writes it out.
         """
+        if rotation < 1:
+            return          # nothing rotated (another call had already done it)
         attempts = self._attempts(call_id)
         if attempts:
             attempts[-1]["server_rotation"] = rotation
