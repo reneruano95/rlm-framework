@@ -394,6 +394,62 @@ async def test_leaf_enable_thinking_true_reaches_the_template(mock_server, minim
         "enable_thinking": True}
 
 
+# --------------------------------------------------------------------------- #
+# The pre-flight's off-by-one (fix round 2).
+#
+# `query()` tokenized the rendered string with /tokenize's default
+# `add_special=false` while /completion tokenizes WITH the special/BOS prefix.
+# Measured at three sizes: pre-flight 284/474/1274 vs served 285/475/1275 -- a
+# constant +1. A rendered prompt of exactly `slot_capacity_tokens` was
+# therefore admitted and then occupied cap+1 in the slot.
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_preflight_tokenizes_the_way_completion_does(mock_server):
+    """The pre-flight body must carry `add_special: true` -- otherwise it is
+    not counting the string that will occupy the slot."""
+    d = mock_server.dispatcher()
+    await d.query("q", role="leaf", call_id="c1")
+
+    rendered = mock_server.rendered_prompts[0]
+    preflight = [b for b in mock_server.tokenize_bodies
+                 if b.get("content") == rendered]
+    assert preflight, "the pre-flight never tokenized the rendered string"
+    assert preflight[0].get("add_special") is True
+
+
+async def test_count_tokens_leaves_the_bos_off_a_chunk_body(mock_server):
+    """C2's chunker binary-searches on `count_tokens`, and BOS is not part of a
+    chunk BODY -- adding it there would bias every chunk boundary by one token
+    and de-calibrate the §7 #2 sweep."""
+    d = mock_server.dispatcher()
+    assert await d.count_tokens("one two three", role="leaf") == 3
+    assert mock_server.tokenize_bodies[-1].get("add_special") is False
+
+
+async def test_a_rendered_prompt_of_exactly_slot_capacity_is_admitted(mock_server):
+    """THE BOUNDARY, both sides of it. Current headroom hides this; the
+    arithmetic is still wrong, and a chunk-size sweep is precisely the exercise
+    that walks a prompt up to the cap."""
+    prompt = "boundary probe with several words in it"
+    probe = mock_server.dispatcher(slot_capacity_tokens=100_000)
+    await probe.query(prompt, role="leaf", call_id="probe")
+    rendered = mock_server.rendered_prompts[0]
+
+    served = len(await _tokenize(mock_server, rendered, with_pieces=False))
+    unserved = len(await _tokenize(mock_server, rendered, add_special=False,
+                                    with_pieces=False))
+    assert served == unserved + 1, "the fixture must model the +1 to test it"
+
+    exact = mock_server.dispatcher(slot_capacity_tokens=served)
+    await exact.query(prompt, role="leaf", call_id="exact")   # admitted
+
+    tight = mock_server.dispatcher(slot_capacity_tokens=served - 1)
+    with pytest.raises(DispatchError):
+        await tight.query(prompt, role="leaf", call_id="over")
+    assert tight.last_step["status"] == StepStatus.REJECTED
+
+
 async def test_root_role_is_not_a_valid_dispatch_target_from_config(minimal_cfg_dict, mock_server):
     """Root traffic never goes through LLMDispatcher (rootclient talks to a
     raw ServerClient directly), so from_config() must not build a "root"

@@ -186,12 +186,21 @@ class ServerClient:
         resp.raise_for_status()
         return resp.json()["prompt"]
 
-    async def tokenize(self, text: str) -> list[int]:
+    async def tokenize(self, text: str, *, add_special: bool = False) -> list[int]:
         """POST /tokenize. A missing/empty `content` returns HTTP 200
         {"tokens":[]} with no error, so a zero-length result on non-empty
         input is treated as a fault here, never as a legitimate count
-        (recipes §serverapi: "/tokenize FAILS SILENTLY")."""
-        resp = await self._client.post(f"{self.base_url}/tokenize", json={"content": text})
+        (recipes §serverapi: "/tokenize FAILS SILENTLY").
+
+        `add_special` is /tokenize's own flag and it is NOT cosmetic: the
+        endpoint defaults it to false while /completion tokenizes WITH the
+        special/BOS prefix. Measured at three sizes, pre-flight vs served:
+        284/285, 474/475, 1274/1275 -- a constant +1. Admission must therefore
+        pass `add_special=True` (it is counting what will occupy the slot),
+        while a chunk-body count must not (BOS is not part of a chunk)."""
+        resp = await self._client.post(
+            f"{self.base_url}/tokenize",
+            json={"content": text, "add_special": add_special})
         resp.raise_for_status()
         toks = resp.json().get("tokens", [])
         if text and not toks:
@@ -401,7 +410,11 @@ class LLMDispatcher:
         make `chunk_size` advisory again and de-calibrate the §7 #2 sweep.
         Exposed here rather than reaching into `_targets` from the episode
         runner: the semaphore, the retry policy and the token counter are all
-        C4's, and only C4 should know which client serves which role."""
+        C4's, and only C4 should know which client serves which role.
+
+        Deliberately `add_special=False`, unlike the pre-flight: BOS is not
+        part of a chunk BODY, and adding it here would bias every boundary the
+        chunker's binary search finds by one token."""
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
@@ -485,9 +498,13 @@ class LLMDispatcher:
         # logged status=rejected, and never sent to /completion. It counts
         # the RENDERED string -- that is the string that would occupy the
         # slot, and admitting on the shorter unrendered one would under-count
-        # by the whole system prefix plus the template's own markup.
+        # by the whole system prefix plus the template's own markup --
+        # and it counts it WITH `add_special`, because /completion does:
+        # without that flag the pre-flight is short by exactly one BOS token
+        # (measured 284/474/1274 vs served 285/475/1275), so a prompt of
+        # exactly `slot_capacity_tokens` was admitted and then occupied cap+1.
         try:
-            tokens = await target.client.tokenize(rendered)
+            tokens = await target.client.tokenize(rendered, add_special=True)
         except Exception as exc:  # noqa: BLE001 -- server unreachable at
             # the pre-flight stage is a distinct failure from "prompt too
             # big"; there is nothing to retry a dispatch attempt against.
