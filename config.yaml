@@ -1,0 +1,82 @@
+# rlm-halo runtime config (spec ARCHITECTURE.md §5, Appendix A).
+# Validated by rlm.config.Config (pydantic, extra="forbid"). config_snapshot()
+# is the canonical JSON dump of the validated model (stable field order).
+#
+# Prompt files under prompts/ do not exist yet (Task 14 writes them); every
+# `sha256:` below is null, meaning "not yet pinned" — see rlm/config.py's
+# PromptRegistry and Config.pinned_prompt_hashes() docstrings.
+
+servers:
+  root:
+    model: 'D:\AI\models\unsloth\Qwen3.6-27B-GGUF\Qwen3.6-27B-Q4_K_M.gguf'
+    mtp: false
+    port: 8080
+    backend: vulkan
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
+    log_path: traces/logs/root-server.log
+    ctx: 32768
+    parallel: 1
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    extra_flags: ["--no-mmap", "--no-context-shift"]
+  leaf:
+    model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
+    port: 8081
+    backend: rocm
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
+    log_path: traces/logs/leaf-server.log
+    ctx: 327680
+    parallel: 8
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    extra_flags: ["--no-mmap", "--no-kv-unified", "--cont-batching"]
+  fallback_leaf: null
+
+scaffold:
+  dispatcher: real
+  chunk: { size_tokens: 32768, overhead_tokens: 8192, snap_to_boundary: true, snap_tolerance: 0.10 }
+  truncation_cap_chars: 2000
+  budgets:
+    max_depth: 1
+    max_subcalls: 32
+    max_wall_clock_s: 900
+    max_total_tokens: 1500000
+    max_predict: { root: 1024, leaf: 512 }
+  retries: { max_attempts: 3, backoff_s: [1, 4], per_call_timeout_s: 240 }
+  root_window_kill_fraction: 0.90
+  sampling:
+    root: { temperature: 0.7, top_p: 0.8, seed: 1 }
+    leaf: { temperature: 0.3, top_p: 0.9, seed: 1 }
+  prompts:
+    root: { path: prompts/root.v1.md, sha256: null }
+    leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: null }
+    strategy_templates:
+      needle: { path: prompts/strat-needle.v1.md, sha256: null }
+      aggregation: { path: prompts/strat-aggregation.v1.md, sha256: null }
+      synthesis: { path: prompts/strat-synthesis.v1.md, sha256: null }
+      code_qa: { path: prompts/strat-codeqa.v1.md, sha256: null }
+      default: { path: prompts/strat-default.v1.md, sha256: null }
+  leaf_envelope: { enabled: false }
+  sandbox:
+    interpreter: 'D:\PROJECTS\rlm-halo-framework\.venv\Scripts\python.exe'
+    bootstrap_dir: 'D:\PROJECTS\rlm-halo-framework\sandbox_bootstrap'
+    network_isolation: appcontainer
+    appcontainer_per_episode: true
+    deny_ctypes: false
+    memory_limit_mb: 4096
+  root:
+    enable_thinking: false
+    window_tokens: 32768
+  dispatch_concurrency: 8
+
+trace:
+  db_path: traces/rlm.duckdb
+  blob_root: traces/blobs
+  export_every_episode: true
+
+benchmark: { version: null, seeds: [1, 2, 3] }
+power_sampling: { enabled: false }
