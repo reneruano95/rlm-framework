@@ -8,3 +8,7 @@ __pycache__/
 
 # SDD workspace (scratch, per-plan)
 .superpowers/
+
+# Staged sandbox bootstrap (generated copies of child.py + its two imports;
+# the only directory granted to ALL APPLICATION PACKAGES -- see D7)
+sandbox_bootstrap/
