@@ -153,6 +153,18 @@ class RootScaffoldCfg(_Strict):
     window_tokens: int
 
 
+class LeafScaffoldCfg(_Strict):
+    """The leaf's counterpart to `scaffold.root` (today: the thinking flag
+    only — the leaf has no conversation window; it is one turn per call).
+
+    S1 (finding F3) measured leaf replies consisting of nothing but an empty
+    `<think></think>` block, and for chunk-level extraction the reasoning
+    trace is pure cost — decode tokens the root never reads. Off by default,
+    same as the root's."""
+
+    enable_thinking: bool = False
+
+
 class ScaffoldCfg(_Strict):
     dispatcher: Literal["real", "mock"] = "real"
     chunk: ChunkCfg
@@ -166,6 +178,7 @@ class ScaffoldCfg(_Strict):
     sandbox: SandboxCfg
     cell_extraction: CellExtraction = CellExtraction()
     root: RootScaffoldCfg
+    leaf: LeafScaffoldCfg = LeafScaffoldCfg()
     dispatch_concurrency: int
 
 

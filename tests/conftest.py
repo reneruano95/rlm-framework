@@ -41,6 +41,12 @@ def cfg(valid_cfg: Config) -> Config:
     return valid_cfg
 
 
+@pytest.fixture
+def leaf_prefix() -> str:
+    """The pinned registry leaf prefix (`leaf_prefix_text()` as a fixture)."""
+    return leaf_prefix_text()
+
+
 def _in_process_pair():
     """Wire two BridgeEndpoint instances together over two os.pipe() pairs,
     so the bridge's framing/correlation logic is testable without spawning
@@ -140,6 +146,52 @@ def _naive_tokenize(text: str) -> list[int]:
     return list(range(len(text.split()))) if text else []
 
 
+def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
+    """Qwen3.6's own ChatML shape (recipes §serverapi). Shared by both fake
+    servers: since the S2 leaf-template fix, the LEAF renders through
+    /apply-template too (D14), not just the root."""
+    parts = []
+    for m in messages:
+        parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n")
+    parts.append("<|im_start|>assistant\n")
+    parts.append("<think>\n" if enable_thinking else "<think>\n\n</think>\n\n")
+    return "".join(parts)
+
+
+def _user_segment(prompt: str) -> str:
+    """The last user message body inside a ChatML-rendered prompt (the whole
+    string when it is not rendered at all).
+
+    The mock server's behaviour switches (`"slow"`) and its echo are keyed on
+    what the CALLER asked, which since the leaf-template fix is no longer the
+    string that arrives at /completion -- that is now the rendered prompt."""
+    marker = "<|im_start|>user\n"
+    if marker not in prompt:
+        return prompt
+    return prompt.rsplit(marker, 1)[1].split("<|im_end|>", 1)[0]
+
+
+_LEAF_PREFIX: str | None = None
+
+
+def leaf_prefix_text() -> str:
+    """The registry's leaf system prefix, read exactly the way the runtime
+    reads it (changelog header stripped by PromptRegistry). Paths come from
+    the shipped config.yaml so a prompt rename cannot leave this behind."""
+    global _LEAF_PREFIX
+    if _LEAF_PREFIX is None:
+        from rlm.config import PromptRegistry
+
+        raw = yaml.safe_load((REPO_ROOT / "config.yaml").read_text(encoding="utf-8"))
+        prompts = raw["scaffold"]["prompts"]
+        _LEAF_PREFIX = PromptRegistry.from_files(
+            root_path=REPO_ROOT / prompts["root"]["path"],
+            leaf_prefix_path=REPO_ROOT / prompts["leaf_prefix"]["path"],
+            strategy_paths={},
+        ).leaf_prefix()
+    return _LEAF_PREFIX
+
+
 class MockLlamaServer:
     """Stub of the leaf-shaped llama-server endpoints C4 talks to."""
 
@@ -149,6 +201,14 @@ class MockLlamaServer:
         self.restart_count = 0
         self.last_request_disconnected = False
         self.last_completion_body: dict | None = None
+        # Request-level capture, for the D14 leaf-template contract: the
+        # ORDER of the endpoints hit, every /apply-template body, and every
+        # string /apply-template handed back (which is what /completion must
+        # then receive, byte for byte).
+        self.request_paths: list[str] = []
+        self.template_bodies: list[dict] = []
+        self.rendered_prompts: list[str] = []
+        self.completion_bodies: list[dict] = []
         self._concurrent = 0
         self._fail_remaining = 0
         self._lock = threading.Lock()
@@ -176,10 +236,19 @@ class MockLlamaServer:
                     _send_json(self, 404, {"error": "not found"})
 
             def do_POST(self):
+                outer.request_paths.append(self.path)
                 if self.path == "/tokenize":
                     body = _read_json_body(self)
                     text = body.get("content", "") or ""
                     _send_json(self, 200, {"tokens": _naive_tokenize(text)})
+                elif self.path == "/apply-template":
+                    body = _read_json_body(self)
+                    outer.template_bodies.append(body)
+                    enable_thinking = bool(
+                        (body.get("chat_template_kwargs") or {}).get("enable_thinking", True))
+                    rendered = _render_chatml(body.get("messages", []), enable_thinking)
+                    outer.rendered_prompts.append(rendered)
+                    _send_json(self, 200, {"prompt": rendered})
                 elif self.path == "/completion":
                     self._handle_completion()
                 else:
@@ -189,6 +258,7 @@ class MockLlamaServer:
                 body = _read_json_body(self)
                 prompt = body.get("prompt", "")
                 outer.last_completion_body = body
+                outer.completion_bodies.append(body)
                 with outer._lock:
                     outer.dispatch_count += 1
                     outer._concurrent += 1
@@ -211,10 +281,10 @@ class MockLlamaServer:
                         except OSError:
                             pass
                         return
-                    if prompt == "slow":
+                    if _user_segment(prompt) == "slow":
                         self._stream_slow()
                     else:
-                        self._stream_normal(prompt)
+                        self._stream_normal(_user_segment(prompt))
                 finally:
                     with outer._lock:
                         outer._concurrent -= 1
@@ -292,14 +362,22 @@ class MockLlamaServer:
     def dispatcher(self, *, slot_capacity_tokens: int = 32768, parallel: int = 4,
                     max_predict: int = 64, max_attempts: int = 3,
                     temperature: float = 0.3, top_p: float = 0.9, seed: int = 1,
-                    backoff_s: list[float] | None = None):
+                    backoff_s: list[float] | None = None,
+                    system_prefix: str | None = None,
+                    enable_thinking: bool = False):
         from rlm.config import Retries
         from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient
 
         client = ServerClient(self.base_url, timeout=5.0)
+        # The REAL registry prefix by default (§4/§5: the leaf prefix is
+        # never an inline string), so every dispatcher test runs against the
+        # same bytes the runtime ships.
         target = DispatchTarget(client=client, max_predict=max_predict,
                                  slot_capacity_tokens=slot_capacity_tokens,
-                                 temperature=temperature, top_p=top_p, seed=seed)
+                                 temperature=temperature, top_p=top_p, seed=seed,
+                                 system_prefix=(leaf_prefix_text() if system_prefix is None
+                                                else system_prefix),
+                                 enable_thinking=enable_thinking)
         # Fast backoff by default -- retry TIMING isn't what most of these
         # tests assert on, and the real 1s/4s backoff (scaffold.retries in
         # config.yaml) would make them take ~5s for no additional coverage.
@@ -350,15 +428,6 @@ async def mock_server():
 # answers /completion with one fenced ```repl block, so rootclient's
 # render -> hash -> dispatch -> parse cycle is exercised end to end.
 # --------------------------------------------------------------------------- #
-
-
-def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
-    parts = []
-    for m in messages:
-        parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n")
-    parts.append("<|im_start|>assistant\n")
-    parts.append("<think>\n" if enable_thinking else "<think>\n\n</think>\n\n")
-    return "".join(parts)
 
 
 class FakeRootServer:

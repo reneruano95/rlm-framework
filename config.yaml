@@ -99,6 +99,12 @@ scaffold:
   root:
     enable_thinking: false
     window_tokens: 32768
+  leaf:
+    # S1 F3: every leaf reply in the gate was an empty `<think></think>` block
+    # (the untemplated leaf path). At chunk scale the reasoning trace is decode
+    # cost the root never reads, and the hand-run probe with thinking ON never
+    # reached an answer inside 512 tokens. Off, like the root's.
+    enable_thinking: false
   dispatch_concurrency: 8
 
 trace:

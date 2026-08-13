@@ -7,6 +7,16 @@ string, never /v1/chat/completions -- the OAI-shaped endpoint never reports
 is unfillable and the §4 prefix/slot-affinity contract is unverifiable.
 Use /completion for the LEAF too, for the same reason (recipes §serverapi).
 
+The leaf request is built in `query()`, scaffold-side (I1): the §4
+byte-identical system prefix -- `DispatchTarget.system_prefix`, the whole
+text of the sha256-pinned `prompts/leaf-prefix.v1.md` via
+`PromptRegistry.leaf_prefix()` -- as the system message, and the one opaque
+string the sandbox passed to `llm_query` as the user message. Model code
+therefore cannot alter, replace or suppress the prefix: ChatML markers
+written into its prompt are user content. Skipping the template here is
+base-model prompting against an instruct-tuned model, which is what made
+every leaf answer in the S1 gate junk (s1/RESULTS.md F3).
+
 Streaming is not an optimisation here, it is the mechanism: closing the
 response context mid-generation genuinely aborts server-side generation and
 frees the slot (measured 0.03-0.17 s). C4 must stream for exactly this
@@ -22,9 +32,10 @@ module only produces the step records; a caller (the episode runner) is
 responsible for actually enforcing those budgets and persisting the steps
 via `rlm.trace.TraceLogger.put_step`.
 
-Pre-flight: token-count via the target server's /tokenize; a prompt
-exceeding the target's slot capacity is REJECTED without dispatch and
-logged status=rejected -- never sent to /completion.
+Pre-flight: token-count via the target server's /tokenize, on the RENDERED
+string (the one that would actually occupy the slot); a prompt exceeding the
+target's slot capacity is REJECTED without dispatch and logged
+status=rejected -- never sent to /completion.
 
 The semaphore is `asyncio.Semaphore(cfg.servers.leaf.parallel)`, owned here.
 Nothing the model runs may resize it, choose a server, or change a port. It
@@ -219,8 +230,16 @@ class DispatchTarget:
     """Everything C4 needs to know about ONE role's server to dispatch a
     call and admit it: the client, the per-role generation budget, the slot
     capacity pre-flight rejects against (servers.<role>.ctx //
-    servers.<role>.parallel), and the per-role sampling params
-    (cfg.scaffold.sampling.<role>) that must reach every /completion call."""
+    servers.<role>.parallel), the per-role sampling params
+    (cfg.scaffold.sampling.<role>) that must reach every /completion call,
+    and the request-construction pair the chat template needs.
+
+    `system_prefix` is §4's byte-identical leaf prefix -- the whole text of
+    the sha256-pinned registry file, held here as ONE constant string for
+    the target's lifetime so every call renders the same bytes. It is
+    required, not defaulted: an empty default is precisely the S1 defect
+    (finding F3, leaf calls with no system prompt at all) and would fail
+    silently. `enable_thinking` is scaffold.<role>.enable_thinking."""
 
     client: ServerClient
     max_predict: int
@@ -228,6 +247,8 @@ class DispatchTarget:
     temperature: float
     top_p: float
     seed: int
+    system_prefix: str
+    enable_thinking: bool = False
 
 
 def _new_step(call_id: str, retry_idx: int, role: str) -> dict[str, Any]:
@@ -281,6 +302,12 @@ class LLMDispatcher:
         `query(role="root", ...)` raises DispatchError instead."""
         max_predict = cfg.scaffold.budgets.max_predict
         leaf_sampling = cfg.scaffold.sampling.leaf
+        # §4/§5: the leaf prefix comes from the sha256-pinned registry file,
+        # never an inline string here (an inline prompt is unpinnable, so
+        # config_snapshot would stop describing what actually ran). Read once,
+        # at construction: re-reading per call could not change the bytes for
+        # the better and could only introduce mid-episode prefix drift.
+        leaf_prefix = cfg.prompt_registry().load().leaf_prefix()
         targets = {
             "leaf": DispatchTarget(
                 client=ServerClient(f"http://127.0.0.1:{cfg.servers.leaf.port}",
@@ -290,6 +317,8 @@ class LLMDispatcher:
                 temperature=leaf_sampling.temperature,
                 top_p=leaf_sampling.top_p,
                 seed=leaf_sampling.seed,
+                system_prefix=leaf_prefix,
+                enable_thinking=cfg.scaffold.leaf.enable_thinking,
             ),
         }
         return cls(targets=targets, parallel=cfg.servers.leaf.parallel,
@@ -330,11 +359,47 @@ class LLMDispatcher:
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
 
+        # D14: render through the server's OWN chat template, never post the
+        # caller's string raw -- that is base-model prompting against an
+        # instruct-tuned model, and it made every leaf answer in the S1 gate
+        # junk (`''` or a bare `<think></think>`; s1/RESULTS.md F3).
+        #
+        # I1 + §4: the system prefix is prepended HERE, scaffold-side, from a
+        # constant the sandbox cannot reach. `prompt` is the one opaque string
+        # model code passes to `llm_query`, and it lands in the USER message --
+        # so ChatML markers written into it are user content, not a system
+        # turn. Exactly two messages, prefix first: the layout is
+        # [system prefix][chunk][question] with the question last (the
+        # caller composes the chunk+question user string), so a re-queried
+        # chunk extends the slot's resident prefix instead of invalidating it
+        # at token 0.
+        messages = [
+            {"role": "system", "content": target.system_prefix},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            rendered = await target.client.apply_template(
+                messages,
+                chat_template_kwargs={"enable_thinking": target.enable_thinking},
+            )
+        except Exception as exc:  # noqa: BLE001 -- same class as a failed
+            # pre-flight /tokenize below: nothing has been dispatched, so
+            # there is no attempt to retry, only a call that cannot be built.
+            step = _new_step(call_id, 0, role)
+            step["status"] = StepStatus.ERROR
+            step["error_detail"] = f"pre-flight /apply-template failed: {exc}"
+            self._record(step)
+            raise DispatchError(
+                f"pre-flight /apply-template failed for role={role!r}: {exc}") from exc
+
         # Pre-flight: token-count via the target server's /tokenize. A
         # prompt exceeding slot capacity is REJECTED without dispatch,
-        # logged status=rejected, and never sent to /completion.
+        # logged status=rejected, and never sent to /completion. It counts
+        # the RENDERED string -- that is the string that would occupy the
+        # slot, and admitting on the shorter unrendered one would under-count
+        # by the whole system prefix plus the template's own markup.
         try:
-            tokens = await target.client.tokenize(prompt)
+            tokens = await target.client.tokenize(rendered)
         except Exception as exc:  # noqa: BLE001 -- server unreachable at
             # the pre-flight stage is a distinct failure from "prompt too
             # big"; there is nothing to retry a dispatch attempt against.
@@ -366,8 +431,12 @@ class LLMDispatcher:
                 # 1-4s backoff would starve other queued leaf calls for no
                 # benefit (up to 8 idle slots under a 32-call fan-out).
                 async with self.semaphore:
+                    # The EXACT string /apply-template returned, verbatim on
+                    # every attempt -- re-rendering or re-assembling it here
+                    # would break byte-identity for a reason no test on
+                    # message *content* could ever catch.
                     result = await target.client.completion(
-                        prompt, n_predict=target.max_predict,
+                        rendered, n_predict=target.max_predict,
                         temperature=target.temperature, top_p=target.top_p,
                         seed=target.seed, stream=True)
             except asyncio.CancelledError:
