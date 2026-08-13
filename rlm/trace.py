@@ -255,7 +255,27 @@ class TraceLogger:
         + steps.parquet + blobs.parquet -- is the only way anyone else ever
         sees a run in progress. Written synchronously on the caller's
         thread (infrequent -- once per episode close -- unlike per-step
-        commits, which must never run inline)."""
+        commits, which must never run inline).
+
+        DRAIN-BEFORE-EXPORT CONTRACT: this reads whatever is already
+        committed in `episodes`/`steps` at the moment it runs. It does NOT
+        wait for the writer queue -- a `close_episode()` call sitting
+        unprocessed in the queue is invisible here, so calling this right
+        after `close_episode()` with no intervening `await self.drain()`
+        exports a stale row (outcome/ended_at still NULL) for the episode
+        that was just closed. Callers MUST `await tl.drain()` after the
+        last `open_episode`/`put_step`/`close_episode` call they care about
+        and before calling this, every time -- including at every episode
+        close per D21, where a perpetually-one-drain-behind bundle would
+        make external monitoring of a multi-hour bench read wrong outcomes.
+
+        SQL INJECTION CAVEAT: `run_filter_sql` is interpolated directly into
+        the COPY statements below, not parameterised -- DuckDB's COPY/FROM
+        clauses do not accept bound parameters in this position. Fine for a
+        CLI-driven local tool operating under R6's single-user threat model;
+        would need validation or a safe expression builder before any
+        run-id sourced from a task file or external input ever reaches this
+        argument."""
         out = pathlib.Path(dest)
         out.mkdir(parents=True, exist_ok=True)
         con = self._con

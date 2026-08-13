@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     task_id TEXT NOT NULL,
     task_hash TEXT NOT NULL,
     tokenized_task_len INTEGER,
-    started_at TIMESTAMP,
+    started_at TIMESTAMP NOT NULL,
     ended_at TIMESTAMP,
     outcome episode_outcome,
     outcome_reason TEXT,

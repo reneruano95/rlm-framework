@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import uuid
 
@@ -72,8 +73,10 @@ def test_recover_orphans_tombstones_null_outcome_episodes(tmp_path):
     con.execute((__import__("pathlib").Path(__file__).parents[1]
                  / "rlm" / "schema.sql").read_text())
     ep = str(uuid.uuid4())
-    con.execute("INSERT INTO episodes (episode_id, task_id, task_hash) "
-                "VALUES (?, ?, ?)", [ep, "t", "h"])
+    con.execute(
+        "INSERT INTO episodes (episode_id, task_id, task_hash, started_at) "
+        "VALUES (?, ?, ?, ?)",
+        [ep, "t", "h", dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)])
     con.close()
     assert recover_orphans(db, lifecycle=None) == [ep]
     con = duckdb.connect(str(db))
@@ -92,6 +95,9 @@ async def test_export_bundle_is_self_contained(tmp_path):
                 blobs={"observation_full_ref": b"leaf answer"})
     await tl.drain()
     tl.close_episode(ep, Outcome.SUCCESS, None, None)
+    await tl.drain()  # drain-before-export contract: close_episode() alone
+                       # is not enough -- its row may still be unprocessed
+                       # in the writer queue when export_bundle() runs.
     dest = tmp_path / "bundle"
     tl.export_bundle(dest)
     await tl.aclose()
@@ -101,3 +107,8 @@ async def test_export_bundle_is_self_contained(tmp_path):
         f"JOIN '{dest / 'blobs.parquet'}' b ON b.rel = s.observation_full_ref"
     ).fetchone()
     assert got[0] == b"leaf answer"
+    outcome_row = con.execute(
+        f"SELECT outcome, ended_at FROM '{dest / 'episodes.parquet'}' "
+        f"WHERE episode_id = ?", [ep]).fetchone()
+    assert outcome_row[0] == "success"
+    assert outcome_row[1] is not None
