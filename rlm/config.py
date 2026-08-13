@@ -255,24 +255,52 @@ class Config(_Strict):
                 "head-only output"
             )
 
+        # Every prompt path exists and its sha256 matches the pinned value
+        # (when pinned) — brief's own qualifier. A no-op today (config.yaml
+        # ships every sha256 as null); once Task 14 pins real hashes, a
+        # drifted or deleted prompt file must be refused at load time, not
+        # silently accepted (spec §5: the pin is what makes config_snapshot a
+        # meaningful record of what actually ran). PromptRegistry.load() keeps
+        # its own, separate check for rendering.
+        for name, ref in self._prompt_refs():
+            if ref.sha256 is None:
+                continue
+            if not ref.path.exists():
+                raise ValueError(
+                    f"scaffold.prompts.{name}.path ({ref.path}) is pinned "
+                    f"(sha256={ref.sha256}) but does not exist"
+                )
+            actual = _sha256_hex(ref.path.read_bytes())
+            if actual != ref.sha256:
+                raise ValueError(
+                    f"scaffold.prompts.{name}.path ({ref.path}): sha256 mismatch "
+                    f"(pinned {ref.sha256}, file is {actual})"
+                )
+
         return self
+
+    def _prompt_refs(self) -> list[tuple[str, PromptRef]]:
+        prompts = self.scaffold.prompts
+        return [
+            ("root", prompts.root),
+            ("leaf_prefix", prompts.leaf_prefix),
+            ("strategy_templates.needle", prompts.strategy_templates.needle),
+            ("strategy_templates.aggregation", prompts.strategy_templates.aggregation),
+            ("strategy_templates.synthesis", prompts.strategy_templates.synthesis),
+            ("strategy_templates.code_qa", prompts.strategy_templates.code_qa),
+            ("strategy_templates.default", prompts.strategy_templates.default),
+        ]
 
     def pinned_prompt_hashes(self) -> dict[str, str]:
         """path -> pinned sha256, for every prompt entry that IS pinned.
 
         Entries with `sha256: null` ("not yet pinned") are skipped.
         """
-        prompts = self.scaffold.prompts
-        refs = [
-            prompts.root,
-            prompts.leaf_prefix,
-            prompts.strategy_templates.needle,
-            prompts.strategy_templates.aggregation,
-            prompts.strategy_templates.synthesis,
-            prompts.strategy_templates.code_qa,
-            prompts.strategy_templates.default,
-        ]
-        return {str(ref.path): ref.sha256 for ref in refs if ref.sha256 is not None}
+        return {
+            str(ref.path): ref.sha256
+            for _, ref in self._prompt_refs()
+            if ref.sha256 is not None
+        }
 
     def prompt_registry(self) -> "PromptRegistry":
         """Build (but do not `.load()`) the PromptRegistry this config declares."""
@@ -351,7 +379,11 @@ def config_snapshot(cfg: Config, extra: dict[str, Any]) -> dict[str, Any]:
 # Prompt registry
 # --------------------------------------------------------------------------- #
 
-_CHANGELOG_RE = re.compile(r"\A<!--\s*changelog\b.*?-->\n?", re.DOTALL)
+# \r?\n? (not just \n?) because prompt files may ship with CRLF line endings
+# (this is a Windows-native project; Path.write_text/open("a") both translate
+# "\n" to os.linesep in text mode) — an unconsumed trailing \r would otherwise
+# leak into the rendered body.
+_CHANGELOG_RE = re.compile(r"\A<!--\s*changelog\b.*?-->\r?\n?", re.DOTALL)
 
 
 def _strip_changelog(text: str) -> str:

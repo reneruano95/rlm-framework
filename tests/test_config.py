@@ -1,3 +1,4 @@
+import hashlib
 import json
 import textwrap
 
@@ -101,11 +102,17 @@ def test_pinned_prompt_hashes_skips_unpinned(valid_cfg):
     assert valid_cfg.pinned_prompt_hashes() == {}
 
 
-def test_pinned_prompt_hashes_includes_only_pinned(minimal_cfg_dict):
-    minimal_cfg_dict["scaffold"]["prompts"]["root"]["sha256"] = "a" * 64
+def test_pinned_prompt_hashes_includes_only_pinned(tmp_path, minimal_cfg_dict):
+    # A pinned entry must now point at a real, matching file (fix round 1:
+    # the Config-level pin check below), so this uses a genuine temp file
+    # rather than a fake sha256 against a nonexistent path.
+    f = write_prompt(tmp_path, "root.v1.md", "ROOT")
+    real_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["path"] = str(f)
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["sha256"] = real_hash
     cfg = Config.model_validate(minimal_cfg_dict)
     hashes = cfg.pinned_prompt_hashes()
-    assert hashes[str(cfg.scaffold.prompts.root.path)] == "a" * 64
+    assert hashes[str(cfg.scaffold.prompts.root.path)] == real_hash
     assert str(cfg.scaffold.prompts.leaf_prefix.path) not in hashes
 
 
@@ -115,3 +122,79 @@ def test_truncation_cap_below_marker_floor_is_refused(minimal_cfg_dict):
     minimal_cfg_dict["scaffold"]["truncation_cap_chars"] = MIN_MARKER_CAP - 1
     with pytest.raises(ConfigError, match="truncation_cap_chars"):
         Config.model_validate(minimal_cfg_dict)
+
+
+# --- Fix round 1/5: Config-level "every prompt path exists and its sha256
+# matches the pinned value (when pinned)" validator. PromptRegistry.load()
+# alone was opt-in and nothing called it, so a drifted/deleted pinned prompt
+# passed load_config() silently. This is a Config-construction-time check. ---
+
+
+def test_all_null_sha256_validates_fine_even_though_files_dont_exist(valid_cfg):
+    # Proves the no-op property: today's config.yaml pins nothing, and none
+    # of prompts/*.md exist yet (Task 14 writes them) — valid_cfg's successful
+    # construction (via the fixture) already demonstrates this, so also assert
+    # the precondition directly rather than just trusting the fixture.
+    for _, ref in valid_cfg._prompt_refs():
+        assert ref.sha256 is None
+        assert not ref.path.exists()
+
+
+def test_pinned_prompt_with_missing_file_is_refused(minimal_cfg_dict):
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["sha256"] = "a" * 64
+    # path is left as "prompts/root.v1.md", which does not exist yet.
+    with pytest.raises(ConfigError, match="does not exist"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_pinned_prompt_hash_mismatch_is_refused(tmp_path, minimal_cfg_dict):
+    f = write_prompt(tmp_path, "root.v1.md", "REAL BODY")
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["path"] = str(f)
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["sha256"] = "0" * 64  # wrong
+    with pytest.raises(ConfigError, match="sha256 mismatch"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_pinned_prompt_matching_hash_validates_cleanly(tmp_path, minimal_cfg_dict):
+    f = write_prompt(tmp_path, "root.v1.md", "REAL BODY")
+    real_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["path"] = str(f)
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["sha256"] = real_hash
+    cfg = Config.model_validate(minimal_cfg_dict)
+    assert cfg.scaffold.prompts.root.sha256 == real_hash
+
+
+# Minor finding, same round: Config.prompt_registry() had no test covering it.
+# Kept (rather than deleted) because it is the natural integration point
+# Task 14/16 need — a Config already declares everything a PromptRegistry
+# needs, so requiring callers to hand-assemble one from cfg.scaffold.prompts
+# would just duplicate this mapping at every call site. Covered end-to-end
+# below instead of removed.
+
+
+def test_config_prompt_registry_builds_a_loadable_registry(tmp_path, minimal_cfg_dict):
+    root = write_prompt(tmp_path, "root.v1.md", "ROOT BODY")
+    leaf_prefix = write_prompt(tmp_path, "leaf-prefix.v1.md", "LEAF PREFIX BODY")
+    needle = write_prompt(tmp_path, "strat-needle.v1.md", "NEEDLE BLOCK")
+    aggregation = write_prompt(tmp_path, "strat-aggregation.v1.md", "AGG BLOCK")
+    synthesis = write_prompt(tmp_path, "strat-synthesis.v1.md", "SYN BLOCK")
+    code_qa = write_prompt(tmp_path, "strat-codeqa.v1.md", "CODEQA BLOCK")
+    default = write_prompt(tmp_path, "strat-default.v1.md", "DEFAULT BLOCK")
+
+    minimal_cfg_dict["scaffold"]["prompts"] = {
+        "root": {"path": str(root), "sha256": None},
+        "leaf_prefix": {"path": str(leaf_prefix), "sha256": None},
+        "strategy_templates": {
+            "needle": {"path": str(needle), "sha256": None},
+            "aggregation": {"path": str(aggregation), "sha256": None},
+            "synthesis": {"path": str(synthesis), "sha256": None},
+            "code_qa": {"path": str(code_qa), "sha256": None},
+            "default": {"path": str(default), "sha256": None},
+        },
+    }
+    cfg = Config.model_validate(minimal_cfg_dict)
+    reg = cfg.prompt_registry()
+    reg.load()
+    assert "ROOT BODY" in reg.render_root("default")
+    assert "DEFAULT BLOCK" in reg.render_root("default")
+    assert reg.leaf_prefix() == "LEAF PREFIX BODY"
