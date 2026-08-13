@@ -49,9 +49,43 @@ status=rejected -- never sent to /completion.
 The semaphore is `asyncio.Semaphore(cfg.servers.leaf.parallel)`, owned here.
 Nothing the model runs may resize it, choose a server, or change a port. It
 is held only around each individual dispatch attempt, not across a retry's
-backoff sleep -- a failed attempt's slot is not pinned (id_slot is never
-set on retry), so there is no affinity to preserve, and holding it across a
-1-4s sleep would starve other queued leaf calls for no benefit.
+backoff sleep -- this window's slot is its own and can be handed to nothing
+else (see SLOT DISCIPLINE below), so releasing the semaphore during a backoff
+costs the call nothing, while holding it across a 1-4s sleep would starve
+other queued leaf calls for no benefit.
+
+SLOT DISCIPLINE (v0.2.6, R13) -- the correctness contract of this module.
+The leaf returns content from documents previously held on the same slot.
+Measured under a paired control in ONE process with byte-identical prompts at
+the same moment: shared pinned slot 24/54 leaked, virgin slot 0/54 (Fisher
+p = 4.4e-9, `s2/R13.md` §1). It survives a cold full re-prefill
+(`timings.cache_n == 0`) and survives `action=erase` returning a truthful
+`n_erased`, and a verified full-attention control model leaked MORE than the
+hybrid -- so it is neither the prompt cache nor recurrent state, and no
+configuration flag suppresses it. `cache_prompt: false` (15/18) and
+`--parallel 1` (4/18, which makes reuse mandatory) both leak and are NOT
+mitigations. The only measured-clean configurations are one process per
+document and ONE NEVER-REUSED SLOT PER WINDOW, and the second costs a slot
+rather than a process (13.4 s per 200K corpus against 29 min of redundant
+model loading, `s2/R13-mitigations.md` §8.2).
+
+So C4 owns slot assignment: `SlotPool`, sized by the server's `--parallel`,
+hands each window one slot that no other window will ever get, and REFUSES
+when the pool is empty (`SlotPoolExhausted`) so the caller restarts the
+server instead of wrapping around into the defect. Both questions about the
+same window go to that window's own slot -- same-document reuse is warm and
+measured clean (0/72), and it is the one performance lever R13 leaves intact.
+Every reply's `id_slot` is ASSERTED against the requested one, because an
+out-of-range request is silently reassigned with HTTP 200 (asked 200, got 72),
+which would leave the scaffold certain it held a virgin slot while sharing a
+used one. And every answer is run through R13's foreign-string detector
+(`rlm.leakcheck`), whose verdict lands on the step as `leak_detected` /
+`leak_detail`.
+
+None of this makes the leaf clean: 138 virgin-slot calls with zero leaks give
+a 95% upper bound of 2.2%, and a 200K episode is ~522 leaf calls, so the
+evidence permits roughly 11 contaminated answers per episode. The phrase
+"leak-free" is not available to this module or anything reporting on it.
 
 Server death: retries exhausting against a dead server produce a step
 `status=error` and a raised DispatchError; the caller turns that into
@@ -83,7 +117,15 @@ from typing import Any, Callable
 import httpx
 
 from rlm.config import Config, Retries
-from rlm.errors import ActionType, Actor, DispatchError, StepStatus
+from rlm.errors import (
+    ActionType,
+    Actor,
+    DispatchError,
+    SlotMismatch,
+    SlotPoolExhausted,
+    StepStatus,
+)
+from rlm.leakcheck import NOT_CHECKED, ChunkIndex, LeakVerdict
 from rlm.trace import utc_now
 
 # --------------------------------------------------------------------------- #
@@ -176,6 +218,84 @@ def compose_leaf_user(question: str, chunk: str | None) -> str:
     if chunk is None:
         return question
     return f"{chunk}\n\n{question}"
+
+
+# --------------------------------------------------------------------------- #
+# R13 slot discipline: one never-reused slot per window (spec §5 C4, §10 R13).
+# --------------------------------------------------------------------------- #
+
+
+def window_key(chunk: str | None, call_id: str) -> str:
+    """Which WINDOW a call is about, for slot-allocation purposes.
+
+    Identity is the chunk's bytes: two calls carrying the same chunk are two
+    questions about one window and share its slot (warm, measured clean --
+    `s2/R13-mitigations.md` §4.3). A call with no `chunk=` is the single-string
+    form, where C4 cannot see where the document ends and therefore cannot
+    prove two such calls carry the same document; the safe reading is that
+    they do not, so each gets a window of its own. That costs slots on the
+    legacy call form, which is the correct direction to be wrong in."""
+    if chunk is None:
+        return f"call:{call_id}"
+    return f"chunk:{hashlib.sha256(chunk.encode('utf-8')).hexdigest()}"
+
+
+class SlotPool:
+    """The `--parallel`-sized pool of leaf slots, handed out once each.
+
+    Two invariants, and they are the entire R13 prevention:
+
+      * a slot index is handed out to AT MOST ONE window for this pool's
+        lifetime (which is the lifetime of the leaf server process it
+        describes -- a restarted server means a new pool);
+      * every index handed out is in `[0, size)`, because an out-of-range
+        `id_slot` is silently reassigned by the server onto a slot that has
+        held other documents.
+
+    Exhaustion RAISES. Wrapping around would hand document B a slot that held
+    document A while the scaffold believed otherwise, which is R13 exactly;
+    the caller's answer to `SlotPoolExhausted` is to restart the leaf server
+    (spec §5 C4) -- C4 itself has no code path that restarts anything.
+    """
+
+    __slots__ = ("size", "_by_window", "_next")
+
+    def __init__(self, size: int) -> None:
+        if size < 1:
+            raise ValueError(f"slot pool size must be >= 1, got {size}")
+        self.size = size
+        self._by_window: dict[str, int] = {}
+        self._next = 0
+
+    @property
+    def remaining(self) -> int:
+        """Virgin slots left, i.e. how many NEW windows this leaf process can
+        still serve before it must be restarted."""
+        return self.size - self._next
+
+    @property
+    def restart_required(self) -> bool:
+        return self.remaining <= 0
+
+    @property
+    def assigned(self) -> dict[str, int]:
+        return dict(self._by_window)
+
+    def acquire(self, window: str) -> int:
+        """This window's slot: its existing one, or the next virgin one."""
+        slot = self._by_window.get(window)
+        if slot is not None:
+            return slot
+        if self._next >= self.size:
+            raise SlotPoolExhausted(
+                f"leaf slot pool exhausted: all {self.size} slots have held a "
+                f"window, and reusing one is R13's defect. The leaf server "
+                f"must be restarted before another window is dispatched "
+                f"(--parallel {self.size})")
+        slot = self._next
+        self._next += 1
+        self._by_window[window] = slot
+        return slot
 
 
 # --------------------------------------------------------------------------- #
@@ -409,6 +529,10 @@ def _new_step(call_id: str, retry_idx: int, role: str, *,
         "latency_queue_ms": None,
         "latency_prefill_ms": None,
         "latency_decode_ms": None,
+        # R13's detector (rlm.leakcheck), filled on every answered leaf call.
+        # None means NOT CHECKED -- never "checked and clean".
+        "leak_detected": None,
+        "leak_detail": None,
     }
 
 
@@ -419,12 +543,18 @@ class LLMDispatcher:
     attempt, appended to `.steps` and handed to `on_step` if given."""
 
     def __init__(self, *, targets: dict[str, DispatchTarget], parallel: int,
-                 retries: Retries, on_step: Callable[[dict[str, Any]], None] | None = None) -> None:
+                 retries: Retries, on_step: Callable[[dict[str, Any]], None] | None = None,
+                 slots: SlotPool | None = None) -> None:
         self._targets = targets
         self.semaphore = asyncio.Semaphore(parallel)
         self._retries = retries
         self._on_step = on_step
         self.steps: list[dict[str, Any]] = []
+        # R13: one never-reused slot per window, from a pool the size of the
+        # server's --parallel. Injected so a test can size it independently;
+        # `from_config` is the only production construction and ties the two.
+        self.slots = slots if slots is not None else SlotPool(parallel)
+        self._chunk_index: ChunkIndex | None = None
 
     @classmethod
     def from_config(cls, cfg: Config, *,
@@ -461,12 +591,51 @@ class LLMDispatcher:
                 enable_thinking=cfg.scaffold.leaf.enable_thinking,
             ),
         }
+        # R13/§5 C4: the pool is sized by the server's --parallel, which is
+        # therefore also the number of WINDOWS one leaf process can serve
+        # before it must be restarted. `slot_policy` is config-declared and
+        # has exactly one supported value today, so the choice is explicit
+        # and greppable rather than implied by this line.
+        if cfg.servers.leaf.slot_policy != "never_reuse":  # pragma: no cover
+            raise DispatchError(
+                f"servers.leaf.slot_policy={cfg.servers.leaf.slot_policy!r} is "
+                "not supported; R13 has exactly one measured-clean policy")
         return cls(targets=targets, parallel=cfg.servers.leaf.parallel,
-                    retries=cfg.scaffold.retries, on_step=on_step)
+                    retries=cfg.scaffold.retries, on_step=on_step,
+                    slots=SlotPool(cfg.servers.leaf.parallel))
 
     @property
     def last_step(self) -> dict[str, Any] | None:
         return self.steps[-1] if self.steps else None
+
+    @property
+    def restart_required(self) -> bool:
+        """True once the slot pool has no virgin slot left for a new window.
+        The signal exists so exhaustion is handled by restarting the leaf,
+        never by reusing a slot (R13)."""
+        return self.slots.restart_required
+
+    def set_corpus(self, chunks: Any) -> None:
+        """Hand C4 the corpus C2 chunked, ONCE per episode, so R13's detector
+        can run on every answer (spec §5 C4).
+
+        Without it the detector reports NOT CHECKED rather than clean: a leak
+        verdict with nothing to compare against is not a verdict."""
+        self._chunk_index = ChunkIndex.from_chunks(chunks) if chunks else None
+
+    @property
+    def chunk_index(self) -> ChunkIndex | None:
+        return self._chunk_index
+
+    def leak_verdict(self, answer: str, sent: str) -> LeakVerdict:
+        """R13's foreign-string check for one answer: identifier-shaped tokens
+        that are absent from what was sent (chunk AND question) and present in
+        another chunk. Zero model calls; see `rlm.leakcheck` for its two
+        stated limits and for why a clean verdict is evidence rather than a
+        certificate."""
+        if self._chunk_index is None:
+            return NOT_CHECKED
+        return self._chunk_index.foreign(answer, sent=sent)
 
     def prefix_tokens(self, role: str = "leaf") -> int | None:
         """This role's rendered system-head length in tokens, or None before
@@ -561,8 +730,12 @@ class LLMDispatcher:
         # formatting discipline: a re-queried chunk then extends the slot's
         # resident prefix instead of invalidating it at token 0 (measured
         # cache_n 546 chunk-first vs 0 question-first).
+        # `sent` is the user segment BEFORE sanitisation -- chunk and question
+        # together, which is exactly what R13's oracle treats as "own" text
+        # (a leak is absent from the document AND absent from the question).
+        sent = compose_leaf_user(prompt, chunk)
         user_message = neutralise_control_tokens(
-            compose_leaf_user(prompt, chunk), await self._markers(target))
+            sent, await self._markers(target))
         messages = [
             {"role": "system", "content": target.system_prefix},
             {"role": "user", "content": user_message},
@@ -631,6 +804,22 @@ class LLMDispatcher:
             self._record(step)
             raise DispatchError(step["error_detail"])
 
+        # R13: this window's own never-reused slot, acquired AFTER admission
+        # so a prompt rejected pre-flight (nothing sent, nothing prefilled)
+        # does not burn one. Held for every attempt of this call: a retry
+        # re-sends the SAME document, which is same-document reuse and
+        # measured clean, and a fresh slot per attempt would drain the pool
+        # three times as fast as the budget assumes.
+        try:
+            slot = self.slots.acquire(window_key(chunk, call_id))
+        except SlotPoolExhausted as exc:
+            step = _new_step(call_id, 0, role, layout=layout, rendered=rendered,
+                              prefix_tokens=target.prefix_tokens)
+            step["status"] = StepStatus.ERROR
+            step["error_detail"] = str(exc)
+            self._record(step)
+            raise
+
         last_exc: Exception | None = None
         for attempt in range(self._retries.max_attempts):
             step = _new_step(call_id, attempt, role, layout=layout,
@@ -652,7 +841,7 @@ class LLMDispatcher:
                     result = await target.client.completion(
                         rendered, n_predict=target.max_predict,
                         temperature=target.temperature, top_p=target.top_p,
-                        seed=target.seed, stream=True)
+                        seed=target.seed, stream=True, id_slot=slot)
             except asyncio.CancelledError:
                 # A genuine abort: closing the stream already freed the
                 # slot server-side. No final event exists, so slot_id/
@@ -697,6 +886,28 @@ class LLMDispatcher:
                     latency_prefill_ms=result.prompt_ms,
                     latency_decode_ms=result.predicted_ms,
                 )
+                # R13's slot assertion, and the reason the whole mitigation is
+                # honest rather than merely intended: an out-of-range id_slot
+                # is silently reassigned with HTTP 200 (measured: asked 200,
+                # got 72), so without this the scaffold believes it holds a
+                # virgin slot while sharing a used one. A mismatch is a
+                # contaminated answer -- status=error, not a warning -- and it
+                # is NOT retried: the same request would ask for the same slot
+                # and learn nothing, while the answer in hand cannot be
+                # trusted. `slot_id` records what actually served.
+                if result.slot_id != slot:
+                    step["status"] = StepStatus.ERROR
+                    step["error_detail"] = (
+                        f"slot assertion failed: asked for id_slot {slot}, the "
+                        f"server answered on id_slot {result.slot_id} (HTTP 200, "
+                        "silently reassigned). That slot may have held other "
+                        "documents, so the answer is discarded (R13)")
+                    self._record(step)
+                    raise SlotMismatch(step["error_detail"])
+                # R13's detector, on every answer, at zero model cost.
+                verdict = self.leak_verdict(result.content, sent)
+                step["leak_detected"] = verdict.detected
+                step["leak_detail"] = verdict.detail
                 self._record(step)
                 return result.content
         # unreachable: the loop above always returns or raises.
@@ -719,10 +930,18 @@ class MockDispatcher:
         self._fixtures = dict(fixtures)
         self.semaphore = asyncio.Semaphore(parallel)
         self.steps: list[dict[str, Any]] = []
+        self._chunk_index: ChunkIndex | None = None
 
     @property
     def last_step(self) -> dict[str, Any] | None:
         return self.steps[-1] if self.steps else None
+
+    def set_corpus(self, chunks: Any) -> None:
+        """Same entry point as the real dispatcher's, so the episode runner
+        wires C2's chunks the same way in a dry run and the steps a dry run
+        writes carry the same leak columns. There is no slot pool here: a
+        MockDispatcher never touches a server, so it has no slot to reuse."""
+        self._chunk_index = ChunkIndex.from_chunks(chunks) if chunks else None
 
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         """A dry run has no server to ask, so this is a stated approximation,
@@ -749,6 +968,11 @@ class MockDispatcher:
                 step["error_detail"] = f"MockDispatcher: no fixture for {key}"
                 self.steps.append(step)
                 raise DispatchError(step["error_detail"])
+            answer = self._fixtures[key]
             step["status"] = StepStatus.OK
+            if self._chunk_index is not None:
+                verdict = self._chunk_index.foreign(answer, sent=composed)
+                step["leak_detected"] = verdict.detected
+                step["leak_detail"] = verdict.detail
             self.steps.append(step)
-            return self._fixtures[key]
+            return answer

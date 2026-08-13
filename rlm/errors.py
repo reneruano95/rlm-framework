@@ -55,6 +55,25 @@ class DispatchError(RlmError):
     """A model-server call failed after its retry budget."""
 
 
+class SlotPoolExhausted(DispatchError):
+    """C4's never-reused slot pool has no virgin slot left for a NEW window,
+    so the leaf server must be restarted before another window is served
+    (spec §10 R13, §5 C4).
+
+    Raised rather than wrapping around: reusing a slot that has held another
+    document is the R13 defect itself, and wrapping silently would reintroduce
+    it invisibly -- the scaffold would believe it held a virgin slot."""
+
+
+class SlotMismatch(DispatchError):
+    """The leaf answered on a slot other than the one C4 requested.
+
+    An out-of-range `id_slot` is silently reassigned with HTTP 200 (measured:
+    asked for 200 on a 128-slot server, got 72 -- `s2/R13-mitigations.md`
+    §4.5), so this is a contaminated answer, not a warning: the slot that
+    served it may have held other documents."""
+
+
 class BudgetBreach(RlmError):
     """A C5 budget was breached. Carries the outcome the episode must record."""
 

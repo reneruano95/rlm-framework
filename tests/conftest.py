@@ -257,6 +257,13 @@ class MockLlamaServer:
         self.restart_count = 0
         self.last_request_disconnected = False
         self.last_completion_body: dict | None = None
+        # R13: how many slots this fake server has, and what it does with the
+        # `id_slot` it is asked for. `answer` overrides the echo so a test can
+        # put a foreign identifier in a leaf answer; `slot_override` forces the
+        # reported slot so a test can stage a mismatch on an IN-range request.
+        self.total_slots = 8
+        self.answer: str | None = None
+        self.slot_override: int | None = None
         # Request-level capture, for the D14 leaf-template contract: the
         # ORDER of the endpoints hit, every /apply-template body, and every
         # string /apply-template handed back (which is what /completion must
@@ -289,7 +296,7 @@ class MockLlamaServer:
                         outer.props_count += 1
                     _send_json(self, 200, {
                         "model_path": "mock-leaf.gguf",
-                        "total_slots": 8,
+                        "total_slots": outer.total_slots,
                         "default_generation_settings": {"n_ctx": 4096},
                         "build_info": "mock",
                         "chat_template": outer.chat_template,
@@ -345,21 +352,22 @@ class MockLlamaServer:
                         except OSError:
                             pass
                         return
+                    served = outer.served_slot(body.get("id_slot"))
                     if _user_segment(prompt) == "slow":
-                        self._stream_slow()
+                        self._stream_slow(served)
                     else:
-                        self._stream_normal(_user_segment(prompt))
+                        self._stream_normal(_user_segment(prompt), served)
                 finally:
                     with outer._lock:
                         outer._concurrent -= 1
 
-            def _stream_normal(self, prompt):
-                content = f"echo:{prompt}"
+            def _stream_normal(self, prompt, served):
+                content = outer.answer if outer.answer is not None else f"echo:{prompt}"
                 _write_sse_event(self, {"content": content, "stop": False,
                                          "id_slot": -1, "tokens_predicted": 1,
                                          "tokens_evaluated": 4})
                 _write_sse_event(self, {
-                    "content": "", "stop": True, "id_slot": 0, "stop_type": "eos",
+                    "content": "", "stop": True, "id_slot": served, "stop_type": "eos",
                     "tokens_predicted": max(1, len(content.split())),
                     "tokens_evaluated": 4, "truncated": False, "tokens_cached": 4,
                     "timings": {"cache_n": 0, "prompt_n": 4, "prompt_ms": 5.0,
@@ -367,7 +375,7 @@ class MockLlamaServer:
                                 "predicted_ms": 10.0},
                 })
 
-            def _stream_slow(self):
+            def _stream_slow(self, served=0):
                 # Long enough that a cancel fired ~0.1s in reliably lands
                 # mid-stream. Detection is event-driven, not polled: a
                 # dedicated thread blocks on recv() on this same connection,
@@ -395,7 +403,7 @@ class MockLlamaServer:
                                                  "id_slot": -1, "tokens_predicted": i + 1})
                         time.sleep(0.02)
                     _write_sse_event(self, {
-                        "content": "", "stop": True, "id_slot": 0, "stop_type": "limit",
+                        "content": "", "stop": True, "id_slot": served, "stop_type": "limit",
                         "tokens_predicted": 300, "tokens_evaluated": 4, "tokens_cached": 4,
                         "timings": {"cache_n": 0, "prompt_n": 4, "prompt_ms": 1.0,
                                     "predicted_n": 300, "predicted_ms": 600.0},
@@ -415,6 +423,27 @@ class MockLlamaServer:
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
+    def served_slot(self, requested: int | None) -> int:
+        """Which slot this server answers on -- llama.cpp's MEASURED
+        behaviour, which is the whole reason C4 must assert the returned id.
+
+        An in-range `id_slot` is honoured, including under contention (four
+        concurrent requests pinned to slot 5 were all queued onto slot 5). An
+        OUT-OF-RANGE one is silently reassigned and still answers HTTP 200 --
+        measured on a 128-slot server: asked for 200, got 72
+        (`s2/R13-mitigations.md` §4.5). No error, no warning, and the caller
+        believes it holds a virgin slot while sharing a used one."""
+        if self.slot_override is not None:
+            return self.slot_override
+        if requested is None:
+            return 0
+        if 0 <= requested < self.total_slots:
+            return requested
+        return requested % self.total_slots
+
+    def requested_slots(self) -> list[int | None]:
+        return [b.get("id_slot") for b in self.completion_bodies]
+
     def fail_times(self, n: int) -> None:
         self._fail_remaining = n
 
@@ -428,9 +457,10 @@ class MockLlamaServer:
                     temperature: float = 0.3, top_p: float = 0.9, seed: int = 1,
                     backoff_s: list[float] | None = None,
                     system_prefix: str | None = None,
-                    enable_thinking: bool = False):
+                    enable_thinking: bool = False,
+                    slot_pool: int | None = None):
         from rlm.config import Retries
-        from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient
+        from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient, SlotPool
 
         client = ServerClient(self.base_url, timeout=5.0)
         # The REAL registry prefix by default (§4/§5: the leaf prefix is
@@ -453,8 +483,15 @@ class MockLlamaServer:
         # Only "leaf" -- mirrors the real from_config() shape (fix 4): root
         # traffic never reaches LLMDispatcher, so no test should be able to
         # exercise role="root" here either.
+        # R13 slot discipline. Production ties the pool to `--parallel`
+        # (`from_config`), which is also the number of WINDOWS one leaf process
+        # can serve before it must be restarted. `slot_pool` decouples the two
+        # HERE ONLY, for tests whose subject is the semaphore or the retry
+        # loop rather than the slot rule, and which would otherwise be capped
+        # at `parallel` distinct windows.
+        pool = SlotPool(parallel if slot_pool is None else slot_pool)
         dispatcher = LLMDispatcher(targets={"leaf": target},
-                                    parallel=parallel, retries=retries)
+                                    parallel=parallel, retries=retries, slots=pool)
         self._dispatchers.append(dispatcher)
         return dispatcher
 

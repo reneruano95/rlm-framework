@@ -132,9 +132,13 @@ class ChunkIndex:
 
     `by_token` maps the LOWERCASED token to the first chunk id (in corpus
     iteration order) that contains it. Chunk texts are not retained.
+    `chunk_count` is kept so an index built from a real corpus that happens to
+    contain no identifiers at all reports CHECKED-and-clean, while an index
+    built from nothing reports NOT CHECKED -- the two are not the same claim.
     """
 
     by_token: Mapping[str, str] = field(default_factory=dict)
+    chunk_count: int = 0
 
     @classmethod
     def from_chunks(cls, chunks: Mapping[str, str] | Sequence[str] | Iterable[str]) -> "ChunkIndex":
@@ -146,10 +150,12 @@ class ChunkIndex:
         else:
             items = ((f"chunk[{i}]", text) for i, text in enumerate(chunks))
         by_token: dict[str, str] = {}
+        count = 0
         for chunk_id, text in items:
+            count += 1
             for token in identifier_tokens(text):
                 by_token.setdefault(token.lower(), chunk_id)
-        return cls(by_token=by_token)
+        return cls(by_token=by_token, chunk_count=count)
 
     def foreign(self, answer: str, *, sent: str) -> LeakVerdict:
         """R13's oracle, verbatim in its definition (`s2/R13.md` §2): a leak is
@@ -158,7 +164,7 @@ class ChunkIndex:
         the corpus. `sent` is therefore the WHOLE user segment -- chunk and
         question together -- so a model quoting the question back is never a
         hit."""
-        if not self.by_token:
+        if not self.chunk_count:
             return NOT_CHECKED
         own = {t.lower() for t in identifier_tokens(sent)}
         hits = tuple(

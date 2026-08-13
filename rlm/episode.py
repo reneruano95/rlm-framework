@@ -609,6 +609,13 @@ class _EpisodeRun:
                                  snap_to_boundary=cfg.scaffold.chunk.snap_to_boundary,
                                  snap_tolerance=cfg.scaffold.chunk.snap_tolerance)
         chunks = await asyncio.to_thread(split, context_text, chunk_cfg, counter)
+        # R13 detection (§5 C4): C4 holds the corpus so it can run the
+        # foreign-string check on every leaf answer -- an identifier absent
+        # from the chunk that was sent and present in another chunk is a leak,
+        # at zero model cost. Handed over ONCE, here, because this is the only
+        # place the whole corpus is known; without it C4 records "not checked"
+        # rather than clean, which is the honest degradation.
+        self.dispatcher.set_corpus(chunks)
         # Recorded in the trace (via config_snapshot), not the lifecycle log:
         # this is episode data, and I4 makes the trace store its sole home. No
         # allow-listed lifecycle kind covers it, and inventing one would make

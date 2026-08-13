@@ -39,7 +39,13 @@ async def test_retries_share_a_call_id_and_increment_retry_idx(mock_server):
 
 
 async def test_semaphore_never_exceeds_leaf_parallel(mock_server):
-    d = mock_server.dispatcher(parallel=8)
+    # 32 distinct windows need 32 virgin slots on a 32-slot server (R13); ask
+    # for more slots than the server has and it silently reassigns, which C4
+    # now catches. The subject here is the semaphore, so the pool is sized
+    # past `parallel` explicitly rather than letting slot exhaustion end the
+    # test before the concurrency is observed.
+    mock_server.total_slots = 32
+    d = mock_server.dispatcher(parallel=8, slot_pool=32)
     import asyncio
     await asyncio.gather(*[d.query(f"q{i}", role="leaf", call_id=f"c{i}")
                            for i in range(32)])
@@ -49,9 +55,11 @@ async def test_semaphore_never_exceeds_leaf_parallel(mock_server):
 async def test_backoff_sleep_does_not_hold_the_semaphore(mock_server):
     """rlm/dispatcher.py holds the semaphore only around a single completion
     attempt, not around the backoff sleep between attempts ("Held only
-    around THIS attempt" -- a failed attempt pins no id_slot, so holding the
-    semaphore across a 1-4s backoff would starve every other queued leaf
-    call for no benefit). parallel=1 makes this observable: force one call
+    around THIS attempt" -- the call's slot is its own window's and can be
+    handed to nothing else, so releasing the semaphore during a backoff costs
+    it nothing, while holding it across a 1-4s backoff would starve every
+    other queued leaf call for no benefit). parallel=1 makes this observable:
+    force one call
     into a real 1s backoff after its first attempt fails, then start a
     second, healthy call on the same (single-slot) dispatcher -- it must
     complete well inside that 1s window, not after it, proving the slot was
@@ -60,7 +68,9 @@ async def test_backoff_sleep_does_not_hold_the_semaphore(mock_server):
     import time
 
     mock_server.fail_times(1)  # only the very next /completion fails
-    d = mock_server.dispatcher(parallel=1, backoff_s=[1.0, 4.0])
+    # Two windows, so two virgin slots (R13); `parallel=1` still holds the
+    # semaphore to one in-flight attempt, which is what is under test here.
+    d = mock_server.dispatcher(parallel=1, slot_pool=2, backoff_s=[1.0, 4.0])
 
     slow_task = asyncio.create_task(d.query("q-slow", role="leaf", call_id="slow"))
     # Give the slow call's first (failing) attempt time to land, release the
@@ -586,3 +596,204 @@ async def test_root_role_is_not_a_valid_dispatch_target_from_config(minimal_cfg_
             await d.query("q", role="root", call_id="c1")
     finally:
         await d.aclose()
+
+
+# --------------------------------------------------------------------------- #
+# R13 slot discipline (spec v0.2.6 §5 C4).
+#
+# The leaf returns content from documents previously held on the same slot:
+# shared slot 24/54 vs virgin slot 0/54 in one process with byte-identical
+# prompts (p = 4.4e-9, s2/R13.md §1). It survives a cold full re-prefill and
+# survives `action=erase`, and a full-attention control model leaked MORE than
+# the hybrid -- so it is neither the prompt cache nor recurrent state, and no
+# configuration flag suppresses it. The only thing that works is never reusing
+# a slot, which makes slot allocation a scaffold contract and these tests the
+# only place it is enforced.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_slot_pool_never_hands_out_the_same_index_twice():
+    from rlm.dispatcher import SlotPool
+
+    pool = SlotPool(4)
+    handed = [pool.acquire(f"w{i}") for i in range(4)]
+    assert handed == [0, 1, 2, 3]
+    assert len(set(handed)) == 4
+    assert pool.remaining == 0
+
+
+def test_a_slot_pool_keeps_one_window_on_its_own_slot():
+    """s2/R13-mitigations.md §4.3: the rule is never reuse a slot for a
+    DIFFERENT document. A second question about the same window is
+    same-document reuse -- warm, and measured clean (0/72 at 3 calls per slot,
+    0/54 at 9). It is the one performance lever that survives R13."""
+    from rlm.dispatcher import SlotPool
+
+    pool = SlotPool(4)
+    assert pool.acquire("window-a") == pool.acquire("window-a") == 0
+    assert pool.acquire("window-b") == 1
+    assert pool.acquire("window-a") == 0
+    assert pool.remaining == 2
+
+
+def test_an_exhausted_slot_pool_demands_a_restart_instead_of_wrapping():
+    """Wrapping around would silently reintroduce R13 -- the scaffold would
+    believe it held a virgin slot while handing document B the slot that held
+    document A. The pool must refuse, loudly."""
+    from rlm.dispatcher import SlotPool, SlotPoolExhausted
+
+    pool = SlotPool(2)
+    pool.acquire("w0")
+    pool.acquire("w1")
+    assert pool.restart_required
+    with pytest.raises(SlotPoolExhausted):
+        pool.acquire("w2")
+    assert pool.acquire("w1") == 1     # an ALREADY-assigned window still works
+
+
+async def test_each_window_gets_its_own_never_reused_in_range_slot(mock_server):
+    d = mock_server.dispatcher(parallel=4)
+    for i in range(4):
+        await d.query("Q?", role="leaf", call_id=f"c{i}", chunk=f"chunk {i}")
+    asked = mock_server.requested_slots()
+    assert asked == [0, 1, 2, 3]
+    assert len(set(asked)) == 4                                  # never twice
+    assert all(0 <= s < mock_server.total_slots for s in asked)  # never out of range
+    assert [s["slot_id"] for s in d.steps] == asked              # server agreed
+
+
+async def test_both_questions_about_one_window_land_on_that_windows_slot(mock_server):
+    d = mock_server.dispatcher(parallel=4)
+    chunk = "the same window, twice"
+    await d.query("first question", role="leaf", call_id="c1", chunk=chunk)
+    await d.query("second question", role="leaf", call_id="c2", chunk=chunk)
+    await d.query("about another window", role="leaf", call_id="c3", chunk="other")
+    assert mock_server.requested_slots() == [0, 0, 1]
+
+
+async def test_every_attempt_of_one_call_stays_on_that_windows_slot(mock_server):
+    """A retry re-sends the SAME document, so it is same-document reuse and
+    belongs on the window's own slot -- and burning a fresh slot per attempt
+    would drain the pool three times as fast as the budget assumes."""
+    mock_server.fail_times(2)
+    d = mock_server.dispatcher(parallel=4)
+    await d.query("Q?", role="leaf", call_id="c1", chunk="one window")
+    assert mock_server.requested_slots() == [0, 0, 0]
+    assert d.slots.remaining == 3
+
+
+async def test_a_call_with_no_chunk_still_gets_a_window_of_its_own(mock_server):
+    """The single-string form gives C4 no way to know where the document
+    ended, so it cannot prove two such calls carry the same document. The safe
+    reading is that they do not: each gets a virgin slot."""
+    d = mock_server.dispatcher(parallel=4)
+    await d.query("first", role="leaf", call_id="c1")
+    await d.query("second", role="leaf", call_id="c2")
+    assert mock_server.requested_slots() == [0, 1]
+
+
+async def test_pool_exhaustion_signals_a_restart_and_dispatches_nothing(mock_server):
+    from rlm.dispatcher import SlotPoolExhausted
+
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    await d.query("Q?", role="leaf", call_id="c1", chunk="w0")
+    await d.query("Q?", role="leaf", call_id="c2", chunk="w1")
+    served = mock_server.dispatch_count
+    with pytest.raises(SlotPoolExhausted):
+        await d.query("Q?", role="leaf", call_id="c3", chunk="w2")
+    assert mock_server.dispatch_count == served      # nothing was sent
+    assert d.restart_required
+    assert d.steps[-1]["status"] == StepStatus.ERROR
+    assert "restart" in d.steps[-1]["error_detail"]
+    assert mock_server.restart_count == 0            # C4 never restarts a server
+
+
+async def test_a_reassigned_slot_is_caught_and_logged_as_an_error(mock_server):
+    """s2/R13-mitigations.md §4.5. The server can answer HTTP 200 on a slot
+    other than the one requested, with no error and no warning; a scaffold
+    that trusts its own request then believes it holds a virgin slot while
+    sharing a used one. The assertion is what keeps the whole mitigation
+    honest, so a mismatch is a contaminated answer (status=error), never a
+    warning -- and it is not retried, because a retry would re-ask for the
+    same slot and learn nothing."""
+    from rlm.dispatcher import SlotMismatch
+
+    mock_server.slot_override = 7          # asked for 0, answered on 7
+    d = mock_server.dispatcher(parallel=4)
+    with pytest.raises(SlotMismatch):
+        await d.query("Q?", role="leaf", call_id="c1", chunk="w0")
+    assert len(d.steps) == 1
+    step = d.steps[-1]
+    assert step["status"] == StepStatus.ERROR
+    assert "7" in step["error_detail"] and "0" in step["error_detail"]
+    assert step["slot_id"] == 7            # what actually served, for forensics
+
+
+async def test_the_fixture_reproduces_the_silent_reassignment_it_guards_against(mock_server):
+    """Fidelity check on the fake server: without this behaviour the
+    assertion above would agree with any implementation at all."""
+    from rlm.dispatcher import ServerClient
+
+    client = ServerClient(mock_server.base_url, timeout=5.0)
+    try:
+        res = await client.completion("p", n_predict=4, temperature=0.1,
+                                       top_p=0.9, seed=1, id_slot=200)
+    finally:
+        await client.aclose()
+    assert res.slot_id == 200 % mock_server.total_slots != 200
+
+
+async def test_the_pool_is_sized_by_the_servers_parallel(minimal_cfg_dict, mock_server):
+    """Spec §5 C4: "a pool sized by --parallel". Sizing it by anything else
+    would either waste virgin slots or hand out ids the server silently
+    reassigns onto slots that have held other documents."""
+    raw = copy.deepcopy(minimal_cfg_dict)
+    raw["servers"]["leaf"]["port"] = mock_server.port
+    cfg = Config.model_validate(raw)
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        assert d.slots.size == cfg.servers.leaf.parallel
+        assert cfg.servers.leaf.slot_policy == "never_reuse"
+    finally:
+        await d.aclose()
+
+
+# --------------------------------------------------------------------------- #
+# R13 detection: the foreign-string check runs on every leaf answer.
+# --------------------------------------------------------------------------- #
+
+FOREIGN_UUID = "1251d802-86aa-4e75-96be-aefc175c1e8e"
+
+
+async def test_a_foreign_identifier_in_a_leaf_answer_is_recorded_on_the_step(mock_server):
+    d = mock_server.dispatcher(parallel=4)
+    d.set_corpus(["this window says nothing",
+                  f"another window holds key {FOREIGN_UUID}"])
+    mock_server.answer = f"The archive key is {FOREIGN_UUID}."
+    await d.query("Q?", role="leaf", call_id="c1", chunk="this window says nothing")
+    step = d.steps[-1]
+    assert step["leak_detected"] is True
+    assert FOREIGN_UUID in step["leak_detail"]
+    assert "chunk[1]" in step["leak_detail"]
+
+
+async def test_an_answer_quoting_its_own_chunk_is_recorded_as_checked_and_clean(mock_server):
+    d = mock_server.dispatcher(parallel=4)
+    d.set_corpus([f"this window holds key {FOREIGN_UUID}", "another window"])
+    mock_server.answer = f"The archive key is {FOREIGN_UUID}."
+    await d.query("Q?", role="leaf", call_id="c1",
+                  chunk=f"this window holds key {FOREIGN_UUID}")
+    assert d.steps[-1]["leak_detected"] is False
+    assert d.steps[-1]["leak_detail"] is None
+
+
+async def test_with_no_corpus_the_verdict_is_null_not_a_clean_bill(mock_server):
+    """NULL means "not checked". Recording False would claim a check that
+    never ran -- and even a real False is only evidence: 138 clean calls give
+    a 95% upper bound of 2.2%, which over ~522 leaf calls permits ~11
+    contaminated answers per episode."""
+    d = mock_server.dispatcher(parallel=4)
+    mock_server.answer = f"The archive key is {FOREIGN_UUID}."
+    await d.query("Q?", role="leaf", call_id="c1", chunk="a window")
+    assert d.steps[-1]["leak_detected"] is None
+    assert d.steps[-1]["leak_detail"] is None

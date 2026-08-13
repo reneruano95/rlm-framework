@@ -30,6 +30,14 @@ class _RetryingDispatcher:
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         return (len(text) + 3) // 4
 
+    def set_corpus(self, chunks) -> None:
+        """Part of C4's interface since R13: the episode runner hands every
+        dispatcher the corpus so the foreign-string detector can run. This
+        double answers from a canned table and never produces a leaf answer to
+        check, so it accepts and ignores it -- deliberately not defended
+        against in `run_episode`, where a dispatcher that cannot be given the
+        corpus should fail loudly rather than silently skip detection."""
+
     async def query(self, prompt: str, *, role: str, call_id: str,
                      chunk: str | None = None) -> str:
         async with self.semaphore:
@@ -366,3 +374,27 @@ async def test_a_final_that_arrived_first_survives_a_breach_on_the_same_turn(epi
     assert env.episode_row()["outcome"] == "success"
     assert [s["action_type"] for s in env.steps()][-1] == "final"
     assert env.episode_row()["final_answer_ref"], "the answer must be stored"
+
+
+async def test_the_corpus_reaches_c4_so_every_leaf_answer_is_leak_checked(
+        episode_env, mock_server):
+    """R13 (§5 C4): the detector is free only because the scaffold already
+    holds every chunk -- so C2's chunks must actually reach C4, once, at
+    episode start. Without that the leaf steps record NULL ("not checked"),
+    which is honest but useless; with it they record a real verdict.
+
+    A False here is evidence, not a certificate: 138 clean calls give a 95%
+    upper bound of 2.2%, so a 522-call episode may still carry ~11
+    contaminated answers."""
+    d = mock_server.dispatcher()
+    env = episode_env(context="alpha beta gamma delta", root_script=[
+        "```repl\nprint(await llm_query('Q?', chunk=chunks[0]))\n```",
+        "```repl\nfinal_answer('done')\n```",
+    ], dispatcher=d)
+    await env.run()
+
+    assert d.chunk_index is not None, "C2's chunks never reached C4"
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert len(calls) == 1
+    assert calls[0]["leak_detected"] is False   # checked, no foreign identifier
+    assert calls[0]["leak_detail"] is None
