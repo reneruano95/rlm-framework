@@ -77,7 +77,15 @@ _KV_LINE = re.compile(
     r"llama_kv_cache: size\s*=\s*([\d.]+) MiB \(\s*(\d+) cells,\s*(\d+) layers,"
     r"\s*(\d+)/(\d+) seqs\), K \((\w+)\):\s*[\d.]+ MiB, V \((\w+)\)")
 _FA_LINE = re.compile(r"llama_context: flash_attn\s*=\s*(\w+)")
-_BUILD_LINE = re.compile(r"build\s*[:=]\s*(\d+)\s*\(([0-9a-f]+)\)")
+# The separator after `build` is OPTIONAL because b10375 does not print one:
+# measured on-box at S1, a live server emits
+#   `common_param: common_params_print_info: build 10375 (ba360efe1) with Clang…`
+# while this regex originally required `build:` or `build =`. A required
+# separator made every correctly-launched server parse as "no build line",
+# which `log_is_current` turns into UNVERIFIED and `validate` turns into a
+# refusal -- the gate failing closed on a server that was in fact exactly what
+# config said it was. Both shapes are accepted now; the test pins both.
+_BUILD_LINE = re.compile(r"build\s*[:=]?\s*(\d+)\s*\(([0-9a-f]+)\)")
 
 
 def parse_launch_log(path: str | os.PathLike) -> dict[str, Any]:

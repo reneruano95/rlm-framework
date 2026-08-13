@@ -325,6 +325,31 @@ def test_launch_log_parse_reads_the_real_lv4_lines(tmp_path):
     assert parse_launch_log(tmp_path / "absent.log") == {}
 
 
+def test_launch_log_parse_reads_the_build_line_b10375_ACTUALLY_prints(tmp_path):
+    """S1, measured on-box: b10375 prints no separator after `build`, and
+    /props reports `b10375-ba360efe1` rather than `10375 (ba360efe1)`. The
+    sample above was written from the older upstream shape; these three lines
+    are copied verbatim out of a live `-lv 4` leaf log, so a future rewrite
+    cannot regress the parse to the shape that fails closed on a good server.
+    """
+    from rlm.cli import log_is_current, parse_launch_log
+
+    log = tmp_path / "leaf-server.log"
+    log.write_text(
+        "0.00.361.126 I cmn  common_param: common_params_print_info: build "
+        "10375 (ba360efe1) with Clang 20.1.8 for Windows x86_64\n"
+        "0.06.080.326 I llama_context: flash_attn            = enabled\n"
+        "0.06.170.335 I llama_kv_cache: size = 3400.00 MiB ( 40960 cells,  10 "
+        "layers,  8/8 seqs), K (q8_0): 1700.00 MiB, V (q8_0): 1700.00 MiB\n",
+        encoding="utf-8")
+    parsed = parse_launch_log(log)
+    assert parsed["build_number"] == "10375" and parsed["build_commit"] == "ba360efe1"
+    assert parsed["type_k"] == "q8_0" and parsed["type_v"] == "q8_0"
+    assert parsed["flash_attn"] == "enabled"
+    assert parsed["kv_cells"] == 40960 and parsed["kv_seqs"] == 8
+    assert log_is_current(parsed, {"build_info": "b10375-ba360efe1"}) is True
+
+
 def test_the_cli_has_exactly_three_verbs():
     """Non-goals are written into the spec: no daemon, no REST API, no web UI,
     no interactive chat mode. bench/export are later slices, so a fourth verb

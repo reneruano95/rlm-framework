@@ -694,6 +694,14 @@ def valid_config_file(minimal_cfg_dict: dict, tmp_path: Path) -> Path:
         ref["path"] = str(REPO_ROOT / ref["path"])
     raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
     raw["trace"]["blob_root"] = str(tmp_path / "blobs")
+    # …and its launch logs. The shipped config points these at
+    # `traces/logs/*-server.log` RELATIVE TO THE CWD, so a suite run from the
+    # repo root while real servers happen to be up reads real, current logs --
+    # and `test_validate_refuses_when_the_cache_type_is_unverified`, whose whole
+    # premise is that no launch log exists, silently inverts. Found the first
+    # time the S1 gate ran the suite with both servers running (S1, 2026-08-13).
+    for role in ("root", "leaf"):
+        raw["servers"][role]["log_path"] = str(tmp_path / f"{role}-server.log")
     return _write_cfg(tmp_path / "config.yaml", raw)
 
 
