@@ -42,6 +42,39 @@ async def test_semaphore_never_exceeds_leaf_parallel(mock_server):
     assert mock_server.max_concurrent <= 8
 
 
+async def test_backoff_sleep_does_not_hold_the_semaphore(mock_server):
+    """rlm/dispatcher.py holds the semaphore only around a single completion
+    attempt, not around the backoff sleep between attempts ("Held only
+    around THIS attempt" -- a failed attempt pins no id_slot, so holding the
+    semaphore across a 1-4s backoff would starve every other queued leaf
+    call for no benefit). parallel=1 makes this observable: force one call
+    into a real 1s backoff after its first attempt fails, then start a
+    second, healthy call on the same (single-slot) dispatcher -- it must
+    complete well inside that 1s window, not after it, proving the slot was
+    actually free during the sleep rather than merely idle-but-held."""
+    import asyncio
+    import time
+
+    mock_server.fail_times(1)  # only the very next /completion fails
+    d = mock_server.dispatcher(parallel=1, backoff_s=[1.0, 4.0])
+
+    slow_task = asyncio.create_task(d.query("q-slow", role="leaf", call_id="slow"))
+    # Give the slow call's first (failing) attempt time to land, release the
+    # semaphore, and enter its 1s backoff sleep -- comfortably short of that
+    # 1s window, same margin test_cancellation_aborts_the_stream uses.
+    await asyncio.sleep(0.2)
+
+    start = time.monotonic()
+    await d.query("q-fast", role="leaf", call_id="fast")
+    elapsed = time.monotonic() - start
+    assert elapsed < 0.5, (
+        f"second call took {elapsed:.2f}s on a parallel=1 dispatcher -- it "
+        "waited out the first call's backoff instead of running during it"
+    )
+
+    await slow_task  # let the retried (now-succeeding) attempt finish cleanly
+
+
 async def test_server_death_produces_error_status_not_a_restart(mock_server):
     mock_server.kill()
     d = mock_server.dispatcher()

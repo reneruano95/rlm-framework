@@ -291,7 +291,8 @@ class MockLlamaServer:
 
     def dispatcher(self, *, slot_capacity_tokens: int = 32768, parallel: int = 4,
                     max_predict: int = 64, max_attempts: int = 3,
-                    temperature: float = 0.3, top_p: float = 0.9, seed: int = 1):
+                    temperature: float = 0.3, top_p: float = 0.9, seed: int = 1,
+                    backoff_s: list[float] | None = None):
         from rlm.config import Retries
         from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient
 
@@ -299,10 +300,13 @@ class MockLlamaServer:
         target = DispatchTarget(client=client, max_predict=max_predict,
                                  slot_capacity_tokens=slot_capacity_tokens,
                                  temperature=temperature, top_p=top_p, seed=seed)
-        # Fast backoff -- retry TIMING isn't what these tests assert on, and
-        # the real 1s/4s backoff (scaffold.retries in config.yaml) would
-        # make the retry test take ~5s for no additional coverage.
-        retries = Retries(max_attempts=max_attempts, backoff_s=[0.01, 0.02],
+        # Fast backoff by default -- retry TIMING isn't what most of these
+        # tests assert on, and the real 1s/4s backoff (scaffold.retries in
+        # config.yaml) would make them take ~5s for no additional coverage.
+        # A caller that IS testing backoff timing (fix round 1: the
+        # semaphore-around-backoff concurrency test) passes backoff_s
+        # explicitly.
+        retries = Retries(max_attempts=max_attempts, backoff_s=backoff_s or [0.01, 0.02],
                            per_call_timeout_s=5.0)
         # Only "leaf" -- mirrors the real from_config() shape (fix 4): root
         # traffic never reaches LLMDispatcher, so no test should be able to

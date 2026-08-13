@@ -117,6 +117,16 @@ class BudgetMachine(RuleBasedStateMachine):
         assert self.b.reserved_total <= self.b.budgets.max_total_tokens
 
     @invariant()
+    def full_reserved_never_exceeds_cap(self):
+        """Fix round 1: admit() actually gates on tokens_used + full_reserved
+        + reservation <= max_total_tokens (spec §5 "running_total +
+        reservation <= cap") -- full_reserved (prompt_tokens + max_predict
+        summed over in-flight), not reserved_total's max_predict-only slice.
+        That strong quantity was previously never property-tested and was
+        true only "by construction" of admit(); property-test it directly."""
+        assert self.b.full_reserved <= self.b.budgets.max_total_tokens
+
+    @invariant()
     def overshoot_is_bounded_by_inflight_times_max_predict(self):
         bound = len(self.inflight) * self.b.budgets.max_predict["leaf"]
         assert self.b.reserved_total - self.b.tokens_used <= bound

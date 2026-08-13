@@ -148,6 +148,17 @@ class BudgetEnforcer:
     def reserved_total(self) -> int:
         return self._predict_reserved
 
+    @property
+    def full_reserved(self) -> int:
+        """Sum of `prompt_tokens + max_predict[role]` over every currently
+        in-flight reservation -- the FULL commitment `admit()` actually gates
+        on (`tokens_used + full_reserved + new_reservation <= max_total_tokens`).
+        Exposed read-only so the property suite can assert the cap directly
+        against the quantity the gate enforces, instead of trusting that by
+        construction (fix round 1: `reserved_total` alone, being the
+        max_predict-only slice, doesn't exercise this)."""
+        return self._full_reserved
+
     # ------------------------------------------------------------------ #
     # admission
     # ------------------------------------------------------------------ #
