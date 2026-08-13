@@ -362,3 +362,54 @@ def test_the_cli_has_exactly_three_verbs():
            if isinstance(a, argparse._SubParsersAction)]
     assert len(sub) == 1
     assert set(sub[0].choices) == {"validate", "run", "replay"}
+
+
+# --------------------------------------------------------------------------- #
+# Who owns the leaf process (spec §5 C4, v0.2.6).
+#
+# A rotation replaces a process, and the scaffold can only replace one it
+# started. The manager is built HERE, in the process root, so the launch flags
+# stay in config.yaml (where `config_snapshot` reads them from) and C4 keeps
+# having no code path that restarts a server.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_dry_run_has_no_leaf_process_to_rotate(valid_config_file):
+    from rlm.cli import leaf_process_manager
+
+    cfg = load_config(valid_config_file)
+    mock = cfg.model_copy(deep=True)
+    mock.scaffold.dispatcher = "mock"
+    assert leaf_process_manager(mock, launch=True) is None
+
+
+def test_without_launch_leaf_the_run_owns_nothing_and_says_so_once(valid_config_file):
+    """Default: the servers were launched outside `rlm run`. Returning None
+    beats returning a manager that refuses every rotation -- the refusal is a
+    property of the run, not of each exhausted pool."""
+    from rlm.cli import leaf_process_manager
+
+    cfg = load_config(valid_config_file)
+    assert cfg.scaffold.dispatcher == "real"
+    assert leaf_process_manager(cfg, launch=False) is None
+
+
+def test_launch_leaf_builds_the_manager_from_config_flags(valid_config_file):
+    from rlm.cli import leaf_process_manager
+    from rlm.serverproc import launch_argv
+
+    cfg = load_config(valid_config_file)
+    manager = leaf_process_manager(cfg, launch=True)
+    assert manager is not None
+    assert manager.argv == launch_argv(cfg.servers.leaf)
+    assert not manager.owned          # nothing started yet; `run` starts it
+
+
+def test_run_takes_launch_leaf_and_defaults_to_off():
+    """Off by default: taking ownership silently would kill an operator's own
+    leaf server at the end of an episode."""
+    from rlm.cli import build_parser
+
+    args = build_parser().parse_args(["run", "t.json"])
+    assert args.launch_leaf is False
+    assert build_parser().parse_args(["run", "t.json", "--launch-leaf"]).launch_leaf

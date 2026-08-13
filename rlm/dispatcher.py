@@ -389,6 +389,23 @@ class ServerClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def health(self) -> bool:
+        """GET /health as a POLL, not an assertion: True only on a 200.
+
+        Returns False rather than raising for every other outcome, because the
+        two interesting ones are indistinguishable from faults and both mean
+        "not yet" -- 503 while the model loads, and a refused connection in the
+        seconds after a slot-pool rotation kills the old process. A rotation's
+        readiness wait (`rlm.serverproc`) is built on exactly this, and a
+        rotation that treated a refused connection as an error would fail every
+        time it worked.
+        """
+        try:
+            resp = await self._client.get(f"{self.base_url}/health")
+        except Exception:  # noqa: BLE001 -- see the docstring: not-yet, not fault
+            return False
+        return resp.status_code == 200
+
     async def slots(self) -> list[dict]:
         """GET /slots -> one object per slot, each with `is_processing`.
 

@@ -57,6 +57,7 @@ from rlm.episode import (
 from rlm.errors import ActionType, ConfigError, RlmError, StepStatus
 from rlm.lifecycle import Lifecycle
 from rlm.rootclient import assistant_prefix, extract_cell
+from rlm.serverproc import LlamaServerProcess
 from rlm.sandbox import winproc
 from rlm.sandbox.manager import SandboxManager, install_bootstrap
 from rlm.trace import TraceLogger, recover_orphans, unpack_blob
@@ -175,6 +176,40 @@ def _scaffold_git_sha() -> str:
         return f"{sha}-dirty" if dirty else sha
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def leaf_process_manager(cfg: Config, *, launch: bool):
+    """The `ProcessManager` an episode rotates the leaf through (§5 C4).
+
+    Built HERE, in the process root, and not in C4: the launch flags live in
+    `config.yaml` (which is also the only place `config_snapshot` can record
+    them from), and the dispatcher must keep having no code path that restarts
+    a server. `run_episode` takes it injected, so every rotation test runs
+    against a fake and no test ever starts a llama-server.
+
+    Returns None for a dry run (no leaf server exists to rotate) and for a real
+    run that did not ask to own the leaf -- in which case the manager would
+    refuse every rotation anyway, and refusing at construction says so once
+    instead of once per exhausted pool. `--launch-leaf` is what makes the
+    R13 mitigation usable past window `--parallel`: the scaffold can only
+    replace a process it started.
+    """
+    if cfg.scaffold.dispatcher != "real" or not launch:
+        return None
+    leaf = cfg.servers.leaf
+    url = f"http://127.0.0.1:{leaf.port}"
+
+    async def health() -> bool:
+        # A client per poll, deliberately: the poll spans the death of one
+        # process and the birth of another, and a pooled keep-alive connection
+        # to the old one is exactly the handle that reports a stale answer.
+        client = ServerClient(url, timeout=5.0)
+        try:
+            return await client.health()
+        finally:
+            await client.aclose()
+
+    return LlamaServerProcess(leaf, health_probe=health)
 
 
 def _build_dispatcher(cfg: Config, task_path: Path | None):
@@ -466,16 +501,27 @@ def cmd_validate(args) -> int:
 # --------------------------------------------------------------------------- #
 
 
-async def _run_one(cfg: Config, task: Task, lifecycle: Lifecycle, task_path: Path):
+async def _run_one(cfg: Config, task: Task, lifecycle: Lifecycle, task_path: Path,
+                    *, launch_leaf: bool = False):
     dispatcher, owns_http = _build_dispatcher(cfg, task_path)
     trace = TraceLogger(cfg.trace.db_path, cfg.trace.blob_root, lifecycle=lifecycle)
     await trace.start()
+    leaf_proc = leaf_process_manager(cfg, launch=launch_leaf)
+    if leaf_proc is not None:
+        # Ownership is what makes a rotation possible at all (§5 C4): the
+        # scaffold can only replace a process it started, and `restart()`
+        # refuses otherwise rather than starting a second server on a taken
+        # port while the first keeps answering.
+        lifecycle.event("server_health", role="leaf", state="launching",
+                         port=cfg.servers.leaf.port)
+        await leaf_proc.start()
     try:
         result = await run_episode(
             task, cfg, dispatcher=dispatcher, trace=trace, lifecycle=lifecycle,
             scaffold_instance_id=f"{os.getpid()}",
             scaffold_git_sha=_scaffold_git_sha(),
-            benchmark_version=cfg.benchmark.version)
+            benchmark_version=cfg.benchmark.version,
+            process_manager=leaf_proc)
         if cfg.trace.export_every_episode:
             # D21. `export_bundle` reads what is COMMITTED, so the drain is
             # not optional: run_episode drains before returning, and nothing
@@ -498,6 +544,13 @@ async def _run_one(cfg: Config, task: Task, lifecycle: Lifecycle, task_path: Pat
         await trace.aclose()
         if owns_http:
             await dispatcher.aclose()
+        if leaf_proc is not None:
+            # A leaf this process launched dies with the episode: leaving 20 GB
+            # of weights resident on a port the next run expects to be free is
+            # how two servers end up disagreeing about what is running (R11).
+            await leaf_proc.stop()
+            lifecycle.event("server_health", role="leaf", state="stopped",
+                             port=cfg.servers.leaf.port)
 
 
 def cmd_run(args) -> int:
@@ -517,7 +570,8 @@ def cmd_run(args) -> int:
             print(f"recovery: tombstoned {len(tombstoned)} orphaned episode(s)",
                   file=out)
         try:
-            result = asyncio.run(_run_one(cfg, task, lifecycle, task_path))
+            result = asyncio.run(_run_one(cfg, task, lifecycle, task_path,
+                                           launch_leaf=args.launch_leaf))
         except ConfigError as exc:
             print(f"refused: {exc}", file=err)
             return EXIT_REFUSED
@@ -866,6 +920,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = common(sub.add_parser("run", help="run one episode"))
     r.add_argument("task_file", help="task JSON file")
+    # §5 C4: R13's mitigation spends one slot per window, so an episode that
+    # covers more windows than `--parallel` needs the leaf ROTATED -- and the
+    # scaffold can only replace a process it started. Off by default: the
+    # servers are normally launched and owned outside `rlm run`, and taking
+    # ownership silently would kill an operator's server at episode end.
+    r.add_argument("--launch-leaf", action="store_true",
+                   help="launch (and own) the leaf server from config, so its "
+                        "slot pool can be rotated when it is exhausted")
     r.set_defaults(func=cmd_run)
 
     p = common(sub.add_parser("replay", help="verify and render a stored episode"))
