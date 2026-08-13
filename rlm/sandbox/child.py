@@ -30,19 +30,34 @@ failure, not from taste:
   D24 Re-inject the reserved names before EVERY cell. The reference harness
       restores its reserved names after each execution; without this, model
       code that rebinds `llm_query` intercepts its own sub-call plumbing --
-      a direct I1 violation.
+      a direct I1 violation. Re-injection is necessary but NOT sufficient: it
+      re-reads `_RESERVED`, so anything that can reach `_RESERVED` defeats it.
+      Two routes were reproduced live and are now closed and regression-tested
+      -- `sys.modules['__main__']` (a decoy is installed) and the injected
+      callables' `__globals__` (rebuilt over a two-name namespace).
   D25 (a) `SandboxPolicyError` is defined at module level and re-homed onto a
       module name chosen for the model's benefit, because its qualname is
       user-visible in every denied observation (a closure-local class shows up
       as `main.<locals>.SandboxPolicyError`). (b) `sys.unraisablehook` and
       `warnings.showwarning` are redirected per cell into THAT cell's stderr
       buffer, dropping anything whose traceback is purely scaffold- or
-      stdlib-internal. (c) `asyncio.new_event_loop`/`run`/`set_event_loop` are
-      shadowed with stubs that raise BEFORE any loop object is constructed --
-      not optional: a denied `asyncio.new_event_loop()` in turn N otherwise
-      leaves a half-built ProactorEventLoop whose `__del__` fires during turn
-      N+1 and injects absolute interpreter paths plus a misattributed
-      AttributeError into the NEXT cell's observation.
+      stdlib-internal. (c) EVERY loop-construction route is shadowed --
+      `asyncio.new_event_loop`/`run`/`set_event_loop`, the same names on
+      `asyncio.events`, the loop classes, and the policy's `new_event_loop` --
+      with stubs that raise BEFORE any loop object exists. Package-level
+      shadowing alone is one layer thin: `asyncio.events.new_event_loop()`
+      reaches the constructor directly and the denial then fires inside
+      `ProactorEventLoop.__init__` (on its AF_INET self-pipe), leaving exactly
+      the half-built loop whose `__del__` fires during turn N+1 and injects
+      absolute interpreter paths plus a misattributed AttributeError into the
+      NEXT cell's observation.
+
+NOTHING HERE SEALS THE INTERPRETER. Cells run in this process on this loop, so a
+frame walk still reaches this module's namespace. What holds is the layer below
+(the AppContainer) and the layer above: every I1-critical control -- budgets,
+the semaphore, retries, truncation, step logging, whether a `final_answer` is
+accepted at all -- lives SCAFFOLD-SIDE across the pipe, where nothing in this
+process can reach it.
 
 Protocol. Everything rides the Task 8 bridge envelope, so there is exactly one
 framing implementation on the wire (`rlm.bridge`); the `kind` of a bridge
@@ -68,6 +83,7 @@ import os
 import sys
 import time
 import traceback
+import types
 import warnings
 
 _SELF = os.path.normcase(os.path.abspath(__file__))
@@ -76,22 +92,23 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 # --------------------------------------------------------------------------- #
-# 1. steal fds 0/1 as the private protocol channel, then blind real stdio
+# 1. move fds 0/1 to the private protocol channel, then blind real stdio
 #
-# Model code that writes to fd 1 (a native extension, a stray `os.write(1, ...)`)
-# can no longer corrupt the protocol: fd 1 is NUL from here on and the bridge
-# owns two duplicates nobody else knows about.
+# This RAISES THE BAR, it does not close the hole. It stops the accident (a
+# native extension or a stray `os.write(1, ...)` corrupting the protocol) and it
+# stops the cheap guess: `os.write(4, ...)` used to land on the protocol when
+# the fds were merely `dup()`ed to the next free numbers. Deliberate model code
+# can still find fd 101 and desync the stream -- which is why the scaffold
+# classifies that outcome (`bridge_desync`, see rlm.trace) instead of pretending
+# it cannot happen.
 # --------------------------------------------------------------------------- #
-_PROTO_R = os.dup(0)
-_PROTO_W = os.dup(1)
+_PROTO_R = 100
+_PROTO_W = 101
+os.dup2(0, _PROTO_R, inheritable=False)
+os.dup2(1, _PROTO_W, inheritable=False)
 _NUL = os.open(os.devnull, os.O_RDWR)
 os.dup2(_NUL, 0)
 os.dup2(_NUL, 1)
-for _fd in (_PROTO_R, _PROTO_W):
-    try:
-        os.set_inheritable(_fd, False)
-    except OSError:
-        pass
 
 # --------------------------------------------------------------------------- #
 # 2. the persistent event loop -- MUST precede the audit hook (D8)
@@ -154,24 +171,25 @@ class _CaptureStream(io.TextIOBase):
 _OUT = _CaptureStream()
 _ERR = _CaptureStream()
 
-# Absolute paths that must never reach the model's observation. `_HERE` covers
-# child.py AND the staged rlm.bridge copy; the interpreter prefixes cover the
-# stdlib. Frames are judged separately for the two uses -- see
-# `_is_scaffold_frame` (tracebacks) vs `_is_internal_frame` (unraisable/warning).
+# NO ABSOLUTE HOST PATH MAY EVER REACH AN OBSERVATION -- it goes straight into
+# the root's context and into DuckDB. Scaffold frames are DROPPED; stdlib frames
+# are KEPT (they are genuinely useful to the model: `json/decoder.py` tells it
+# what failed) but their filenames are REWRITTEN onto a virtual root, and any
+# other real path collapses to `<host>/<basename>`. The mapping is
+# order-sensitive: the stdlib lives under base_prefix, so it must match first.
 _STDLIB = os.path.normcase(os.path.dirname(os.__file__))
-_INTERNAL_ROOTS = tuple(
-    p + os.sep for p in {
-        _HERE,
-        _STDLIB,
-        os.path.normcase(os.path.abspath(sys.base_prefix)),
-        os.path.normcase(os.path.abspath(sys.prefix)),
-    }
+_VIRTUAL_ROOTS: tuple[tuple[str, str], ...] = (
+    (_HERE + os.sep, None),          # scaffold: drop the frame entirely
+    (_STDLIB + os.sep, "<stdlib>"),
+    (os.path.normcase(os.path.abspath(sys.base_prefix)) + os.sep, "<python>"),
+    (os.path.normcase(os.path.abspath(sys.prefix)) + os.sep, "<python>"),
 )
+_INTERNAL_ROOTS = tuple(root for root, _ in _VIRTUAL_ROOTS)
 
 
 def _real_path(filename: str | None) -> str | None:
     """None for pseudo-filenames like `<cell:3>` or `<string>`: those are the
-    model's own code and must never be scrubbed."""
+    model's own code and must never be scrubbed or rewritten."""
     if not filename or filename.startswith("<"):
         return None
     try:
@@ -180,14 +198,23 @@ def _real_path(filename: str | None) -> str | None:
         return None
 
 
-def _is_scaffold_frame(filename: str | None) -> bool:
-    path = _real_path(filename)
-    return path is not None and path.startswith(_HERE + os.sep)
-
-
 def _is_internal_frame(filename: str | None) -> bool:
     path = _real_path(filename)
     return path is not None and path.startswith(_INTERNAL_ROOTS)
+
+
+def _virtual_filename(filename: str | None) -> str | None:
+    """The name the MODEL sees. `None` means "drop this frame"."""
+    path = _real_path(filename)
+    if path is None:
+        return filename                       # `<cell:3>`: the model's own code
+    for root, label in _VIRTUAL_ROOTS:
+        if path.startswith(root):
+            if label is None:
+                return None                   # scaffold frame
+            return label + "/" + os.path.relpath(path, root).replace("\\", "/")
+    # Unknown real path (the repo, a user file, anything): never leak it whole.
+    return "<host>/" + os.path.basename(path)
 
 
 def _traceback_is_internal_only(tb) -> bool:
@@ -295,35 +322,94 @@ def _make_loop_stub(name: str):
 
 
 def _install_asyncio_stubs() -> None:
-    # Only the `asyncio` package attributes are shadowed; asyncio's own
-    # internals call `asyncio.events.set_event_loop`, so the running loop is
-    # untouched. `asyncio.get_event_loop()` still returns the running loop.
-    asyncio.new_event_loop = _make_loop_stub("new_event_loop")
-    asyncio.run = _make_loop_stub("run")
-    asyncio.set_event_loop = _make_loop_stub("set_event_loop")
+    """Shadow every route that would CONSTRUCT a loop, at both the package and
+    the implementation layer -- `asyncio.new_event_loop` alone is one layer thin,
+    because `asyncio.events.new_event_loop()` reaches the constructor directly
+    and the denial then fires inside `ProactorEventLoop.__init__`, leaving the
+    half-built object D25(c) exists to prevent.
+
+    `get_event_loop` is deliberately NOT shadowed at the `events` layer:
+    `asyncio.gather` calls `events.get_event_loop()` on its `_ensure_future`
+    path, and shadowing it breaks gather -- the fan-out idiom the prompt
+    registry teaches (measured: `gather BROKE: RuntimeError denied`). It is also
+    not a construction route here: the bootstrap already installed LOOP as the
+    thread's event loop, so it returns that and builds nothing.
+    """
+    stubs = {name: _make_loop_stub(name)
+             for name in ("new_event_loop", "set_event_loop", "run")}
+    for name, stub in stubs.items():
+        setattr(asyncio, name, stub)
+    for name in ("new_event_loop", "set_event_loop"):
+        setattr(asyncio.events, name, stubs[name])
+    # The loop classes themselves, and the policy method that instantiates them.
+    for module in (asyncio, getattr(asyncio, "windows_events", None)):
+        if module is None:
+            continue
+        for cls_name in ("ProactorEventLoop", "SelectorEventLoop"):
+            if hasattr(module, cls_name):
+                setattr(module, cls_name, _make_loop_stub(cls_name))
+    asyncio.events.BaseDefaultEventLoopPolicy.new_event_loop = _make_loop_stub(
+        "EventLoopPolicy.new_event_loop")
 
 
 # --------------------------------------------------------------------------- #
 # 9. the names the scaffold injects (I1: this is the entire crossing surface)
+#
+# The two templates below are NEVER injected as written. `_build_injected()`
+# rebuilds them with `types.FunctionType` over a MINIMAL globals dict, because
+# `f.__globals__` is readable and writable from any cell: injected as-is,
+# `final_answer.__globals__["_RESERVED"]["final_answer"] = ...` captures the
+# terminal channel and `..["llm_query"] = ..` intercepts the sub-call plumbing --
+# both reproduced live. They therefore reference only `BRIDGE` and `LOOP`, and
+# `_FINAL_TASK_NAME` is inlined as a literal so no shared mutable container is
+# reachable either.
 # --------------------------------------------------------------------------- #
-_FINAL_TASKS: list = []
+_FINAL_TASK_NAME = "rlm-final-answer"
 
 
-async def llm_query(prompt, role="leaf", **kw):
-    """The only way out of the sandbox. C4's semaphore, /tokenize pre-flight,
-    retries, timeouts, budget admission and step logging all live on the OTHER
-    side of this pipe, where model code cannot reach them."""
+async def _llm_query_template(prompt, role="leaf", **kw):
+    """Ask a sub-model. The only way out of the sandbox.
+
+    C4's semaphore, /tokenize pre-flight, retries, timeouts, budget admission
+    and step logging all live on the OTHER side of this pipe, where model code
+    cannot reach them.
+    """
     return await BRIDGE.request("llm_query", {"prompt": prompt, "role": role, **kw})
 
 
-def final_answer(value):
-    """Deliberately synchronous: an `async def` here would make the bare call
-    `final_answer(x)` -- the shape every prompt teaches -- a silent no-op plus
-    a 'coroutine was never awaited' warning. Delivery is still guaranteed:
-    `_run_cell` drains the send before it returns the observation."""
-    _FINAL_TASKS.append(LOOP.create_task(
-        BRIDGE.request("final_answer", {"value": value})))
+def _final_answer_template(value):
+    """Submit the episode's answer. Call it directly -- no `await` needed.
+
+    Deliberately synchronous: an `async def` here would make the bare call
+    `final_answer(x)` -- the shape every prompt teaches -- a silent no-op plus a
+    'coroutine was never awaited' warning. Delivery is still guaranteed: the
+    scaffold drains the send before it returns the observation, and reports back
+    into this cell's stderr if the scaffold rejected it.
+    """
+    LOOP.create_task(BRIDGE.request("final_answer", {"value": value}),
+                     name="rlm-final-answer")
     return None
+
+
+def _rebuild(template, name: str, namespace: dict):
+    fn = types.FunctionType(template.__code__, namespace, name,
+                            template.__defaults__, template.__closure__)
+    fn.__qualname__ = name
+    fn.__module__ = "rlm_sandbox"
+    fn.__doc__ = template.__doc__
+    fn.__kwdefaults__ = template.__kwdefaults__
+    return fn
+
+
+def _build_injected() -> tuple:
+    """(llm_query, final_answer) over a namespace that cannot reach this module."""
+    ns = {"__builtins__": builtins, "__name__": "rlm_sandbox",
+          "BRIDGE": BRIDGE, "LOOP": LOOP}
+    return (_rebuild(_llm_query_template, "llm_query", ns),
+            _rebuild(_final_answer_template, "final_answer", ns))
+
+
+llm_query, final_answer = _build_injected()
 
 
 class AnswerGuard(dict):
@@ -386,23 +472,80 @@ def _compile_cell(src: str, name: str):
 
 
 def _format_exception(exc: BaseException) -> str:
-    """Scrub scaffold frames, following `__cause__`/`__context__`. Stdlib
-    frames are KEPT: they carry real diagnostic value for model code, and
-    dropping them would misattribute the error to the cell's own line."""
+    """Drop scaffold frames and VIRTUALIZE every remaining real filename,
+    following `__cause__`/`__context__`.
+
+    Stdlib frames are kept because they carry real diagnostic value
+    (`json.loads('{bad')` should show the model `json/decoder.py`), but their
+    absolute paths must not survive: unrewritten they put the interpreter's
+    install directory into `CellOutput.traceback`, which reaches both the root's
+    context and DuckDB. Cell frames (`<cell:3>`) pass through untouched, keeping
+    their `~~^~~` anchors; rewritten frames carry their source line explicitly,
+    since linecache can no longer resolve the virtual name.
+    """
     te = traceback.TracebackException.from_exception(exc, lookup_lines=True)
     seen: set[int] = set()
+
+    def rewrite(frame):
+        virtual = _virtual_filename(frame.filename)
+        if virtual is None:
+            return None
+        if virtual == frame.filename:
+            return frame
+        return traceback.FrameSummary(virtual, frame.lineno, frame.name,
+                                      line=frame.line)
 
     def scrub(node) -> None:
         if node is None or id(node) in seen:
             return
         seen.add(id(node))
         node.stack = traceback.StackSummary.from_list(
-            [f for f in node.stack if not _is_scaffold_frame(f.filename)])
+            [f for f in map(rewrite, node.stack) if f is not None])
         scrub(node.__cause__)
         scrub(node.__context__)
 
     scrub(te)
     return "".join(te.format()).rstrip()
+
+
+_REJECTED_MSG = "final_answer was not accepted by the scaffold: {}\n"
+
+
+async def _drain_final_answers() -> None:
+    """Guarantee delivery before the observation is returned, and SURFACE a
+    rejection into this cell's stderr instead of swallowing it -- a submission
+    the scaffold refused is exactly the thing the root has to be told about.
+
+    The tasks are found by name rather than through a shared list, because any
+    container the injected `final_answer` could reach would also be reachable
+    from a cell, and clearing it would swallow the submission again.
+    """
+    pending = [t for t in asyncio.all_tasks(LOOP)
+               if t.get_name() == _FINAL_TASK_NAME]
+    if not pending:
+        return
+    for result in await asyncio.gather(*pending, return_exceptions=True):
+        if isinstance(result, BaseException) and not isinstance(
+                result, asyncio.CancelledError):
+            _ERR.write(_REJECTED_MSG.format(f"{type(result).__name__}: {result}"))
+
+
+def _loop_exception_handler(loop, context: dict) -> None:
+    """asyncio's default handler logs through `logging`, whose last-resort
+    handler writes to `sys.stderr` -- which is a CELL BUFFER here, so scaffold
+    noise would land in whatever observation happened to be open. Route a
+    rejected final_answer to the cell that caused it and everything else to the
+    episode's own log."""
+    future = context.get("future") or context.get("task")
+    name = future.get_name() if hasattr(future, "get_name") else None
+    if name == _FINAL_TASK_NAME:
+        _ERR.write(_REJECTED_MSG.format(repr(context.get("exception"))))
+        return
+    try:
+        print(context.get("message"), context.get("exception"),
+              file=sys.__stderr__, flush=True)
+    except BaseException:  # noqa: BLE001
+        pass
 
 
 async def _run_cell(src: str) -> dict:
@@ -438,9 +581,7 @@ async def _run_cell(src: str) -> dict:
                     value_repr = repr(value)
         except BaseException as exc:  # noqa: BLE001 -- the REPL survives anything
             tb_text = _format_exception(exc)
-        if _FINAL_TASKS:
-            pending, _FINAL_TASKS[:] = _FINAL_TASKS[:], []
-            await asyncio.gather(*pending, return_exceptions=True)
+        await _drain_final_answers()
     finally:
         sys.unraisablehook = prev_unraisable
         warnings.showwarning = prev_showwarning
@@ -515,16 +656,43 @@ def _farewell(code: int) -> None:
     os._exit(code)
 
 
+_REAL_MODULE = None  # strong ref: see _hide_this_module
+
+
+def _hide_this_module() -> None:
+    """`import sys; sys.modules['__main__']` is the shortest path from a cell to
+    this module's namespace, and from there `_RESERVED['llm_query'] = ...`
+    intercepts the sub-call plumbing and `_RESERVED['final_answer'] = ...`
+    captures the terminal channel -- both reproduced live against the first cut
+    of this file. Swap in a decoy carrying nothing.
+
+    Note this raises the bar rather than sealing the interpreter: cell code runs
+    in the same process on the same loop, so a frame walk
+    (`sys._getframe().f_back...f_globals`) still reaches this dict. That is
+    intrinsic and is why every I1-critical control -- budgets, the semaphore,
+    retries, truncation, step logging, whether a final_answer is accepted --
+    lives SCAFFOLD-SIDE across the pipe, where nothing in this process can
+    reach it.
+    """
+    global _REAL_MODULE
+    _REAL_MODULE = sys.modules.get("__main__")
+    decoy = types.ModuleType("__main__")
+    decoy.__doc__ = "rlm-halo sandbox (episode-scoped interpreter)"
+    sys.modules["__main__"] = decoy
+
+
 def main() -> None:
     sys.stdout = _OUT
     sys.stderr = _ERR
     sys.displayhook = lambda value: None
     sys.unraisablehook = _drop_unraisable
     warnings.showwarning = _drop_showwarning
+    LOOP.set_exception_handler(_loop_exception_handler)
 
     _install_asyncio_stubs()
     _install_audit_hook("--deny-ctypes" in sys.argv[1:])
     BRIDGE.on_request(_handle)
+    _hide_this_module()
 
     code = 0
     try:

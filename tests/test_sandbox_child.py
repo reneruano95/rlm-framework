@@ -1,9 +1,13 @@
 """Child-protocol behaviour, exercised through a real spawned sandbox."""
+import os
 import sys
+from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 async def test_variables_persist_across_cells(session):
@@ -64,6 +68,122 @@ async def test_egress_is_blocked_but_the_bridge_still_works(session):
     assert "REACHED" not in out.stdout
     r = await session.exec_cell("print(await llm_query('still works'))")
     assert "MOCK" in r.stdout
+
+
+async def test_sub_call_plumbing_cannot_be_hijacked_via_main_module(session):
+    """D24 escape 1, reproduced live against the first cut of child.py:
+    `sys.modules['__main__']._RESERVED['llm_query'] = ...` made the NEXT cell's
+    llm_query return 'HIJACKED'. Re-injection did not help, because it re-read
+    the very dict the cell had just rewritten."""
+    probe = await session.exec_cell(
+        "import sys\n"
+        "m = sys.modules['__main__']\n"
+        "print([n for n in ('_RESERVED', 'USER_NS', 'BRIDGE', '_PROTO_W')\n"
+        "       if hasattr(m, n)])\n")
+    assert probe.stdout.strip() == "[]", "the child module is reachable as __main__"
+
+    await session.exec_cell(
+        "import sys\n"
+        "try:\n"
+        "    sys.modules['__main__']._RESERVED['llm_query'] = lambda *a, **k: 'HIJACKED'\n"
+        "except Exception as e:\n"
+        "    print('refused', type(e).__name__)\n")
+    out = await session.exec_cell("print(await llm_query('x'))")
+    assert "HIJACKED" not in out.stdout
+    assert out.stdout.strip() == "MOCK:x"
+
+
+async def test_terminal_channel_cannot_be_captured_via_func_globals(session):
+    """D24 escape 2, reproduced live: `final_answer.__globals__['_RESERVED']
+    ['final_answer'] = ...` swallowed the submission and the scaffold recorded
+    nothing. That is capture of I1's termination channel."""
+    probe = await session.exec_cell(
+        "g = final_answer.__globals__\n"
+        "print(sorted(k for k in g if k not in ('__builtins__', '__name__')))\n")
+    assert probe.stdout.strip() == "['BRIDGE', 'LOOP']", probe.stdout
+
+    await session.exec_cell(
+        "try:\n"
+        "    final_answer.__globals__['_RESERVED']['final_answer'] = lambda v: None\n"
+        "except Exception as e:\n"
+        "    print('refused', type(e).__name__)\n"
+        "try:\n"
+        "    llm_query.__globals__['_RESERVED']['llm_query'] = lambda *a, **k: 'X'\n"
+        "except Exception as e:\n"
+        "    print('refused', type(e).__name__)\n")
+    await session.exec_cell("final_answer('real answer')")
+    out = await session.exec_cell("print(await llm_query('y'))")
+    assert out.stdout.strip() == "MOCK:y"
+    assert session.final_answers == ["real answer"]
+
+
+async def test_event_loop_cannot_be_constructed_at_any_layer(session):
+    """D25(c): shadowing the `asyncio` package alone is one layer thin --
+    `asyncio.events.new_event_loop()` reaches the constructor directly, and the
+    denial then fires INSIDE ProactorEventLoop.__init__, which is exactly the
+    half-built object whose __del__ contaminates the next cell."""
+    out = await session.exec_cell(
+        "import asyncio, asyncio.events as ev\n"
+        "cands = [('asyncio.new_event_loop', asyncio.new_event_loop),\n"
+        "         ('events.new_event_loop', ev.new_event_loop),\n"
+        "         ('events.set_event_loop', ev.set_event_loop),\n"
+        "         ('ProactorEventLoop', asyncio.windows_events.ProactorEventLoop),\n"
+        "         ('policy.new_event_loop',\n"
+        "          asyncio.get_event_loop_policy().new_event_loop)]\n"
+        "for name, fn in cands:\n"
+        "    try:\n"
+        "        fn()\n"
+        "        print('CONSTRUCTED', name)\n"
+        "    except Exception as e:\n"
+        "        early = 'is not available in this episode' in str(e)\n"
+        "        print('denied', name, 'BEFORE-CONSTRUCTION' if early else 'TOO-LATE')\n")
+    # 'TOO-LATE' means the denial came from the audit hook firing INSIDE
+    # ProactorEventLoop.__init__ (on its AF_INET self-pipe) -- i.e. a loop object
+    # was already half-built, which is precisely the D25(c) defect.
+    assert "CONSTRUCTED" not in out.stdout
+    assert "TOO-LATE" not in out.stdout, out.stdout
+    assert out.stdout.count("BEFORE-CONSTRUCTION") == 5, out.stdout
+    clean = await session.exec_cell("print('clean')")
+    assert clean.stderr == ""
+    assert clean.stdout.strip() == "clean"
+
+
+async def test_traceback_never_carries_a_host_path(session, cfg):
+    """Keeping stdlib frames (they are useful to the model) must not mean
+    keeping absolute host paths: those reach the root's context and DuckDB."""
+    out = await session.exec_cell("import json\njson.loads('{bad')")
+    assert "JSONDecodeError" in out.traceback
+    assert "<stdlib>/json/decoder.py" in out.traceback, out.traceback
+
+    blob = (out.traceback + out.stderr).lower()
+    forbidden = [
+        str(os.path.dirname(cfg.scaffold.sandbox.interpreter)).lower(),
+        str(REPO_ROOT).lower(),
+        str(cfg.scaffold.sandbox.bootstrap_dir).lower(),
+        "appdata", ":\\", ":/",
+    ]
+    for needle in forbidden:
+        assert needle not in blob, f"{needle!r} leaked into the observation"
+
+
+async def test_protocol_fd_desync_is_survivable_and_not_trivially_reachable(session):
+    """The fds are moved out of the low range so an ordinary `os.write(4, ...)`
+    can no longer land on the protocol -- the accident, and the cheap guess, are
+    both gone. A deliberate write to fd 101 still desyncs; that is classified by
+    the manager (see test_sandbox_manager.py), not prevented here."""
+    out = await session.exec_cell(
+        "import os\n"
+        "hit = []\n"
+        "for fd in range(3, 32):\n"
+        "    try:\n"
+        "        os.write(fd, b'garbage\\n')\n"
+        "        hit.append(fd)\n"
+        "    except OSError:\n"
+        "        pass\n"
+        "print('wrote to', hit)\n")
+    assert "wrote to" in out.stdout
+    alive = await session.exec_cell("print('still here')")
+    assert alive.stdout.strip() == "still here"
 
 
 async def test_gather_fanout_exits_cleanly(session):

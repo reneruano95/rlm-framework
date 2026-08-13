@@ -48,6 +48,49 @@ async def test_sandbox_cannot_read_the_repo(manager, cfg):
         assert out.stdout.strip() == "DENIED"
 
 
+async def test_bridge_desync_is_classified_not_an_unattributed_death(manager, cfg):
+    """A cell CAN reach the protocol fd and corrupt the stream. §6's status
+    ENUM cannot express that on its own, so C1 attributes it: the sandbox is
+    still alive, therefore `bridge_desync`, not `sandbox_death`."""
+    from rlm import trace
+
+    async with manager.session("ep-desync", cfg) as s:
+        with pytest.raises(SandboxError) as excinfo:
+            await s.exec_cell("import os\nos.write(101, b'garbage\\n')")
+        assert trace.BRIDGE_DESYNC_REASON in str(excinfo.value)
+        assert s.kill_reason == trace.BRIDGE_DESYNC_REASON == "bridge_desync"
+
+
+async def test_frames_before_the_handshake_are_refused():
+    """D23 is about ORDER as much as identity: nothing may be dispatched in an
+    episode's name before that episode has been admitted."""
+    import asyncio
+
+    from rlm.sandbox.manager import _FrameGate
+
+    served = []
+
+    async def serve(kind, payload):
+        served.append(kind)
+        return "served"
+
+    fut = asyncio.get_running_loop().create_future()
+    gate = _FrameGate(fut, serve)
+
+    with pytest.raises(SandboxError, match="before the handshake"):
+        await gate("llm_query", {"prompt": "sneak"})
+    with pytest.raises(SandboxError, match="before the handshake"):
+        await gate("final_answer", {"value": "sneak"})
+    assert served == []
+
+    assert await gate("handshake", {"pid": 1234}) is None
+    assert fut.result() == 1234
+    assert await gate("llm_query", {"prompt": "ok"}) == "served"
+
+    with pytest.raises(SandboxError, match="duplicate handshake"):
+        await gate("handshake", {"pid": 4321})
+
+
 async def test_episodes_do_not_share_state(manager, cfg):
     async with manager.session("ep-5", cfg) as s:
         await s.exec_cell("marker = 'first-episode'")

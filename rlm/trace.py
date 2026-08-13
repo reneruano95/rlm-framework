@@ -112,6 +112,15 @@ def unpack_blob(buf: bytes) -> dict[str, bytes]:
 SANDBOX_DIED_MID_CELL = "sandbox_died_mid_cell"    # steps.error_detail
 SANDBOX_DEATH_REASON = "sandbox_death"             # episodes.outcome_reason
 
+# The other way a result frame never arrives: the sandbox is still ALIVE but the
+# protocol stream is unparseable. Model code can reach the protocol fd
+# (`os.write(101, b'garbage')`) and desync it deliberately, so this is ordinary
+# model behaviour to be classified, not a crash. Both statuses are `error`; only
+# the reason distinguishes "the sandbox died" from "the sandbox corrupted the
+# channel", and C5/§6 need that distinction to attribute the episode.
+BRIDGE_DESYNC = "bridge_desync"                    # steps.error_detail
+BRIDGE_DESYNC_REASON = "bridge_desync"             # episodes.outcome_reason
+
 
 EPISODE_OPEN_COLS = (
     "episode_id", "task_id", "task_hash", "tokenized_task_len", "started_at",

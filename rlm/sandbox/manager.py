@@ -63,7 +63,8 @@ from collections.abc import Awaitable, Callable
 from ctypes import wintypes
 from pathlib import Path
 
-from rlm.bridge import BridgeParent
+from rlm import trace
+from rlm.bridge import BridgeError, BridgeParent
 from rlm.errors import SandboxError
 from rlm.sandbox import winproc
 from rlm.sandbox.winjob import Job
@@ -131,6 +132,12 @@ def install_bootstrap(sandbox_cfg, *, grant_acl: bool = False) -> Path:
     return dest
 
 
+def _close_handles(*handles: int) -> None:
+    for handle in handles:
+        with contextlib.suppress(OSError):
+            _winapi.CloseHandle(handle)
+
+
 def _sandbox_cfg(cfg):
     """Accept either the whole `Config` or just its `scaffold.sandbox` block."""
     scaffold = getattr(cfg, "scaffold", None)
@@ -187,17 +194,38 @@ class SandboxSession:
 
     async def setvar(self, name: str, value) -> None:
         self._check_alive()
-        await self._bridge.request("setvar", {"name": name, "value": value})
+        async with self._bridge_failure_guard():
+            await self._bridge.request("setvar", {"name": name, "value": value})
 
     async def exec_cell(self, cell: str) -> CellOutput:
         self._check_alive()
-        r = await self._bridge.request("exec", {"cell": cell})
+        async with self._bridge_failure_guard():
+            r = await self._bridge.request("exec", {"cell": cell})
         return CellOutput(
             stdout=r.get("stdout") or "",
             stderr=r.get("stderr") or "",
             repr_=r.get("repr") or "",
             traceback=r.get("traceback") or "",
         )
+
+    @contextlib.asynccontextmanager
+    async def _bridge_failure_guard(self):
+        """A result frame that never arrives has exactly two causes, and §6's
+        `status` ENUM cannot tell them apart on its own. Classify here, where
+        both facts are available: the sandbox is either dead
+        (`sandbox_died_mid_cell`) or alive with a corrupted stream
+        (`bridge_desync` -- reachable from ordinary model code, since a cell can
+        write to the protocol fd). Either way it routes through `kill()`, so
+        D22's single-owner property holds and `kill_reason` stays the one
+        attributable string."""
+        try:
+            yield
+        except BridgeError as exc:
+            reason = (trace.BRIDGE_DESYNC_REASON if self._is_alive()
+                      else trace.SANDBOX_DEATH_REASON)
+            await self.kill(reason, 0xB0DE)
+            raise SandboxError(
+                f"sandbox bridge failed mid-request ({reason}): {exc}") from exc
 
     # -- D22 ---------------------------------------------------------------- #
 
@@ -253,6 +281,13 @@ class SandboxSession:
         if self._dead is not None:
             raise self._dead
 
+    def _is_alive(self) -> bool:
+        if not self._hprocess:
+            return False
+        code = wintypes.DWORD()
+        winproc.kernel32.GetExitCodeProcess(self._hprocess, ctypes.byref(code))
+        return code.value == STILL_ACTIVE
+
     async def _wait_exit(self, timeout_s: float) -> int | None:
         """Poll on the loop -- no executor thread, no blocking call."""
         deadline = self._loop.time() + timeout_s
@@ -305,6 +340,30 @@ class SandboxSession:
             self._loop.create_task(self.kill(msg.lower(), 0xB0DE))
 
 
+class _FrameGate:
+    """D23 is about ORDER as much as identity.
+
+    Until the handshake has been seen, the episode has not been admitted: no
+    `llm_query` may be dispatched and no `final_answer` recorded in its name.
+    A second handshake is refused too -- one episode, one identity.
+    """
+
+    def __init__(self, handshake: asyncio.Future, serve) -> None:
+        self._handshake = handshake
+        self._serve = serve
+
+    async def __call__(self, kind: str, payload):
+        if kind == "handshake":
+            if self._handshake.done():
+                raise SandboxError("duplicate handshake frame; refused")
+            self._handshake.set_result((payload or {}).get("pid"))
+            return None
+        if not self._handshake.done():
+            raise SandboxError(
+                f"{kind!r} frame arrived before the handshake; refused")
+        return await self._serve(kind, payload)
+
+
 # --------------------------------------------------------------------------- #
 # manager
 # --------------------------------------------------------------------------- #
@@ -354,44 +413,58 @@ class SandboxManager:
         # fewer ctypes call to get wrong.
         c_in_r, p_in_w = _winapi.CreatePipe(None, 0)    # parent -> child
         p_out_r, c_out_w = _winapi.CreatePipe(None, 0)  # child -> parent
-        os.set_handle_inheritable(c_in_r, True)
-        os.set_handle_inheritable(c_out_w, True)
 
-        errf = self._open_child_stderr(episode_id)
-        herr = msvcrt.get_osfhandle(errf.fileno())
-        os.set_handle_inheritable(herr, True)
-
-        job = Job(memory_limit_mb=sbx.memory_limit_mb,
-                  active_process_limit=sbx.active_process_limit)
-        ac, sid = self._mint_appcontainer(episode_id, sbx)
-
-        args = ["-B", "-I", "-u", str(script)]
-        # Under `appcontainer` the kernel already returns WSAEACCES on the raw
-        # ws2_32 FFI path, so denying ctypes (which also breaks a fresh
-        # `import ctypes` outright) is optional there. Under `audit_only` the
-        # ctypes deny set is the only thing between model code and the leaf
-        # server on 127.0.0.1, so it is forced on regardless of config.
-        if sbx.deny_ctypes or sid is None:
-            args.append("--deny-ctypes")
-
+        # Everything from here to a successful spawn is unwound on ANY failure:
+        # a leaked pipe handle is a handle the child never sees EOF on, and a
+        # leaked Job handle is a process tree nothing will reap.
+        errf = job = ac = None
+        sid = None
         try:
+            os.set_handle_inheritable(c_in_r, True)
+            os.set_handle_inheritable(c_out_w, True)
+
+            errf = self._open_child_stderr(episode_id)
+            herr = msvcrt.get_osfhandle(errf.fileno())
+            os.set_handle_inheritable(herr, True)
+
+            job = Job(memory_limit_mb=sbx.memory_limit_mb,
+                      active_process_limit=sbx.active_process_limit)
+            ac, sid = self._mint_appcontainer(episode_id, sbx)
+
+            args = ["-B", "-I", "-u", str(script)]
+            # Under `appcontainer` the kernel already returns WSAEACCES on the
+            # raw ws2_32 FFI path, so denying ctypes (which also breaks a fresh
+            # `import ctypes` outright) is optional there. Under `audit_only`
+            # the ctypes deny set is the only thing between model code and the
+            # leaf server on 127.0.0.1, so it is forced on regardless of config.
+            if sbx.deny_ctypes or sid is None:
+                args.append("--deny-ctypes")
+
             res = winproc.spawn(str(sbx.interpreter), args, [], sid, job, None,
                                 winproc.Stdio(c_in_r, c_out_w, herr),
                                 cwd=str(bootstrap))
-        except OSError as exc:
-            job.close()
+        except BaseException as exc:
+            # Every handle, including the parent ends: nothing survives a spawn
+            # that never happened.
+            _close_handles(c_in_r, c_out_w, p_in_w, p_out_r)
+            if errf is not None:
+                errf.close()
+            if job is not None:
+                job.close()
             if ac is not None:
                 ac.delete()
-            raise SandboxError(
-                f"could not spawn the sandbox interpreter ({exc}). If the "
-                f"AppContainer cannot reach the bootstrap directory, run once: "
-                f"{subprocess.list2cmdline(bootstrap_acl_command(bootstrap))}"
-            ) from exc
-        finally:
-            # Our copies of the child's ends must go now, or we never see EOF.
-            _winapi.CloseHandle(c_in_r)
-            _winapi.CloseHandle(c_out_w)
-            errf.close()
+            if isinstance(exc, OSError):
+                raise SandboxError(
+                    f"could not spawn the sandbox interpreter ({exc}). If the "
+                    f"AppContainer cannot reach the bootstrap directory, run "
+                    f"once: "
+                    f"{subprocess.list2cmdline(bootstrap_acl_command(bootstrap))}"
+                ) from exc
+            raise
+
+        # Our copies of the child's ends must go now, or we never see EOF.
+        _close_handles(c_in_r, c_out_w)
+        errf.close()
         winproc.kernel32.CloseHandle(res.hthread)
 
         rfd = msvcrt.open_osfhandle(p_out_r, os.O_RDONLY | os.O_BINARY)
@@ -405,19 +478,16 @@ class SandboxManager:
 
         handshake: asyncio.Future = loop.create_future()
 
-        async def _dispatch(kind: str, payload):
-            if kind == "handshake":
-                if not handshake.done():
-                    handshake.set_result((payload or {}).get("pid"))
-                return None
-            return await session._serve(kind, payload)
-
-        bridge.on_request(_dispatch)
+        bridge.on_request(_FrameGate(handshake, session._serve))
         job.watch(session._job_notification_pump)
 
         try:
             child_pid = await asyncio.wait_for(handshake, self.handshake_timeout_s)
         except (TimeoutError, asyncio.TimeoutError) as exc:
+            # kill() FIRST: close() would spend the full shutdown grace waiting
+            # for a graceful `bye` from a child that has already proved it is
+            # not talking to us.
+            await session.kill("handshake_timeout", 0xC5)
             await session.close()
             raise SandboxError(
                 f"sandbox {episode_id} never sent its handshake frame "
@@ -427,6 +497,7 @@ class SandboxManager:
             ) from exc
 
         if child_pid != res.pid:  # D23
+            await session.kill("handshake_pid_mismatch", 0xC5)
             await session.close()
             raise SandboxError(
                 f"handshake pid {child_pid} != PROCESS_INFORMATION.dwProcessId "
