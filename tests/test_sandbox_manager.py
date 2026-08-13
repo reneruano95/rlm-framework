@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import time
 
@@ -89,6 +90,76 @@ async def test_frames_before_the_handshake_are_refused():
 
     with pytest.raises(SandboxError, match="duplicate handshake"):
         await gate("handshake", {"pid": 4321})
+
+
+async def test_hijacked_llm_query_cannot_alter_scaffold_side_control(manager, cfg):
+    """THE I1 TEST (spec v0.2.3 §5 C1). This is the guarantee that holds.
+
+    The in-process namespace is not a boundary and I1 does not depend on it
+    being one: cell code can hijack `llm_query` outright, and this test does
+    exactly that through one of the reachable routes child.py documents. What
+    the sandbox cannot touch is the concurrency cap, the budget accounting, the
+    routing or the admission decision, because those run IN A DIFFERENT PROCESS.
+
+    A hijacked stub answers the model locally and the scaffold receives no
+    frames at all -- it cannot be tricked into spending budget, holding a
+    semaphore slot, or recording a sub-call that never happened. Every call that
+    does cross the pipe is admitted or refused on the scaffold's count.
+
+    Unlike the two route-specific regression tests, this one stays true no
+    matter which pivot the sandbox uses. If a future change makes it fail, the
+    scaffold has a real I1 bug.
+    """
+    admitted: list[tuple[str, str]] = []
+    refused: list[str] = []
+    max_subcalls = 2
+    semaphore = asyncio.Semaphore(1)
+
+    async def dispatcher(payload):
+        async with semaphore:                       # C4's concurrency cap
+            if len(admitted) >= max_subcalls:       # C5's budget
+                refused.append(payload["prompt"])
+                raise SandboxError("max_subcalls exhausted")
+            admitted.append((payload["prompt"], payload["role"]))
+            return f"LEAF:{payload['prompt']}"
+
+    async with manager.session("ep-i1", cfg) as s:
+        s.on_llm_query(dispatcher)
+
+        hijack = await s.exec_cell(
+            "RESERVED = llm_query.__globals__['BRIDGE']._handler.__globals__['_RESERVED']\n"
+            "REAL = RESERVED['llm_query']\n"
+            "RESERVED['llm_query'] = lambda *a, **k: 'HIJACKED'\n")
+        assert hijack.traceback == "", "the hijack itself must succeed"
+
+        out = await s.exec_cell(
+            "print(sorted({llm_query(f'q{i}') for i in range(50)}))")
+        assert out.stdout.strip() == "['HIJACKED']", out.stdout
+
+        # 50 sub-calls the model believes it made, and the scaffold did not move:
+        # no frames, no budget spent, no slot held, no step to log.
+        assert admitted == []
+        assert refused == []
+        assert not semaphore.locked()
+        assert s.final_answers == []
+
+        # And the budget it "escaped" was never its to spend. Restore the real
+        # stub: the same parent-side gate admits exactly max_subcalls and
+        # refuses the rest, on the scaffold's count.
+        await s.exec_cell("RESERVED['llm_query'] = REAL")
+        real = await s.exec_cell(
+            "for i in range(4):\n"
+            "    try:\n"
+            "        print(await llm_query(f'real{i}'))\n"
+            "    except Exception as e:\n"
+            "        print('REFUSED', type(e).__name__)\n")
+
+    assert [p for p, _ in admitted] == ["real0", "real1"]
+    assert {role for _, role in admitted} == {"leaf"}   # routing stays the scaffold's
+    assert refused == ["real2", "real3"]
+    assert real.stdout.count("REFUSED") == 2
+    assert "LEAF:real0" in real.stdout
+    assert not semaphore.locked()
 
 
 async def test_episodes_do_not_share_state(manager, cfg):

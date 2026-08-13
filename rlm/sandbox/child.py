@@ -30,11 +30,13 @@ failure, not from taste:
   D24 Re-inject the reserved names before EVERY cell. The reference harness
       restores its reserved names after each execution; without this, model
       code that rebinds `llm_query` intercepts its own sub-call plumbing --
-      a direct I1 violation. Re-injection is necessary but NOT sufficient: it
-      re-reads `_RESERVED`, so anything that can reach `_RESERVED` defeats it.
-      Two routes were reproduced live and are now closed and regression-tested
-      -- `sys.modules['__main__']` (a decoy is installed) and the injected
-      callables' `__globals__` (rebuilt over a two-name namespace).
+      a direct I1 violation. Re-injection raises the bar against the ordinary
+      case (a cell that rebinds the NAME) and nothing more: it re-reads
+      `_RESERVED`, so anything that can reach `_RESERVED` defeats it, and
+      several things can -- see ENFORCEMENT LAYERING below. Two cheap routes are
+      shut anyway, because cheap is worth shutting: `sys.modules['__main__']`
+      (a decoy is installed) and the injected callables' `__globals__` (rebuilt
+      over a two-name namespace).
   D25 (a) `SandboxPolicyError` is defined at module level and re-homed onto a
       module name chosen for the model's benefit, because its qualname is
       user-visible in every denied observation (a closure-local class shows up
@@ -52,12 +54,37 @@ failure, not from taste:
       absolute interpreter paths plus a misattributed AttributeError into the
       NEXT cell's observation.
 
-NOTHING HERE SEALS THE INTERPRETER. Cells run in this process on this loop, so a
-frame walk still reaches this module's namespace. What holds is the layer below
-(the AppContainer) and the layer above: every I1-critical control -- budgets,
-the semaphore, retries, truncation, step logging, whether a `final_answer` is
-accepted at all -- lives SCAFFOLD-SIDE across the pipe, where nothing in this
-process can reach it.
+ENFORCEMENT LAYERING (spec v0.2.3, §5 C1 -- read this before "hardening"
+anything here). The kernel boundary is the AppContainer token plus the Job
+Object's `ACTIVE_PROCESS` limit of 1. EVERYTHING IN THIS FILE -- the audit hook,
+the shadowed loop constructors, the decoy `__main__`, the re-injected reserved
+names, the moved protocol fds -- RAISES THE BAR AND IS NOT A BOUNDARY. Do not
+write a comment, a docstring or a test name here that claims otherwise.
+
+These routes from cell code to this module's namespace are KNOWN REACHABLE and
+are not defects to be re-filed. All three were measured on-box; each yields
+`_RESERVED` and therefore a hijacked `llm_query`/`final_answer`:
+
+  * frame walk -- `sys._getframe()` up to the outermost frame, or
+    `asyncio.current_task().get_coro()`; needs nothing injected;
+  * the loop -- `asyncio.get_running_loop()._exception_handler.__globals__`;
+    the loop is reachable by construction, since top-level `await` requires it;
+  * bridge-object pivots -- `llm_query.__globals__['BRIDGE']._handler
+    .__globals__`, and the same from `final_answer`.
+
+Sanitizing a namespace cannot close this class: whatever performs re-injection
+must itself reach `_RESERVED`, so every sanitized namespace still contains the
+target one hop further along. The first two routes do not touch the injected
+namespace at all.
+
+WHY I1 STILL HOLDS. Not because the sandbox is escape-proof -- because the
+things a model could otherwise subvert (truncation caps, budgets, routing,
+termination, step logging, whether a `final_answer` is ACCEPTED) execute
+scaffold-side, IN A DIFFERENT PROCESS. A hijacked stub answers the model
+locally; the scaffold simply receives no frames, and every call that does cross
+the pipe is admitted or refused on the scaffold's count.
+`test_hijacked_llm_query_cannot_alter_scaffold_side_control` is the assertion of
+that guarantee, and it is the one that must never be weakened.
 
 Protocol. Everything rides the Task 8 bridge envelope, so there is exactly one
 framing implementation on the wire (`rlm.bridge`); the `kind` of a bridge
@@ -353,14 +380,17 @@ def _install_asyncio_stubs() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 9. the names the scaffold injects (I1: this is the entire crossing surface)
+# 9. the names the scaffold injects -- the entire surface the model CALLS
+#
+# (Not the entire surface it can REACH: see ENFORCEMENT LAYERING in the module
+# docstring. This narrows one route; it does not close the class.)
 #
 # The two templates below are NEVER injected as written. `_build_injected()`
 # rebuilds them with `types.FunctionType` over a MINIMAL globals dict, because
 # `f.__globals__` is readable and writable from any cell: injected as-is,
 # `final_answer.__globals__["_RESERVED"]["final_answer"] = ...` captures the
 # terminal channel and `..["llm_query"] = ..` intercepts the sub-call plumbing --
-# both reproduced live. They therefore reference only `BRIDGE` and `LOOP`, and
+# both measured. They therefore reference only `BRIDGE` and `LOOP`, and
 # `_FINAL_TASK_NAME` is inlined as a literal so no shared mutable container is
 # reachable either.
 # --------------------------------------------------------------------------- #
@@ -660,19 +690,17 @@ _REAL_MODULE = None  # strong ref: see _hide_this_module
 
 
 def _hide_this_module() -> None:
-    """`import sys; sys.modules['__main__']` is the shortest path from a cell to
+    """`import sys; sys.modules['__main__']` was the SHORTEST path from a cell to
     this module's namespace, and from there `_RESERVED['llm_query'] = ...`
     intercepts the sub-call plumbing and `_RESERVED['final_answer'] = ...`
-    captures the terminal channel -- both reproduced live against the first cut
-    of this file. Swap in a decoy carrying nothing.
+    captures the terminal channel -- both measured against the first cut of this
+    file. Swap in a decoy carrying nothing.
 
-    Note this raises the bar rather than sealing the interpreter: cell code runs
-    in the same process on the same loop, so a frame walk
-    (`sys._getframe().f_back...f_globals`) still reaches this dict. That is
-    intrinsic and is why every I1-critical control -- budgets, the semaphore,
-    retries, truncation, step logging, whether a final_answer is accepted --
-    lives SCAFFOLD-SIDE across the pipe, where nothing in this process can
-    reach it.
+    This shuts the shortest path, not the class: the frame walk, the loop's
+    exception handler and the bridge-object pivots all still land in the same
+    dict (module docstring, ENFORCEMENT LAYERING). Kept because it is three
+    lines and removes the route a model would stumble into by accident, not
+    because it makes anything safe.
     """
     global _REAL_MODULE
     _REAL_MODULE = sys.modules.get("__main__")

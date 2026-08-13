@@ -41,12 +41,18 @@ Two decisions here came from measured defects rather than design taste:
       frame (`said_bye`). Any other exit code means "unattributed sandbox
       death".
 
-D7/Conflict 8: the AppContainer cannot read this repository, so the child is
+D7/Conflict 8: the AppContainer token denies this repository, so the child is
 never executed in place -- `install_bootstrap()` stages it, plus the only two
 scaffold modules it imports, into a dedicated directory that holds nothing
 else. That directory is the ONLY thing granted to ALL APPLICATION PACKAGES;
 config.yaml, prompts/ and traces/ stay unreadable to model code by default,
 which `test_sandbox_cannot_read_the_repo` checks rather than assumes.
+
+This module -- the token, the Job Object's `ACTIVE_PROCESS` limit of 1, and the
+fact that budgets, routing, truncation and termination all run HERE rather than
+in the sandbox -- is where C1's isolation actually lives (spec v0.2.3, §5 C1).
+The controls inside `child.py` raise the bar and are not a boundary; see its
+ENFORCEMENT LAYERING section before assuming anything about them.
 """
 from __future__ import annotations
 

@@ -36,7 +36,9 @@ async def test_last_expression_repr_is_captured(session):
 
 
 async def test_reserved_names_are_reinjected_every_cell(session):
-    """D24: rebinding llm_query must not let model code intercept its own plumbing."""
+    """D24: a cell that rebinds the NAME `llm_query` must not carry that rebind
+    into the next cell. That is the ordinary case and all re-injection covers --
+    reaching `_RESERVED` itself defeats it, by design (spec v0.2.3 §5 C1)."""
     await session.exec_cell("llm_query = lambda *a, **k: 'HIJACKED'")
     out = await session.exec_cell("print(type(llm_query).__name__)")
     assert "HIJACKED" not in out.stdout
@@ -70,11 +72,16 @@ async def test_egress_is_blocked_but_the_bridge_still_works(session):
     assert "MOCK" in r.stdout
 
 
-async def test_sub_call_plumbing_cannot_be_hijacked_via_main_module(session):
-    """D24 escape 1, reproduced live against the first cut of child.py:
-    `sys.modules['__main__']._RESERVED['llm_query'] = ...` made the NEXT cell's
-    llm_query return 'HIJACKED'. Re-injection did not help, because it re-read
-    the very dict the cell had just rewritten."""
+async def test_main_module_route_to_the_reserved_names_is_closed(session):
+    """Documents ONE closed route, not a sealed namespace (spec v0.2.3 §5 C1).
+
+    `sys.modules['__main__']._RESERVED['llm_query'] = ...` used to make the NEXT
+    cell's llm_query return 'HIJACKED'; re-injection did not help, because it
+    re-reads the very dict the cell had just rewritten. Other routes to the same
+    dict remain reachable BY DESIGN -- see child.py's ENFORCEMENT LAYERING and
+    `test_hijacked_llm_query_cannot_alter_scaffold_side_control`, which asserts
+    the guarantee that actually holds.
+    """
     probe = await session.exec_cell(
         "import sys\n"
         "m = sys.modules['__main__']\n"
@@ -93,10 +100,12 @@ async def test_sub_call_plumbing_cannot_be_hijacked_via_main_module(session):
     assert out.stdout.strip() == "MOCK:x"
 
 
-async def test_terminal_channel_cannot_be_captured_via_func_globals(session):
-    """D24 escape 2, reproduced live: `final_answer.__globals__['_RESERVED']
-    ['final_answer'] = ...` swallowed the submission and the scaffold recorded
-    nothing. That is capture of I1's termination channel."""
+async def test_injected_globals_route_to_the_reserved_names_is_closed(session):
+    """The second closed route. `final_answer.__globals__['_RESERVED']
+    ['final_answer'] = ...` used to swallow the submission with the scaffold
+    recording nothing. The injected namespace is now two names wide -- which
+    narrows this route and closes nothing else; `BRIDGE` is deliberately still
+    in it, and pivots off it are documented as reachable in child.py."""
     probe = await session.exec_cell(
         "g = final_answer.__globals__\n"
         "print(sorted(k for k in g if k not in ('__builtins__', '__name__')))\n")
@@ -117,11 +126,15 @@ async def test_terminal_channel_cannot_be_captured_via_func_globals(session):
     assert session.final_answers == ["real answer"]
 
 
-async def test_event_loop_cannot_be_constructed_at_any_layer(session):
+async def test_event_loop_construction_is_denied_before_any_loop_exists(session):
     """D25(c): shadowing the `asyncio` package alone is one layer thin --
     `asyncio.events.new_event_loop()` reaches the constructor directly, and the
     denial then fires INSIDE ProactorEventLoop.__init__, which is exactly the
-    half-built object whose __del__ contaminates the next cell."""
+    half-built object whose __del__ contaminates the next cell.
+
+    Scope: the shadows, not the interpreter. `importlib.reload(asyncio.events)`
+    restores the real constructors and is not defended against (spec v0.2.3).
+    """
     out = await session.exec_cell(
         "import asyncio, asyncio.events as ev\n"
         "cands = [('asyncio.new_event_loop', asyncio.new_event_loop),\n"
