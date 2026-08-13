@@ -13,6 +13,10 @@ ISOLATED = [
     "context.py",
     "budget.py",
     "trace.py",
+    # R13's foreign-string detector: C4 calls it on every leaf answer, but it
+    # must stay importable by the trace/analysis side (which audits recorded
+    # answers offline) without dragging in an HTTP client.
+    "leakcheck.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
