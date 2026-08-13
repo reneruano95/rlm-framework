@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS steps (
     -- "leak-free".
     leak_detected BOOLEAN,
     leak_detail TEXT,
+    -- R13's rotation stamp (spec v0.2.6 §5 C4): the 1-based index of the
+    -- leaf-server rotation THIS step triggered by exhausting the slot pool,
+    -- NULL on every step that triggered none. A rotation is also a lifecycle
+    -- event, but the S3 gate runs with that log deleted, so the trace has to
+    -- carry the fact on its own -- and only the step ties the rotation to the
+    -- window whose slot request could not be served.
+    server_rotation INTEGER,
     PRIMARY KEY (episode_id, step_idx)
 );
 
@@ -86,3 +93,4 @@ CREATE TABLE IF NOT EXISTS steps (
 -- fail against a real operator database. These ALTERs are idempotent.
 ALTER TABLE steps ADD COLUMN IF NOT EXISTS leak_detected BOOLEAN;
 ALTER TABLE steps ADD COLUMN IF NOT EXISTS leak_detail TEXT;
+ALTER TABLE steps ADD COLUMN IF NOT EXISTS server_rotation INTEGER;

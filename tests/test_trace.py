@@ -165,3 +165,41 @@ def test_the_leak_columns_are_added_to_a_pre_existing_steps_table(tmp_path):
     cols = [r[0] for r in con.execute("DESCRIBE steps").fetchall()]
     assert "leak_detected" in cols and "leak_detail" in cols
     con.close()
+
+
+async def test_the_rotation_stamp_rides_on_the_step_that_triggered_it(tmp_path):
+    """§5 C4 (v0.2.6): a slot-pool rotation is logged as a lifecycle event AND
+    stamped on the step that triggered it. The lifecycle log is deleted for the
+    S3 gate, so the trace has to carry the fact by itself -- NULL on every step
+    that triggered nothing, the rotation's 1-based index on the one that did."""
+    tl = TraceLogger(tmp_path / "t.duckdb", tmp_path / "blobs")
+    await tl.start()
+    ep = str(uuid.uuid4())
+    tl.open_episode({"episode_id": ep, "task_id": "t", "task_hash": "h",
+                     "config_snapshot": {}})
+    tl.put_step({"episode_id": ep, "step_idx": 0, "actor": Actor.LEAF,
+                 "action_type": ActionType.LLM_CALL, "status": StepStatus.ERROR,
+                 "server_rotation": 1})
+    tl.put_step({"episode_id": ep, "step_idx": 1, "actor": Actor.LEAF,
+                 "action_type": ActionType.LLM_CALL, "status": StepStatus.OK})
+    await tl.drain()
+    await tl.aclose()
+
+    con = duckdb.connect(str(tmp_path / "t.duckdb"))
+    assert con.execute("SELECT server_rotation FROM steps ORDER BY step_idx"
+                       ).fetchall() == [(1,), (None,)]
+
+
+def test_the_rotation_column_is_added_to_a_pre_existing_steps_table(tmp_path):
+    import pathlib
+
+    schema = (pathlib.Path(__file__).parents[1] / "rlm" / "schema.sql").read_text()
+    pre = (schema.split("-- Migration for stores")[0]
+           .replace("    server_rotation INTEGER,\n", ""))
+    assert "server_rotation" not in pre
+    con = duckdb.connect(str(tmp_path / "old.duckdb"))
+    con.execute(pre)
+    assert "server_rotation" not in [r[0] for r in con.execute("DESCRIBE steps").fetchall()]
+    con.execute(schema)
+    assert "server_rotation" in [r[0] for r in con.execute("DESCRIBE steps").fetchall()]
+    con.close()

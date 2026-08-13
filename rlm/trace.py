@@ -151,6 +151,9 @@ STEP_COLS = (
     # False, and rlm/leakcheck.py for the 2.2% bound that forbids the phrase
     # "leak-free" anywhere near a column of Falses.
     "leak_detected", "leak_detail",
+    # The slot-pool rotation this step triggered (§5 C4, v0.2.6). NULL on every
+    # step that triggered none, which is all but two per 200K corpus.
+    "server_rotation",
 )
 INSERT_STEP = (f"INSERT INTO steps ({','.join(STEP_COLS)}) "
                f"VALUES ({','.join('?' * len(STEP_COLS))})")
@@ -161,7 +164,7 @@ _STEP_DEFAULTS: dict[str, Any] = {
     "tokens_in": None, "tokens_out": None, "tokens_cached": None, "slot_id": None,
     "t_dispatch": None, "t_first_byte": None, "t_end": None,
     "latency_queue_ms": None, "latency_prefill_ms": None, "latency_decode_ms": None,
-    "leak_detected": None, "leak_detail": None,
+    "leak_detected": None, "leak_detail": None, "server_rotation": None,
 }
 _STEP_TEXT_FIELDS = ("error_detail", "action_payload", "observation_view",
                      "leak_detail")
