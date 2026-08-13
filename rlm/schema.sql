@@ -66,5 +66,23 @@ CREATE TABLE IF NOT EXISTS steps (
     latency_queue_ms INTEGER,
     latency_prefill_ms INTEGER,
     latency_decode_ms INTEGER,
+    -- R13 (spec v0.2.6 §10): the foreign-string detector's verdict for this
+    -- leaf answer. TRI-STATE, and the NULL is load-bearing: NULL = not
+    -- checked (no corpus index, or the step never produced an answer), FALSE
+    -- = checked and no foreign identifier found, TRUE = an identifier absent
+    -- from the chunk sent and present in another chunk. FALSE is evidence,
+    -- not a certificate: 138 clean calls give a 95% upper bound of 2.2%, and
+    -- a 200K episode is ~522 leaf calls, so ~11 contaminated answers per
+    -- episode are permitted by the evidence. Never read a column of FALSEs as
+    -- "leak-free".
+    leak_detected BOOLEAN,
+    leak_detail TEXT,
     PRIMARY KEY (episode_id, step_idx)
 );
+
+-- Migration for stores written before R13. The CREATE TABLE above is
+-- IF NOT EXISTS, so it is a no-op against an existing steps table and the
+-- new columns would never arrive -- the first INSERT after the upgrade would
+-- fail against a real operator database. These ALTERs are idempotent.
+ALTER TABLE steps ADD COLUMN IF NOT EXISTS leak_detected BOOLEAN;
+ALTER TABLE steps ADD COLUMN IF NOT EXISTS leak_detail TEXT;

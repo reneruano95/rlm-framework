@@ -146,6 +146,11 @@ STEP_COLS = (
     "tokens_in", "tokens_out", "tokens_cached", "slot_id",
     "t_dispatch", "t_first_byte", "t_end",
     "latency_queue_ms", "latency_prefill_ms", "latency_decode_ms",
+    # R13's foreign-string detector, recorded per leaf answer (§5 C4). NULL
+    # means NOT CHECKED -- see schema.sql for why that is not the same as
+    # False, and rlm/leakcheck.py for the 2.2% bound that forbids the phrase
+    # "leak-free" anywhere near a column of Falses.
+    "leak_detected", "leak_detail",
 )
 INSERT_STEP = (f"INSERT INTO steps ({','.join(STEP_COLS)}) "
                f"VALUES ({','.join('?' * len(STEP_COLS))})")
@@ -156,8 +161,10 @@ _STEP_DEFAULTS: dict[str, Any] = {
     "tokens_in": None, "tokens_out": None, "tokens_cached": None, "slot_id": None,
     "t_dispatch": None, "t_first_byte": None, "t_end": None,
     "latency_queue_ms": None, "latency_prefill_ms": None, "latency_decode_ms": None,
+    "leak_detected": None, "leak_detail": None,
 }
-_STEP_TEXT_FIELDS = ("error_detail", "action_payload", "observation_view")
+_STEP_TEXT_FIELDS = ("error_detail", "action_payload", "observation_view",
+                     "leak_detail")
 
 
 def blob_rel(episode_id: Any, step_idx: int, col: str) -> str:

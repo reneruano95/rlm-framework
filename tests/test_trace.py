@@ -112,3 +112,56 @@ async def test_export_bundle_is_self_contained(tmp_path):
         f"WHERE episode_id = ?", [ep]).fetchone()
     assert outcome_row[0] == "success"
     assert outcome_row[1] is not None
+
+
+async def test_leak_columns_round_trip_and_default_to_not_checked(tmp_path):
+    """R13's detector records its verdict on the step (§5 C4). The column is
+    NULLABLE and defaults to NULL on purpose: NULL means "not checked", and a
+    step that was never checked must not read as one that was checked and came
+    back clean -- 138 clean calls bound the leak rate at 2.2%, they do not
+    zero it."""
+    tl = TraceLogger(tmp_path / "t.duckdb", tmp_path / "blobs")
+    await tl.start()
+    ep = str(uuid.uuid4())
+    tl.open_episode({"episode_id": ep, "task_id": "t", "task_hash": "h",
+                     "config_snapshot": {}})
+    tl.put_step({"episode_id": ep, "step_idx": 0, "actor": Actor.LEAF,
+                 "action_type": ActionType.LLM_CALL, "status": StepStatus.OK,
+                 "leak_detected": True,
+                 "leak_detail": "1 foreign identifier(s): ENT-19022@chunk[3]"})
+    tl.put_step({"episode_id": ep, "step_idx": 1, "actor": Actor.LEAF,
+                 "action_type": ActionType.LLM_CALL, "status": StepStatus.OK,
+                 "leak_detected": False})
+    tl.put_step({"episode_id": ep, "step_idx": 2, "actor": Actor.ROOT,
+                 "action_type": ActionType.REPL_EXEC, "status": StepStatus.OK})
+    await tl.drain()
+    await tl.aclose()
+
+    con = duckdb.connect(str(tmp_path / "t.duckdb"))
+    rows = con.execute("SELECT leak_detected, leak_detail FROM steps "
+                       "ORDER BY step_idx").fetchall()
+    assert rows[0] == (True, "1 foreign identifier(s): ENT-19022@chunk[3]")
+    assert rows[1] == (False, None)
+    assert rows[2] == (None, None)
+
+
+def test_the_leak_columns_are_added_to_a_pre_existing_steps_table(tmp_path):
+    """Every trace store written before R13 already exists on disk. The schema
+    is applied with CREATE TABLE IF NOT EXISTS, which is a no-op against an
+    older table -- so the new columns must arrive by ALTER, or the first
+    INSERT after the upgrade fails against the operator's real database."""
+    import pathlib
+
+    schema = (pathlib.Path(__file__).parents[1] / "rlm" / "schema.sql").read_text()
+    pre_r13 = (schema.split("-- Migration for stores")[0]
+               .replace("    leak_detected BOOLEAN,\n", "")
+               .replace("    leak_detail TEXT,\n", ""))
+    assert "leak_" not in pre_r13
+    db = tmp_path / "old.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute(pre_r13)
+    assert "leak_detected" not in [r[0] for r in con.execute("DESCRIBE steps").fetchall()]
+    con.execute(schema)  # re-applied, the way TraceLogger does at start()
+    cols = [r[0] for r in con.execute("DESCRIBE steps").fetchall()]
+    assert "leak_detected" in cols and "leak_detail" in cols
+    con.close()
