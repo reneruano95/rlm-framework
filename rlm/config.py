@@ -135,6 +135,12 @@ class SandboxCfg(_Strict):
     appcontainer_per_episode: bool = True
     deny_ctypes: bool = False
     memory_limit_mb: int = 4096
+    # Kernel-level ban on the sandbox spawning helper processes (Job Object
+    # JOB_OBJECT_LIMIT_ACTIVE_PROCESS). Default 1 matches winjob.Job's own
+    # default and is load-bearing for the isolation design: without it,
+    # nothing stops sandboxed code from shelling out to a clean interpreter
+    # with no audit hook installed.
+    active_process_limit: int = 1
 
 
 class CellExtraction(_Strict):

@@ -62,12 +62,20 @@ scaffold:
       default: { path: prompts/strat-default.v1.md, sha256: null }
   leaf_envelope: { enabled: false }
   sandbox:
-    interpreter: 'D:\PROJECTS\rlm-halo-framework\.venv\Scripts\python.exe'
+    # MUST be the real base interpreter, never the venv's Scripts\python.exe
+    # trampoline (262 KB stub that re-execs the real interpreter as a CHILD
+    # with a DIFFERENT pid -- measured on this box, Popen.pid != child's own
+    # os.getpid()). Recording the trampoline's pid as episodes.sandbox_pid
+    # would be wrong, would race job.assign against the trampoline's own
+    # re-exec (Cross-check Conflict 1/7), and would make TerminateJobObject
+    # target the wrong process. Absolute path, pinned, never sys.executable.
+    interpreter: 'C:\Users\Rene\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\python.exe'
     bootstrap_dir: 'D:\PROJECTS\rlm-halo-framework\sandbox_bootstrap'
     network_isolation: appcontainer
     appcontainer_per_episode: true
     deny_ctypes: false
     memory_limit_mb: 4096
+    active_process_limit: 1
   root:
     enable_thinking: false
     window_tokens: 32768

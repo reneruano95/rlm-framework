@@ -10,7 +10,7 @@ thing neither probe had run before this plan, and it works: AppContainer
 profile create 0.012 s, spawn 0.006 s, full bridge round-trip inside the
 container.
 
-Three CreateProcessW footguns this module exists to hide (measured, not
+CreateProcessW footguns this module exists to hide (measured, not
 theorised):
   1. Duplicate handle values in PROC_THREAD_ATTRIBUTE_HANDLE_LIST make
      CreateProcessW fail with ERROR_INVALID_PARAMETER (87). `dedupe_handles`
@@ -20,11 +20,24 @@ theorised):
      must also appear in the handle list.
   3. `CreateProcessW` requires the attribute list to stay alive until the
      call returns and to be explicitly deleted afterwards.
+  4. The raw Win32 command line is one string, not an argv list: naively
+     wrapping only the executable in quotes leaves every other argument
+     unquoted, so an argument containing whitespace silently splits into
+     multiple argv entries in the child -- corruption, not a crash.
+     `subprocess.list2cmdline` implements the MS C runtime's actual
+     quoting rules (escaped embedded quotes, doubled trailing backslashes)
+     and is used for exactly that reason, not to spawn anything.
+  5. If anything after a successful CreateProcessW fails (job assignment,
+     ResumeThread), the child is left CREATE_SUSPENDED forever unless it is
+     explicitly torn down -- a silent, permanent orphan per failure.
 """
 from __future__ import annotations
 
 import ctypes
 import datetime as dt
+import subprocess  # list2cmdline only: the MS C runtime argv-quoting rules,
+                    # not for spawning -- getting this wrong silently
+                    # corrupts argv instead of raising.
 from ctypes import wintypes
 from typing import NamedTuple
 
@@ -119,6 +132,12 @@ kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
 
 kernel32.GetProcessTimes.restype = wintypes.BOOL
 kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+
+kernel32.WaitForSingleObject.restype = wintypes.DWORD
+kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+
+kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
 
 
 def _check(ok, what: str):
@@ -244,7 +263,14 @@ def spawn(exe: str, args: list[str], handles: list[int],
             envbuf = ctypes.create_unicode_buffer(blk)
             envblock = ctypes.cast(envbuf, ctypes.c_void_p)
 
-        cmdline = ctypes.create_unicode_buffer(" ".join([f'"{exe}"', *args]))
+        # MS C runtime argv-quoting rules (escaped embedded quotes, doubled
+        # trailing backslashes before a closing quote): a naive `f'"{a}"'`
+        # wrap only protects args with no embedded quote/backslash, and does
+        # nothing for the *other* args in the list at all -- an unquoted arg
+        # containing whitespace silently splits into multiple argv entries
+        # in the child instead of raising. list2cmdline implements exactly
+        # the rules CreateProcessW's own argv parser expects.
+        cmdline = ctypes.create_unicode_buffer(subprocess.list2cmdline([exe, *args]))
         pi = PROCESS_INFORMATION()
         flags = (CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT
                  | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW)
@@ -254,8 +280,19 @@ def spawn(exe: str, args: list[str], handles: list[int],
     finally:
         kernel32.DeleteProcThreadAttributeList(buf)
 
-    job.assign(pi.hProcess)  # BEFORE ResumeThread -- race-free by construction
-    kernel32.ResumeThread(pi.hThread)
+    try:
+        job.assign(pi.hProcess)  # BEFORE ResumeThread -- race-free by construction
+        resumed = kernel32.ResumeThread(pi.hThread)
+        _check(resumed != 0xFFFFFFFF, "ResumeThread")
+    except BaseException:
+        # CreateProcessW succeeded but something after it failed (job.assign
+        # raised, or ResumeThread itself failed): the child is suspended and
+        # would otherwise be a permanent orphan -- holding two open handles
+        # and never running, never exiting, never reaped.
+        kernel32.TerminateProcess(pi.hProcess, 1)
+        kernel32.CloseHandle(pi.hThread)
+        kernel32.CloseHandle(pi.hProcess)
+        raise
     return SpawnResult(pid=pi.dwProcessId, hprocess=pi.hProcess, hthread=pi.hThread)
 
 

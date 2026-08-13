@@ -1,12 +1,15 @@
 # tests/test_winjob.py
+import ctypes
+import os
 import subprocess
 import sys
 import time
+from ctypes import wintypes
 
 import pytest
 
 from rlm.sandbox.winjob import Job
-from rlm.sandbox.winproc import AppContainer, spawn
+from rlm.sandbox.winproc import AppContainer, Stdio, kernel32, spawn
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 
@@ -73,3 +76,74 @@ def test_spawn_rejects_duplicate_handle_values():
     """D2: duplicates make CreateProcessW fail with ERROR_INVALID_PARAMETER."""
     from rlm.sandbox.winproc import dedupe_handles
     assert dedupe_handles([5, 7, 5, 9, 7]) == [5, 7, 9]
+
+
+class _ProbeJob:
+    """Wraps a real Job; `.assign()` is what spawn() calls BEFORE
+    ResumeThread, so recording whether the child's marker file exists at
+    that exact moment proves CREATE_SUSPENDED genuinely held until then --
+    without this, a bug that resumed before (or without) assigning to the
+    job would not be caught by any test (fix-round-1 finding: nothing
+    called spawn() at all)."""
+
+    def __init__(self, real_job: Job, marker) -> None:
+        self._real = real_job
+        self._marker = marker
+        self.marker_existed_at_assign: bool | None = None
+
+    def assign(self, handle: int) -> None:
+        self.marker_existed_at_assign = self._marker.exists()
+        self._real.assign(handle)
+
+
+def test_spawn_holds_suspend_until_resume_and_quotes_args_correctly(tmp_path):
+    """Fix-round-1 smoke test for winproc.spawn() (previously exercised by
+    zero tests). Covers three things at once:
+      - suspend -> job.assign -> resume ordering (Cross-check Conflict 1):
+        the child cannot have run before job.assign() is called;
+      - the child actually resumes and runs to completion (exit code 0);
+      - argv quoting: a space-containing argument must arrive as ONE argv
+        entry in the child, not silently split (fix-round-1 bug 1).
+    """
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import pathlib, sys\n"
+        "marker, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])\n"
+        "marker.write_text('ran', encoding='utf-8')\n"
+        "out.write_text('\\x1f'.join(sys.argv[3:]), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    marker = tmp_path / "marker.txt"
+    out = tmp_path / "out.txt"
+
+    import msvcrt
+    nul_fd = os.open(os.devnull, os.O_RDWR)
+    os.set_inheritable(nul_fd, True)
+    nul_handle = msvcrt.get_osfhandle(nul_fd)
+    stdio = Stdio(stdin=nul_handle, stdout=nul_handle, stderr=nul_handle)
+
+    real_job = Job()  # active_process_limit defaults to 1 (fix-round-1 #6)
+    probe = _ProbeJob(real_job, marker)
+    try:
+        result = spawn(
+            PY, [str(child), str(marker), str(out), "hello world", "plain-arg"],
+            [], None, probe, None, stdio,
+        )
+
+        assert probe.marker_existed_at_assign is False
+
+        deadline = time.time() + 10
+        while time.time() < deadline and not out.exists():
+            time.sleep(0.05)
+        assert marker.exists(), "child never ran: resume/job-assign is broken"
+        assert out.exists()
+        assert out.read_text(encoding="utf-8").split("\x1f") == ["hello world", "plain-arg"]
+
+        WAIT_OBJECT_0 = 0
+        assert kernel32.WaitForSingleObject(result.hprocess, 10_000) == WAIT_OBJECT_0
+        code = wintypes.DWORD()
+        assert kernel32.GetExitCodeProcess(result.hprocess, ctypes.byref(code))
+        assert code.value == 0
+    finally:
+        real_job.close()
+        os.close(nul_fd)

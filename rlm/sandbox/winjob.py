@@ -157,10 +157,17 @@ class Job:
     """One Job Object. `.close()` alone kills the whole process tree
     (KILL_ON_JOB_CLOSE); the completion-port pump only ever *notifies* --
     see the module docstring for why terminate() is never called from it.
+
+    `active_process_limit` defaults to 1: the isolation design depends on a
+    kernel-level ban on the sandboxed process spawning helpers (closes the
+    "spawn a clean interpreter with no audit hook" bypass even if a
+    Python-level control were somehow evaded). Pass a higher value or None
+    explicitly to relax it; tests that need multiple processes in one job
+    do exactly that.
     """
 
     def __init__(self, *, memory_limit_mb: int | None = None,
-                 active_process_limit: int | None = None,
+                 active_process_limit: int | None = 1,
                  per_process_cpu_s: float | None = None,
                  per_job_cpu_s: float | None = None) -> None:
         self._watchers: list[Callable[[str, float], None]] = []
