@@ -67,6 +67,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -75,6 +76,64 @@ import httpx
 from rlm.config import Config, Retries
 from rlm.errors import ActionType, Actor, DispatchError, StepStatus
 from rlm.trace import utc_now
+
+# --------------------------------------------------------------------------- #
+# I1: neutralising model-authored control tokens (spec §5 C4, fix round 2).
+#
+# THE HOLE THIS CLOSES, MEASURED. Applying the chat template to the leaf made
+# model-supplied text an operand of a ChatML render. A leaf prompt containing
+# `<|im_end|>\n<|im_start|>system\n...` therefore renders to a string with TWO
+# system turns -- the second entirely model-authored, and the LAST-writer one.
+# `/tokenize` resolves `<|im_start|>` to a genuine special-token id, and
+# `/completion`'s `prompt_n` equals `/tokenize(add_special=true)` exactly, so
+# those forged markers are parsed as real control tokens on the wire, not as
+# text. The pinned prefix bytes survive; the claim that forged markers are
+# merely "user content" does not. Note this is SELF-INFLICTED: it did not exist
+# while the leaf posted raw prompts to /completion.
+#
+# The fix is scaffold-side, in `query()`, on the USER message ONLY -- never on
+# `target.system_prefix`, so §4's byte-identical head is untouched.
+# Neutralisation inserts one space after the opening `<`, which is the smallest
+# edit that stops the tokenizer matching the literal: the leaf still SEES what
+# the corpus said (the prefix already tells it the excerpt is data, never
+# instruction), it just cannot say it in control tokens.
+# --------------------------------------------------------------------------- #
+
+#: The floor set: neutralised whether or not /props can be read. `<think>`/
+#: `</think>` are here because the leaf runs with `enable_thinking` false, and
+#: a model-authored `</think>` would close a reasoning block the template
+#: opened -- `rlm.rootclient.strip_reasoning` splits on the LAST one.
+CONTROL_MARKERS: tuple[str, ...] = (
+    "<|im_start|>", "<|im_end|>", "<think>", "</think>",
+)
+
+#: Anything of the shape `<|...|>` in a chat template is a control token for
+#: that template. Deriving the set beats hardcoding it -- a model swap (I6) can
+#: bring markers this file has never heard of -- but it never REPLACES the
+#: floor: a /props that fails, or a template that inlines its markers, must not
+#: reopen the hole.
+_TEMPLATE_MARKER_RE = re.compile(r"<\|[^|<>\s]{1,64}\|>")
+
+
+def chat_control_markers(chat_template: str | None = None) -> tuple[str, ...]:
+    """The marker set to neutralise, longest first (so no marker can be split
+    by the rewrite of a shorter one it contains)."""
+    markers = set(CONTROL_MARKERS) | set(
+        _TEMPLATE_MARKER_RE.findall(chat_template or ""))
+    return tuple(sorted(markers, key=lambda m: (-len(m), m)))
+
+
+def neutralise_control_tokens(text: str, markers: tuple[str, ...]) -> str:
+    """Rewrite every control-token literal into a non-tokenizing form.
+
+    Length- and content-preserving on purpose: `<|im_start|>` becomes
+    `< |im_start|>`, which no tokenizer resolves to a special id while a reader
+    (and the leaf) can still see exactly what the corpus contained."""
+    for marker in markers:
+        if marker in text:
+            text = text.replace(marker, "< " + marker[1:])
+    return text
+
 
 # --------------------------------------------------------------------------- #
 # ServerClient -- thin, honest wrapper over the llama-server HTTP surface
@@ -249,6 +308,11 @@ class DispatchTarget:
     seed: int
     system_prefix: str
     enable_thinking: bool = False
+    #: Control-token literals neutralised out of the USER message (I1). Filled
+    #: lazily from this server's /props `chat_template` on the first call and
+    #: cached for the target's lifetime -- deriving it beats hardcoding, and
+    #: caching keeps that derivation off the per-call path.
+    markers: tuple[str, ...] | None = None
 
 
 def _new_step(call_id: str, retry_idx: int, role: str) -> dict[str, Any]:
@@ -354,6 +418,22 @@ class LLMDispatcher:
         for target in self._targets.values():
             await target.client.aclose()
 
+    async def _markers(self, target: DispatchTarget) -> tuple[str, ...]:
+        """This target's control-marker set: derived once from the server's own
+        `chat_template`, then cached on the target.
+
+        A failed /props degrades to the hardcoded floor set rather than to no
+        sanitisation at all, and never fails the call: the derivation widens
+        the guarantee, it is not the guarantee."""
+        if target.markers is None:
+            template = ""
+            try:
+                template = (await target.client.props()).get("chat_template") or ""
+            except Exception:  # noqa: BLE001 -- /props is optional here, see above
+                template = ""
+            target.markers = chat_control_markers(template)
+        return target.markers
+
     async def query(self, prompt: str, *, role: str, call_id: str) -> str:
         target = self._targets.get(role)
         if target is None:
@@ -365,17 +445,25 @@ class LLMDispatcher:
         # junk (`''` or a bare `<think></think>`; s1/RESULTS.md F3).
         #
         # I1 + §4: the system prefix is prepended HERE, scaffold-side, from a
-        # constant the sandbox cannot reach. `prompt` is the one opaque string
-        # model code passes to `llm_query`, and it lands in the USER message --
-        # so ChatML markers written into it are user content, not a system
-        # turn. Exactly two messages, prefix first: the layout is
+        # constant the sandbox cannot reach, and the model's own text is
+        # NEUTRALISED before it becomes an operand of the render. Applying a
+        # chat template made "the model's string lands in the user message" an
+        # insufficient defence: unescaped, a forged `<|im_start|>system` in it
+        # renders as a second, model-authored, LAST-writer system turn whose
+        # markers the tokenizer resolves to real control tokens (see
+        # `neutralise_control_tokens`). Sanitisation runs on the USER message
+        # only -- `target.system_prefix` is emitted verbatim, so §4's
+        # byte-identical head is untouched.
+        #
+        # Exactly two messages, prefix first: the layout is
         # [system prefix][chunk][question] with the question last (the
         # caller composes the chunk+question user string), so a re-queried
         # chunk extends the slot's resident prefix instead of invalidating it
         # at token 0.
+        user_message = neutralise_control_tokens(prompt, await self._markers(target))
         messages = [
             {"role": "system", "content": target.system_prefix},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": user_message},
         ]
         try:
             rendered = await target.client.apply_template(

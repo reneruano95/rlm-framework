@@ -9,6 +9,7 @@ import http.server
 import io
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -140,10 +141,60 @@ def _write_sse_event(handler, ev: dict) -> None:
     handler.wfile.flush()
 
 
-def _naive_tokenize(text: str) -> list[int]:
-    """Whitespace tokenizer -- good enough to make pre-flight admission
-    (token count vs slot capacity) exercisable without a real model."""
-    return list(range(len(text.split()))) if text else []
+# The ChatML control tokens a real Qwen3.6 tokenizer resolves to single
+# SPECIAL token ids (measured on-box: `/tokenize` maps `<|im_start|>` to id 6).
+# The mock models them for one reason: a whitespace tokenizer cannot tell a
+# forged `<|im_start|>` from the words around it, so a mock without this could
+# never certify that scaffold-side sanitisation actually kept a forged marker
+# off the wire -- it would agree with any implementation at all.
+CONTROL_TOKEN_IDS: dict[str, int] = {
+    "<|im_start|>": 6, "<|im_end|>": 7, "<think>": 8, "</think>": 9,
+    # A template-specific marker, so tests can prove the marker set is derived
+    # from /props's chat_template rather than hardcoded in the scaffold.
+    "<|custom_marker|>": 10,
+}
+_CONTROL_SPLIT_RE = re.compile(
+    "(" + "|".join(re.escape(m) for m in CONTROL_TOKEN_IDS) + ")")
+BOS_TOKEN_ID = 1
+
+
+def _naive_tokenize_pieces(text: str, *, add_special: bool = False) -> list[dict]:
+    """Whitespace tokenizer with SPECIAL-token parsing, `with_pieces`-shaped.
+
+    Two real behaviours are modelled, because C4 depends on both:
+      * control-token literals resolve to their own single piece with a
+        special id (llama.cpp parses them in the prompt string, which is what
+        makes an unsanitised forged marker a real control token on the wire);
+      * `add_special` prepends BOS -- the measured +1 between a pre-flight
+        `/tokenize` (default `add_special=false`) and `/completion`'s
+        `prompt_n`.
+    """
+    out: list[dict] = []
+    if add_special:
+        out.append({"id": BOS_TOKEN_ID, "piece": "<s>"})
+    if not text:
+        return out
+    for part in _CONTROL_SPLIT_RE.split(text):
+        if not part:
+            continue
+        if part in CONTROL_TOKEN_IDS:
+            out.append({"id": CONTROL_TOKEN_IDS[part], "piece": part})
+        else:
+            out.extend({"id": 1000 + i, "piece": word}
+                       for i, word in enumerate(part.split()))
+    return out
+
+
+def _naive_tokenize(text: str, *, add_special: bool = False) -> list[int]:
+    return [t["id"] for t in _naive_tokenize_pieces(text, add_special=add_special)]
+
+
+def _tokenize_response(body: dict) -> dict:
+    text = body.get("content", "") or ""
+    pieces = _naive_tokenize_pieces(text, add_special=bool(body.get("add_special")))
+    if body.get("with_pieces"):
+        return {"tokens": pieces}
+    return {"tokens": [t["id"] for t in pieces]}
 
 
 def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
@@ -209,6 +260,12 @@ class MockLlamaServer:
         self.template_bodies: list[dict] = []
         self.rendered_prompts: list[str] = []
         self.completion_bodies: list[dict] = []
+        self.tokenize_bodies: list[dict] = []
+        # /props is what C4 derives its control-marker set from. It is counted
+        # so a test can prove that derivation costs ONE round trip per
+        # dispatcher, not one per call.
+        self.props_count = 0
+        self.chat_template = "mock-template"
         self._concurrent = 0
         self._fail_remaining = 0
         self._lock = threading.Lock()
@@ -223,12 +280,14 @@ class MockLlamaServer:
 
             def do_GET(self):
                 if self.path == "/props":
+                    with outer._lock:
+                        outer.props_count += 1
                     _send_json(self, 200, {
                         "model_path": "mock-leaf.gguf",
                         "total_slots": 8,
                         "default_generation_settings": {"n_ctx": 4096},
                         "build_info": "mock",
-                        "chat_template": "mock-template",
+                        "chat_template": outer.chat_template,
                         "media_marker": "mock-nonce",
                         "is_sleeping": False,
                     })
@@ -239,8 +298,8 @@ class MockLlamaServer:
                 outer.request_paths.append(self.path)
                 if self.path == "/tokenize":
                     body = _read_json_body(self)
-                    text = body.get("content", "") or ""
-                    _send_json(self, 200, {"tokens": _naive_tokenize(text)})
+                    outer.tokenize_bodies.append(body)
+                    _send_json(self, 200, _tokenize_response(body))
                 elif self.path == "/apply-template":
                     body = _read_json_body(self)
                     outer.template_bodies.append(body)
@@ -480,9 +539,7 @@ class FakeRootServer:
                     rendered = _render_chatml(body.get("messages", []), enable_thinking)
                     _send_json(self, 200, {"prompt": rendered})
                 elif self.path == "/tokenize":
-                    body = _read_json_body(self)
-                    text = body.get("content", "") or ""
-                    _send_json(self, 200, {"tokens": _naive_tokenize(text)})
+                    _send_json(self, 200, _tokenize_response(_read_json_body(self)))
                 elif self.path == "/completion":
                     self._handle_completion()
                 else:
