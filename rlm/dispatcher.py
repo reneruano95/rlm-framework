@@ -133,6 +133,17 @@ class ServerClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def slots(self) -> list[dict]:
+        """GET /slots -> one object per slot, each with `is_processing`.
+
+        The §5 C5 quiesce point and §6 crash recovery both need "are all slots
+        idle?", and both read exactly this field. Note the shape: `next_token`
+        is a LIST (one entry per sequence), not an object -- a slot-state
+        parser must index it rather than `.get()` it (recipes §serverapi)."""
+        resp = await self._client.get(f"{self.base_url}/slots")
+        resp.raise_for_status()
+        return resp.json()
+
     async def completion(self, prompt: str, *, n_predict: int, temperature: float,
                           top_p: float, seed: int, stream: bool = True,
                           id_slot: int | None = None, cache_prompt: bool = True,

@@ -12,3 +12,10 @@ __pycache__/
 # Staged sandbox bootstrap (generated copies of child.py + its two imports;
 # the only directory granted to ALL APPLICATION PACKAGES -- see D7)
 sandbox_bootstrap/
+
+# Trace store: the DuckDB file, its blob tree, the parquet bundle, the
+# per-launch server logs and the lifecycle JSONL (trace.db_path /
+# trace.blob_root in config.yaml). Episode records are run output, never
+# source -- and I4 makes them the sole episode truth, not something to
+# reconstruct from a commit.
+traces/

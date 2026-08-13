@@ -52,7 +52,7 @@ import hashlib
 import json
 import os
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -566,6 +566,16 @@ class _EpisodeRun:
                                             name="c5-wall-clock")
             try:
                 await self._turn_loop(conv)
+            except asyncio.CancelledError:
+                # Route the operator abort through D22's kill path HERE, while
+                # the session still exists. Unwinding first and killing later
+                # is not merely untidy: `close()` takes the graceful path when
+                # no kill was issued, and a sandbox wedged by construction
+                # (the exact case someone hits Ctrl-C for) then costs the full
+                # shutdown grace twice -- 30 s measured, before the job is
+                # terminated at all.
+                await self._trip(Outcome.BUDGET_KILL, OPERATOR_ABORT)
+                raise
             finally:
                 watchdog.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -636,7 +646,7 @@ class _EpisodeRun:
                             "error_detail": NO_CELL_EXTRACTED,
                             "observation_view": view},
                            {"root_request_ref": request_blob})
-                self._note_root_usage(rt, window)
+                await self._note_root_usage(rt, window)
                 if self._breach is not None:
                     return
                 conv.append_user(compose_user_message(
@@ -655,6 +665,12 @@ class _EpisodeRun:
                             "error_detail": tracemod.safe_text(str(exc)),
                             "observation_view": None},
                            {"root_request_ref": request_blob})
+                if self._final_emitted:
+                    # The answer crossed the bridge before the sandbox died, so
+                    # it counts -- but the terminal step still has to exist, or
+                    # the trace shows an accepted final with nothing recording
+                    # it and `final_answer_ref` stays NULL.
+                    self._log_final(idx)
                 await self._trip(Outcome.ERROR, reason)
                 return
 
@@ -662,26 +678,30 @@ class _EpisodeRun:
             self._put({**base, "status": StepStatus.OK, "observation_view": view},
                        {"root_request_ref": request_blob,
                         "observation_full_ref": _full_observation(out)})
-            self._note_root_usage(rt, window)
+            # The final is logged BEFORE the window is charged: an answer that
+            # already arrived is not undone by the turn that carried it
+            # crossing the kill fraction.
             if self._final_emitted:
                 self._log_final(idx)
                 return
+            await self._note_root_usage(rt, window)
             if self._breach is not None:
                 return
             conv.append_user(compose_user_message(
                 turn=turn + 1, subcalls_remaining=self._subcalls_remaining(),
                 observation=view))
 
-    def _note_root_usage(self, rt, window: int) -> None:
+    async def _note_root_usage(self, rt, window: int) -> None:
+        """C5 root-window accounting from SERVER-REPORTED usage (§5): at >= the
+        kill fraction of the root window the episode ends deterministically as
+        `context_exhausted`. A multi-turn flail loop can fill 32K well inside
+        the wall clock, and overflow must be an outcome, never an accident."""
         used = (rt.usage.tokens_in or 0) + (rt.usage.tokens_out or 0)
         try:
             self.enforcer.note_root_usage(used, window)
         except BudgetBreach as breach:
-            # Deliberately not awaited: this runs inside the turn loop, which
-            # returns immediately after, and the kill is issued there.
-            self._breach = _Breach(breach.outcome, breach.reason,
-                                    kill_reason=breach.reason)
-            self._finished.set()
+            # D22: ANY BudgetBreach runs the kill path, root-window included.
+            await self._trip(breach.outcome, breach.reason)
 
     def _log_final(self, parent_idx: int) -> None:
         """The terminal step, logged AFTER its parent turn so `action_type`
@@ -740,6 +760,26 @@ class _EpisodeRun:
             },
         })
 
+    def record_abort(self, reason: str) -> None:
+        """Terminal attribution for the operator-abort path, SYNCHRONOUSLY.
+
+        Everything here is deliberately await-free. Once the task is being
+        cancelled, any `await` re-raises `CancelledError` immediately -- so an
+        abort path that awaited would leave the row with a NULL outcome, and
+        the episode would tombstone as `orphaned_at_recovery` at the next
+        startup instead of carrying the `operator_abort` reason §5 promises.
+        `close_episode` is a queue put, not I/O, so it lands regardless; the
+        TraceLogger's owner drains it on `aclose()`.
+
+        The sandbox is already dead by the time this runs: the session context
+        manager kills it on the way out.
+        """
+        if self._breach is None:
+            self._breach = _Breach(Outcome.BUDGET_KILL, reason, kill_reason=reason)
+            self._finished.set()
+        outcome, why = self._outcome()
+        self.trace.close_episode(self.episode_id, outcome, why, self._final_ref)
+
     async def _close(self) -> EpisodeResult:
         outcome, reason = self._outcome()
         self.trace.close_episode(self.episode_id, outcome, reason,
@@ -755,20 +795,23 @@ class _EpisodeRun:
     def _outcome(self) -> tuple[Outcome, str | None]:
         """§6 outcome semantics, in the one place they are decided.
 
-        A breach recorded at the moment it happened always wins: an episode
-        killed for `wall_clock` whose sandbox then dies is `budget_kill`, not
-        `error`. The only exception is a final that was already accepted
-        before the breach -- which cannot happen, since `_on_final_answer`
-        refuses once `_breach` is set.
+        An ACCEPTED final wins outright, and that ordering is load-bearing
+        rather than generous: `_on_final_answer` refuses the moment `_breach`
+        is set, so `_final_emitted` being true means the answer arrived FIRST.
+        Checking the breach first would let a kill that happened strictly after
+        a valid answer -- a wall-clock tick, or the same turn crossing the root
+        window -- erase an episode that had genuinely finished.
+
+        Otherwise a breach recorded at the moment it happened always wins: an
+        episode killed for `wall_clock` whose sandbox then dies is
+        `budget_kill`, not `error`.
         """
-        if self._breach is not None:
-            if self._breach.outcome is Outcome.FAIL:
-                return Outcome.FAIL, self._breach.reason
-            return self._breach.outcome, self._breach.reason
         if self._final_emitted:
             if self.task.check(self._final_value):
                 return Outcome.SUCCESS, None
             return Outcome.FAIL, CHECKER_FAILED
+        if self._breach is not None:
+            return self._breach.outcome, self._breach.reason
         return Outcome.FAIL, NO_FINAL_EMITTED
 
 
@@ -845,12 +888,11 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
         try:
             return await run.execute(manager, root)
         except asyncio.CancelledError:
-            # Operator Ctrl-C routes through C5's path (spec §5): the same
-            # kill, the same drain, an attributable reason -- never a
-            # mid-write death.
+            # Operator Ctrl-C routes through C5's path (spec §5): an
+            # attributable reason, the outcome recorded, never a mid-write
+            # death. See `record_abort` for why nothing here is awaited.
             lifecycle.event("operator_abort", episode_id=run.episode_id)
-            await run._trip(Outcome.BUDGET_KILL, OPERATOR_ABORT)
-            await run._close()
+            run.record_abort(OPERATOR_ABORT)
             raise
     finally:
         if owns_root:

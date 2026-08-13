@@ -133,6 +133,25 @@ async def test_root_that_never_finalises_is_a_fail_with_its_own_reason(episode_e
     assert env.episode_row()["outcome_reason"] == "no_final_emitted"
 
 
+async def test_operator_abort_records_its_outcome_and_never_dies_mid_write(episode_env):
+    """Spec §5 C5: Ctrl-C routes through the same path, with
+    outcome_reason=operator_abort. The row must be CLOSED — an episode left
+    with a NULL outcome tombstones as `orphaned_at_recovery` instead, which
+    would misattribute a deliberate abort as a crash."""
+    import asyncio
+
+    env = episode_env(root_script=["```repl\nwhile True:\n    pass\n```"],
+                      max_wall_clock_s=120)
+    task = asyncio.current_task()
+    asyncio.get_running_loop().call_later(3.0, task.cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await env.run()
+    env._load()
+    assert env.episode_row()["outcome"] == "budget_kill"
+    assert env.episode_row()["outcome_reason"] == "operator_abort"
+    assert env.episode_row()["ended_at"] is not None
+
+
 async def test_checker_failure_is_a_fail_not_an_error(episode_env):
     env = episode_env(root_script=["```repl\nfinal_answer('wrong')\n```"],
                       answer="right")
