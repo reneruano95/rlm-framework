@@ -1,0 +1,5 @@
+# Local toolchain (prebuilt llama.cpp binaries, ~GBs)
+tools/
+
+# Model weights (GGUF, ~tens of GBs)
+models/
