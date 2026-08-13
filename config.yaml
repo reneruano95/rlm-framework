@@ -21,7 +21,13 @@ servers:
     flash_attn: "on"
     ub: 512
     b: 2048
-    extra_flags: ["--no-mmap", "--no-context-shift"]
+    # `-lm none` IS §4's `--no-mmap`: b10375 deprecates `--mmap/-mmp` in favour
+    # of `--load-mode` (R11 flag drift). These are the flags the S1 gate
+    # actually launched with, recorded here so config_snapshot describes the
+    # servers that ran rather than the ones the spec was written against.
+    # `-lv 4` is a launch-contract requirement, not an extra flag: D27's
+    # cache-type assertion parses the log it produces.
+    extra_flags: ["-lm none", "--no-context-shift"]
   leaf:
     model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
     port: 8081
@@ -34,7 +40,7 @@ servers:
     flash_attn: "on"
     ub: 512
     b: 2048
-    extra_flags: ["--no-mmap", "--no-kv-unified", "--cont-batching"]
+    extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching"]
   fallback_leaf: null
 
 scaffold:
@@ -46,6 +52,12 @@ scaffold:
     max_subcalls: 32
     max_wall_clock_s: 900
     max_total_tokens: 1500000
+    # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
+    # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.
+    # The leaf distribution (n=9: 1,1,7,7,7,7,7,31,35) is NOT usable: every
+    # one of those calls came from the untemplated leaf path (finding F3), so
+    # lowering leaf max_predict on it would bake a defect into config. Stays
+    # 512; re-derive at S2 once leaf calls carry a chat template.
     max_predict: { root: 1024, leaf: 512 }
   retries: { max_attempts: 3, backoff_s: [1, 4], per_call_timeout_s: 240 }
   root_window_kill_fraction: 0.90
@@ -53,6 +65,13 @@ scaffold:
     root: { temperature: 0.7, top_p: 0.8, seed: 1 }
     leaf: { temperature: 0.3, top_p: 0.9, seed: 1 }
   prompts:
+    # S1 R1 A/B DECIDED 2026-08-13 (s1/RESULTS.md): root.v1 (tips-only) vs
+    # root.v2 (tips + two worked exemplars), 3 attempts each on both S1
+    # fixtures. Result 6/6 vs 6/6 -- a tie at ceiling, no discrimination. The
+    # pre-registered tie-break keeps the SIMPLER prompt: v2 buys +1,203 root
+    # prompt tokens per episode (1,664 -> 2,867 measured on turn 1) for zero
+    # measured benefit, and a tie is not evidence for the exemplars. v1 stays
+    # pinned; the A/B is CLOSED at two variants (§9 S1 hard cap).
     root: { path: prompts/root.v1.md, sha256: 1c58a5813e7d62cf2721843b01106b2e59cb5734b95a38e660f81229fad6f24f }
     leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76 }
     strategy_templates:

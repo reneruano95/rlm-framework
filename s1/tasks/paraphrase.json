@@ -1,0 +1,31 @@
+{
+  "task_id": "s1-paraphrase",
+  "text": "The Nornisath Chapterhouse has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+  "context": {
+    "path": "D:\\PROJECTS\\rlm-halo-framework\\s1\\tasks\\paraphrase.context.txt"
+  },
+  "context_path": "D:\\PROJECTS\\rlm-halo-framework\\s1\\tasks\\paraphrase.context.txt",
+  "category": "needle",
+  "checker": "contains",
+  "answer": "Zanelade Holkerath",
+  "entity": "the Nornisath Chapterhouse",
+  "seed": 1,
+  "n_words": 37600,
+  "tokenized_len": 64604,
+  "context_chars": 261806,
+  "context_sha256": "5aa4105885601c05a4443989800478ef933c7a86faf533ea0cad4122e76653d6",
+  "needle_text": "[custodial register] the Nornisath Chapterhouse enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Zanelade\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Holkerath\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+  "needle_char_offset": 189068,
+  "needle_fraction_of_chars": 0.7222,
+  "control": {
+    "rule": "keep the longest whole-word prefix with <= n_tokens leaf tokens; drop the rest",
+    "n_tokens": 28000,
+    "path": "D:\\PROJECTS\\rlm-halo-framework\\s1\\tasks\\paraphrase.control.txt",
+    "chars": 112828,
+    "tokens": 27999,
+    "proxy_chars": 111994,
+    "answer_survives_cut": false
+  },
+  "generator_sha256": "b3e21fec50efcb8241fb4f07d01d73d872d0201e0201d056a00e5e7894079e2d",
+  "built_at": "2026-08-13T15:55:04+00:00"
+}
