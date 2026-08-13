@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-# Boundary classes, best first. A cut is snapped to the latest boundary of the
+# Boundary classes, best first. A cut is snapped to the earliest boundary of the
 # best available class inside the tolerance window; ties break to the earliest
 # character offset (deterministic).
 _BOUNDARIES: tuple[re.Pattern[str], ...] = (

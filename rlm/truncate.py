@@ -13,6 +13,11 @@ _MARKER = "[truncated: showing {shown:,} of {total:,} chars]"
 # marker itself is never truncated (property-tested).
 _MARKER_RESERVE = len(_MARKER.format(shown=10**12, total=10**12))
 
+# Smallest cap that can hold the marker without corrupting it. Below this,
+# truncate_view() emits no marker at all (config will later forbid this
+# regime in production; it exists here only to keep the property total).
+MIN_MARKER_CAP = _MARKER_RESERVE
+
 
 @dataclass(frozen=True, slots=True)
 class CellOutput:
@@ -39,17 +44,26 @@ def build_view(out: CellOutput) -> str:
 
 
 def truncate_view(view: str, cap: int) -> str:
-    """Truncate the assembled view to `cap` chars, marker included in the cap."""
+    """Truncate the assembled view to `cap` chars, marker included in the cap.
+
+    Three regimes:
+      cap <= 0                    -> "" (never rely on negative-index slicing).
+      0 < cap < MIN_MARKER_CAP    -> head only, no marker. A truncated marker
+                                      is corrupt and unparseable; an absent one
+                                      is honest.
+      cap >= MIN_MARKER_CAP       -> head + accurate marker (normal case).
+    """
+    if cap <= 0:
+        return ""
     total = len(view)
     if total <= cap:
         return view
-    budget = max(cap - _MARKER_RESERVE, 0)
+    if cap < MIN_MARKER_CAP:
+        return view[:cap]
+    budget = cap - _MARKER_RESERVE
     head = view[:budget]
     marker = _MARKER.format(shown=len(head), total=total)
-    result = head + marker
-    if len(result) > cap:  # pathologically small caps: marker wins, head yields
-        result = result[-cap:] if len(marker) >= cap else head[: cap - len(marker)] + marker
-    return result
+    return head + marker
 
 
 def observation_view(out: CellOutput, cap: int) -> str:
