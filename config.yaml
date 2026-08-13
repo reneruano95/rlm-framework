@@ -2,9 +2,10 @@
 # Validated by rlm.config.Config (pydantic, extra="forbid"). config_snapshot()
 # is the canonical JSON dump of the validated model (stable field order).
 #
-# Prompt files under prompts/ do not exist yet (Task 14 writes them); every
-# `sha256:` below is null, meaning "not yet pinned" — see rlm/config.py's
-# PromptRegistry and Config.pinned_prompt_hashes() docstrings.
+# Prompt files under prompts/ (Task 14) are pinned by sha256 below — see
+# rlm/config.py's PromptRegistry and Config.pinned_prompt_hashes() docstrings.
+# A drifted or deleted file fails load_config() loudly (Config's
+# cross-field validator hashes the file on every load).
 
 servers:
   root:
@@ -52,14 +53,14 @@ scaffold:
     root: { temperature: 0.7, top_p: 0.8, seed: 1 }
     leaf: { temperature: 0.3, top_p: 0.9, seed: 1 }
   prompts:
-    root: { path: prompts/root.v1.md, sha256: null }
-    leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: null }
+    root: { path: prompts/root.v1.md, sha256: 1c58a5813e7d62cf2721843b01106b2e59cb5734b95a38e660f81229fad6f24f }
+    leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76 }
     strategy_templates:
-      needle: { path: prompts/strat-needle.v1.md, sha256: null }
-      aggregation: { path: prompts/strat-aggregation.v1.md, sha256: null }
-      synthesis: { path: prompts/strat-synthesis.v1.md, sha256: null }
-      code_qa: { path: prompts/strat-codeqa.v1.md, sha256: null }
-      default: { path: prompts/strat-default.v1.md, sha256: null }
+      needle: { path: prompts/strat-needle.v1.md, sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d }
+      aggregation: { path: prompts/strat-aggregation.v1.md, sha256: 06613ba00253b9e4d588382efd7460f4620624edafacdc287969142f101651da }
+      synthesis: { path: prompts/strat-synthesis.v1.md, sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c }
+      code_qa: { path: prompts/strat-codeqa.v1.md, sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e }
+      default: { path: prompts/strat-default.v1.md, sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415 }
   leaf_envelope: { enabled: false }
   sandbox:
     # MUST be the real base interpreter, never the venv's Scripts\python.exe

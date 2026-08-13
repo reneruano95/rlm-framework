@@ -91,25 +91,34 @@ def test_cell_extraction_defaults_match_prompt_promise(valid_cfg):
 # --- Controller rulings (beyond the brief's verbatim test block) ---
 #
 # Ruling 1: Config.pinned_prompt_hashes() -> dict[str, str] (path -> pinned
-# sha256); Task 14's tests call it. config.yaml ships with sha256: null for
-# every prompt entry (files don't exist until Task 14), so pinned_prompt_hashes
-# must skip nulls.
+# sha256); Task 14's tests call it. Originally config.yaml shipped sha256:
+# null for every prompt entry (files didn't exist until Task 14), so
+# pinned_prompt_hashes had to skip nulls -- exercised below against an
+# explicitly-unpinned entry now that Task 14 has pinned the real config.yaml.
 # Ruling 2: scaffold.truncation_cap_chars >= rlm.truncate.MIN_MARKER_CAP is a
 # cross-field validator (below that cap the truncator can't emit its marker).
 
 
-def test_pinned_prompt_hashes_skips_unpinned(valid_cfg):
-    assert valid_cfg.pinned_prompt_hashes() == {}
+def test_pinned_prompt_hashes_skips_unpinned(minimal_cfg_dict):
+    # Task 14 pinned every entry in the real config.yaml, so exercise the
+    # skip-when-null behavior directly rather than against valid_cfg.
+    minimal_cfg_dict["scaffold"]["prompts"]["leaf_prefix"]["sha256"] = None
+    cfg = Config.model_validate(minimal_cfg_dict)
+    assert str(cfg.scaffold.prompts.leaf_prefix.path) not in cfg.pinned_prompt_hashes()
+    assert str(cfg.scaffold.prompts.root.path) in cfg.pinned_prompt_hashes()  # still pinned
 
 
 def test_pinned_prompt_hashes_includes_only_pinned(tmp_path, minimal_cfg_dict):
     # A pinned entry must now point at a real, matching file (fix round 1:
     # the Config-level pin check below), so this uses a genuine temp file
-    # rather than a fake sha256 against a nonexistent path.
+    # rather than a fake sha256 against a nonexistent path. leaf_prefix is
+    # explicitly unpinned here so the "only pinned" half of the assertion
+    # is meaningful even though Task 14 pins it in the real config.yaml.
     f = write_prompt(tmp_path, "root.v1.md", "ROOT")
     real_hash = hashlib.sha256(f.read_bytes()).hexdigest()
     minimal_cfg_dict["scaffold"]["prompts"]["root"]["path"] = str(f)
     minimal_cfg_dict["scaffold"]["prompts"]["root"]["sha256"] = real_hash
+    minimal_cfg_dict["scaffold"]["prompts"]["leaf_prefix"]["sha256"] = None
     cfg = Config.model_validate(minimal_cfg_dict)
     hashes = cfg.pinned_prompt_hashes()
     assert hashes[str(cfg.scaffold.prompts.root.path)] == real_hash
@@ -130,19 +139,30 @@ def test_truncation_cap_below_marker_floor_is_refused(minimal_cfg_dict):
 # passed load_config() silently. This is a Config-construction-time check. ---
 
 
-def test_all_null_sha256_validates_fine_even_though_files_dont_exist(valid_cfg):
-    # Proves the no-op property: today's config.yaml pins nothing, and none
-    # of prompts/*.md exist yet (Task 14 writes them) — valid_cfg's successful
-    # construction (via the fixture) already demonstrates this, so also assert
-    # the precondition directly rather than just trusting the fixture.
-    for _, ref in valid_cfg._prompt_refs():
+def test_all_null_sha256_validates_fine_even_though_files_dont_exist(tmp_path, minimal_cfg_dict):
+    # Proves the no-op property: an entry with sha256: null is never checked
+    # for existence, regardless of pinned entries elsewhere. Task 14 pinned
+    # every entry in the real config.yaml (files genuinely exist there now),
+    # so this points every prompt ref at a path under tmp_path that is never
+    # created, with every sha256 explicitly nulled, to exercise the same
+    # "unpinned means unchecked" property the real config.yaml demonstrated
+    # before Task 14 ran.
+    missing = tmp_path / "prompts" / "does-not-exist.md"
+    prompts = minimal_cfg_dict["scaffold"]["prompts"]
+    prompts["root"] = {"path": str(missing), "sha256": None}
+    prompts["leaf_prefix"] = {"path": str(missing), "sha256": None}
+    for cat in prompts["strategy_templates"]:
+        prompts["strategy_templates"][cat] = {"path": str(missing), "sha256": None}
+    cfg = Config.model_validate(minimal_cfg_dict)  # must not raise
+    for _, ref in cfg._prompt_refs():
         assert ref.sha256 is None
         assert not ref.path.exists()
 
 
-def test_pinned_prompt_with_missing_file_is_refused(minimal_cfg_dict):
+def test_pinned_prompt_with_missing_file_is_refused(tmp_path, minimal_cfg_dict):
+    missing = tmp_path / "prompts" / "does-not-exist.md"
+    minimal_cfg_dict["scaffold"]["prompts"]["root"]["path"] = str(missing)
     minimal_cfg_dict["scaffold"]["prompts"]["root"]["sha256"] = "a" * 64
-    # path is left as "prompts/root.v1.md", which does not exist yet.
     with pytest.raises(ConfigError, match="does not exist"):
         Config.model_validate(minimal_cfg_dict)
 
