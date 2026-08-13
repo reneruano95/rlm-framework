@@ -1,4 +1,5 @@
 # tests/test_episode.py
+import asyncio
 import sys
 
 import pytest
@@ -6,6 +7,41 @@ import pytest
 from rlm.errors import Outcome
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+
+
+class _RetryingDispatcher:
+    """A C4 stand-in whose first attempts fail AFTER burning real tokens.
+
+    The shipped `LLMDispatcher` fills token counts only on the OK path (a
+    stream that never yields a final event reports nothing), so no existing
+    fixture can exercise "every attempt's tokens count". A server that times
+    out after prefill genuinely does spend them, which is the case §5 C4's
+    rule is written for.
+    """
+
+    def __init__(self, *, fail_attempts: int = 2, tokens_in: int = 100,
+                 tokens_out: int = 50, parallel: int = 8) -> None:
+        self.semaphore = asyncio.Semaphore(parallel)
+        self.steps: list[dict] = []
+        self._fail = fail_attempts
+        self._tokens_in = tokens_in
+        self._tokens_out = tokens_out
+
+    async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
+        return (len(text) + 3) // 4
+
+    async def query(self, prompt: str, *, role: str, call_id: str) -> str:
+        async with self.semaphore:
+            for attempt in range(self._fail + 1):
+                if attempt == self._fail:
+                    status = "ok"
+                else:
+                    status = "error" if attempt == 0 else "timeout"
+                self.steps.append({
+                    "call_id": call_id, "retry_idx": attempt, "status": status,
+                    "tokens_in": self._tokens_in, "tokens_out": self._tokens_out,
+                })
+            return f"LEAF:{prompt}"
 
 
 async def test_happy_path_emits_final_and_logs_every_step(episode_env):
@@ -64,7 +100,14 @@ async def test_runaway_subcalls_terminate_deterministically(episode_env):
     ], max_subcalls=8)
     res = await env.run()
     assert res.outcome == Outcome.BUDGET_KILL
-    assert len([s for s in env.steps() if s["action_type"] == "llm_call"]) <= 8
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert len(calls) <= 8
+    # `<= 8` alone passes vacuously at zero calls — which is what a broken
+    # dispatch path looks like. The cap is only demonstrated if calls actually
+    # got through, and only attributable if the breach names the right budget.
+    assert len(calls) > 0, "no sub-call was dispatched; the cap proves nothing"
+    assert len({s["call_id"] for s in calls}) == len(calls) <= 8
+    assert res.reason == "max_subcalls"
 
 
 async def test_dry_run_episodes_are_flagged(episode_env):
@@ -133,11 +176,20 @@ async def test_root_that_never_finalises_is_a_fail_with_its_own_reason(episode_e
     assert env.episode_row()["outcome_reason"] == "no_final_emitted"
 
 
+@pytest.mark.timeout(20)
 async def test_operator_abort_records_its_outcome_and_never_dies_mid_write(episode_env):
     """Spec §5 C5: Ctrl-C routes through the same path, with
     outcome_reason=operator_abort. The row must be CLOSED — an episode left
     with a NULL outcome tombstones as `orphaned_at_recovery` instead, which
-    would misattribute a deliberate abort as a crash."""
+    would misattribute a deliberate abort as a crash.
+
+    The 20 s bound is load-bearing, not hygiene. Killing AFTER unwinding the
+    session (rather than inside it) makes `close()` take its graceful path
+    against a sandbox wedged in `while True: pass`, spending the 15 s shutdown
+    grace twice — 33 s measured. Without a bound that regression reads as a
+    slow test rather than as broken kill ordering. Observed here: ~3.0 s, all
+    of it the 3 s delay below.
+    """
     import asyncio
 
     env = episode_env(root_script=["```repl\nwhile True:\n    pass\n```"],
@@ -159,3 +211,74 @@ async def test_checker_failure_is_a_fail_not_an_error(episode_env):
     assert res.outcome == Outcome.FAIL
     assert res.reason == "checker_failed"
     assert res.final_answer == "wrong"
+
+
+def test_every_attempt_of_a_retried_call_is_charged():
+    """§5 C4: a retried call counts ONCE against max_subcalls, but EVERY
+    attempt's tokens count against max_total_tokens. Charging only the
+    successful attempt would make retries free, which is the exact thing that
+    asymmetry exists to prevent."""
+    from rlm.episode import settled_tokens
+
+    attempts = [
+        {"retry_idx": 0, "status": "error", "tokens_in": 100, "tokens_out": 50},
+        {"retry_idx": 1, "status": "timeout", "tokens_in": 100, "tokens_out": 50},
+        {"retry_idx": 2, "status": "ok", "tokens_in": 100, "tokens_out": 50},
+    ]
+    assert settled_tokens(attempts) == (300, 150)          # not (100, 50)
+    # Attempts that reported no usage contribute nothing, so the same
+    # summation is safe on the cancellation path.
+    assert settled_tokens([{"status": "cancelled"}]) == (0, 0)
+    assert settled_tokens([]) == (0, 0)
+
+
+async def test_retried_attempt_tokens_reach_the_budget_and_the_trace(episode_env):
+    """The end-to-end half: two failing attempts that each burned real tokens
+    must push the SECOND call past max_total_tokens. Charging only the
+    successful attempt leaves room and the episode wrongly succeeds."""
+    env = episode_env(
+        root_script=[
+            "```repl\nprint(await llm_query('q'))\nprint(await llm_query('r'))\n```",
+            "```repl\nfinal_answer('x')\n```",
+        ],
+        # call 1 settles 3 x (100+50) = 450; the call-2 reservation is
+        # prompt(1) + max_predict.leaf(512) = 513. 450+513 = 963 > 800 breaches,
+        # while charging only the ok attempt gives 150+513 = 663 and does not.
+        dispatcher=_RetryingDispatcher(fail_attempts=2, tokens_in=100, tokens_out=50),
+        max_total_tokens=800)
+    res = await env.run()
+    assert res.outcome == Outcome.BUDGET_KILL
+    assert res.reason == "max_total_tokens"
+    # C4's other half: every attempt is its own logged step, sharing one
+    # call_id with an incrementing retry_idx.
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert len({s["call_id"] for s in calls}) == 1
+    assert sorted(s["retry_idx"] for s in calls) == [0, 1, 2]
+
+
+@pytest.mark.timeout(60)
+async def test_a_final_that_arrived_first_survives_a_breach_on_the_same_turn(episode_env):
+    """§6 outcome ordering, and the reason it is ordering and not preference.
+
+    The cell submits a valid answer, waits long enough for the frame to cross
+    the bridge and be ACCEPTED, then wedges itself so the wall clock expires on
+    that same turn. Both facts are now true of one episode. The answer was
+    accepted before the breach — `_on_final_answer` refuses once a breach is
+    set, so `_final_emitted` implies it arrived first — and the episode is a
+    success. Checking the breach first would erase an episode that genuinely
+    finished, on nothing but a timer.
+    """
+    env = episode_env(root_script=[
+        "```repl\n"
+        "import asyncio, time\n"
+        "final_answer('42')\n"
+        "await asyncio.sleep(0.5)\n"   # the frame goes out and is accepted here
+        "time.sleep(30)\n"             # then wedge: the wall clock expires
+        "```",
+    ], max_wall_clock_s=3, answer="42")
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert res.final_answer == "42"
+    assert env.episode_row()["outcome"] == "success"
+    assert [s["action_type"] for s in env.steps()][-1] == "final"
+    assert env.episode_row()["final_answer_ref"], "the answer must be stored"

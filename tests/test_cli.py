@@ -1,9 +1,13 @@
 # tests/test_cli.py
+import io
 import sys
+from pathlib import Path
 
 import pytest
 
 from rlm.cli import main
+from rlm.config import load_config
+from rlm.lifecycle import Lifecycle
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 
@@ -29,6 +33,37 @@ def test_run_prints_episode_id_and_outcome(mock_episode_env, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "episode_id" in out and "success" in out
+
+
+def test_run_exports_a_bundle_scoped_to_the_episode(mock_episode_env):
+    """D21: the bundle is written at episode close. Scoped to THIS episode —
+    an unscoped export at every close is O(total episodes) per episode, which
+    makes a multi-hour bench quadratic. It must still be self-contained: a
+    foreign reader joins steps to blobs with no .duckdb in sight."""
+    import duckdb
+
+    main(["run", str(mock_episode_env.task_file), "--config",
+          str(mock_episode_env.config_file)])
+    ep = mock_episode_env.last_episode_id()
+    bundle = mock_episode_env.tmp_path / "bundle" / ep
+    assert bundle.is_dir()
+
+    con = duckdb.connect()          # in-memory: no lock, no live handle
+    try:
+        episodes = con.execute(
+            f"SELECT episode_id, outcome FROM '{bundle / 'episodes.parquet'}'"
+        ).fetchall()
+        assert [(str(e), o) for e, o in episodes] == [(ep, "success")]
+        # Every blob referenced by a step resolves inside this bundle alone.
+        dangling = con.execute(
+            f"SELECT count(*) FROM '{bundle / 'steps.parquet'}' s "
+            f"LEFT JOIN '{bundle / 'blobs.parquet'}' b "
+            f"  ON b.rel = s.observation_full_ref "
+            f"WHERE s.observation_full_ref IS NOT NULL AND b.rel IS NULL"
+        ).fetchone()[0]
+        assert dangling == 0
+    finally:
+        con.close()
 
 
 def test_replay_offline_verifies_hashes_with_no_server(mock_episode_env, capsys):
@@ -90,6 +125,181 @@ def test_replay_online_byte_compares_against_apply_template(mock_episode_env, ca
     assert rc == 0
     assert "apply-template byte-equality: OK" in out
     assert "chat_template sha256: OK" in out
+
+
+def test_replay_uses_the_stored_snapshot_not_the_live_config(mock_episode_env, capsys):
+    """Editing config.yaml after a run must NOT be reported as prompt-assembly
+    drift. `max_subcalls` feeds the user message D26 composes, so re-deriving
+    against the live file would raise a false alarm on the one instrument whose
+    job is spotting real drift — and an alarm that cries wolf is worse than no
+    alarm."""
+    import yaml
+
+    main(["run", str(mock_episode_env.task_file), "--config",
+          str(mock_episode_env.config_file)])
+    ep = mock_episode_env.last_episode_id()
+
+    raw = yaml.safe_load(mock_episode_env.config_file.read_text(encoding="utf-8"))
+    assert raw["scaffold"]["budgets"]["max_subcalls"] != 3
+    raw["scaffold"]["budgets"]["max_subcalls"] = 3
+    raw["scaffold"]["truncation_cap_chars"] = 1500
+    mock_episode_env.config_file.write_text(yaml.safe_dump(raw, sort_keys=False),
+                                             encoding="utf-8")
+
+    rc = main(["replay", ep, "--config", str(mock_episode_env.config_file)])
+    out = capsys.readouterr().out
+    assert rc == 0, "a live-config edit must not read as prompt-assembly drift"
+    assert "message array: OK" in out
+    assert "prompt hashes: OK" in out
+
+
+def test_replay_reports_a_changed_prompt_as_prompt_drift(mock_episode_env, capsys, tmp_path):
+    """A genuine prompt change is real drift — but it must be NAMED as a prompt
+    change, not disguised as assembly drift or as a config error."""
+    import yaml
+
+    main(["run", str(mock_episode_env.task_file), "--config",
+          str(mock_episode_env.config_file)])
+    ep = mock_episode_env.last_episode_id()
+
+    raw = yaml.safe_load(mock_episode_env.config_file.read_text(encoding="utf-8"))
+    edited = tmp_path / "root.edited.md"
+    original = Path(raw["scaffold"]["prompts"]["root"]["path"])
+    edited.write_text(original.read_text(encoding="utf-8") + "\nAN EXTRA LINE.\n",
+                       encoding="utf-8")
+    # Repoint the STORED snapshot's prompt path at the edited file by editing
+    # the episode row, which is what a prompt file changing under a pinned
+    # path amounts to for replay.
+    import json
+
+    import duckdb
+    con = duckdb.connect(str(mock_episode_env.db_path))
+    try:
+        snap = json.loads(con.execute(
+            "SELECT config_snapshot FROM episodes WHERE episode_id = ?",
+            [ep]).fetchone()[0])
+        snap["scaffold"]["prompts"]["root"]["path"] = str(edited)
+        snap["scaffold"]["prompts"]["root"]["sha256"] = None
+        con.execute("UPDATE episodes SET config_snapshot = ? WHERE episode_id = ?",
+                    [json.dumps(snap), ep])
+    finally:
+        con.close()
+
+    rc = main(["replay", ep, "--config", str(mock_episode_env.config_file)])
+    err = capsys.readouterr().err
+    assert rc != 0
+    assert "prompt drift" in err
+    assert "prompt-assembly drift" not in err.split("prompt drift")[0]
+
+
+def test_validate_refuses_when_the_cache_type_is_unverified(valid_config_file, capsys,
+                                                             monkeypatch):
+    """A validation gate that goes green without asserting is worse than no
+    gate: it converts 'never checked' into 'fine'. UNVERIFIED must be a
+    refusal whenever a probe was actually requested."""
+    from rlm import cli
+
+    async def fake_probe(cfg, lifecycle, out):
+        return {"root": {"build_info": "10375 (ba360efe1)"},
+                "leaf": {"build_info": "10375 (ba360efe1)"}}
+
+    monkeypatch.setattr(cli, "_probe_servers", fake_probe)
+    # No launch logs exist, so the cache-type assertion cannot be made.
+    rc = main(["validate", "--config", str(valid_config_file)])
+    captured = capsys.readouterr()
+    assert rc != 0
+    assert "UNVERIFIED" in captured.err
+    assert "Refusing to start" in captured.err
+    # …and the same state is tolerated only when the operator opted out.
+    assert main(["validate", "--config", str(valid_config_file),
+                 "--no-server-probe"]) == 0
+
+
+def _insert_orphan(db_path, *, pid, started_at, episode_id=None):
+    """A NULL-outcome episode row: what a crashed run leaves behind."""
+    import uuid as _uuid
+
+    import duckdb
+
+    from rlm.trace import _schema_sql
+
+    episode_id = episode_id or str(_uuid.uuid4())
+    con = duckdb.connect(str(db_path))
+    try:
+        con.execute(_schema_sql())
+        con.execute(
+            "INSERT INTO episodes (episode_id, task_id, task_hash, started_at, "
+            "sandbox_pid) VALUES (?, ?, ?, ?, ?)",
+            [episode_id, "t", "h", started_at, pid])
+    finally:
+        con.close()
+    return episode_id
+
+
+def test_recovery_reaps_then_quiesces_then_tombstones(mock_episode_env, monkeypatch):
+    """§6 crash recovery. `recover_orphans` is DB-only by design; this is the
+    half the CLI owns, and the ORDER is the contract: a surviving sandbox must
+    be dead and both servers drained BEFORE the row is tombstoned, or recovery
+    tombstones an episode that is still generating."""
+    import datetime as dt
+
+    from rlm import cli
+
+    started = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+    ep = _insert_orphan(mock_episode_env.db_path, pid=4242, started_at=started)
+
+    order = []
+    monkeypatch.setattr(cli.winproc, "kill_if_ours",
+                        lambda pid, at, **kw: order.append(("reap", pid)) or True)
+
+    async def fake_quiesce(cfg, lifecycle):
+        order.append(("quiesce", None))
+
+    monkeypatch.setattr(cli, "_quiesce_all", fake_quiesce)
+    real_tombstone = cli.recover_orphans
+    monkeypatch.setattr(cli, "recover_orphans",
+                        lambda db, lc=None: order.append(("tombstone", None))
+                        or real_tombstone(db, lc))
+
+    cfg = load_config(mock_episode_env.config_file)
+    lifecycle = Lifecycle(None, stream=io.StringIO())
+    assert cli.recover(cfg, lifecycle) == [ep]
+    assert [kind for kind, _ in order] == ["reap", "quiesce", "tombstone"]
+    assert order[0][1] == 4242
+
+    import duckdb
+    con = duckdb.connect(str(mock_episode_env.db_path), read_only=True)
+    try:
+        assert con.execute("SELECT outcome, outcome_reason FROM episodes WHERE "
+                           "episode_id = ?", [ep]).fetchone() == (
+            "error", "orphaned_at_recovery")
+    finally:
+        con.close()
+
+
+def test_recovery_refuses_to_kill_a_reused_pid(mock_episode_env):
+    """The creation-time guard is the whole reason `kill_if_ours` exists: pid
+    reuse is real, and a scaffold that damages an unrelated process during its
+    own cleanup is far worse than one orphaned sandbox. Here the episode claims
+    to have started a year ago, so THIS still-running process (our own pid,
+    created moments ago) must not be touched."""
+    import datetime as dt
+    import os
+
+    from rlm import cli
+
+    long_ago = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(days=365)
+    ep = _insert_orphan(mock_episode_env.db_path, pid=os.getpid(), started_at=long_ago)
+
+    cfg = load_config(mock_episode_env.config_file)
+    lifecycle = Lifecycle(None, stream=io.StringIO())
+    assert cli.recover(cfg, lifecycle) == [ep]
+    # Still alive: the guard refused it. (If it had not, this process would be
+    # gone and there would be no assertion to run.)
+    assert os.getpid() > 0
+    # And it is reported as NOT reaped, so the operator learns the sandbox
+    # outlived its episode rather than being told it was cleaned up.
+    assert cli.winproc.kill_if_ours(os.getpid(), long_ago) is False
 
 
 def test_launch_log_parse_reads_the_real_lv4_lines(tmp_path):

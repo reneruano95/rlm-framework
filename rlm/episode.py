@@ -51,6 +51,7 @@ import contextlib
 import hashlib
 import json
 import os
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -171,6 +172,21 @@ class Task:
 
 def _normalise(value: Any) -> str:
     return " ".join(str(value).split()).casefold()
+
+
+def settled_tokens(attempts: list[dict[str, Any]]) -> tuple[int, int]:
+    """Total tokens one logical call actually cost, summed over EVERY attempt.
+
+    §5 C4's asymmetry, in one place: a retried call counts once against
+    `max_subcalls` (dedupe by `call_id`) but every attempt's tokens count
+    against `max_total_tokens`. Attempts that reported no usage contribute
+    zero, so this is safe to run over a mixed list of ok/error/cancelled
+    attempts.
+
+    Module-level and pure so the arithmetic is testable without an episode.
+    """
+    return (sum(a.get("tokens_in") or 0 for a in attempts),
+            sum(a.get("tokens_out") or 0 for a in attempts))
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,25 +470,38 @@ class _EpisodeRun:
         try:
             answer = await self.dispatcher.query(prompt, role="leaf", call_id=call_id)
         except asyncio.CancelledError:
-            self.enforcer.cancel(reservation)
+            self._settle(reservation, call_id)
             self._log_attempts(call_id, parent, prompt)
             raise
         except Exception:
-            self.enforcer.cancel(reservation)
+            self._settle(reservation, call_id)
             self._log_attempts(call_id, parent, prompt)
             raise
-        ok = self._last_ok_attempt(call_id)
-        self.enforcer.settle(reservation, (ok or {}).get("tokens_in") or 0,
-                              (ok or {}).get("tokens_out") or 0)
+        self._settle(reservation, call_id)
         self._log_attempts(call_id, parent, prompt, answer=answer)
         return answer
 
     def _attempts(self, call_id: str) -> list[dict]:
         return [s for s in self.dispatcher.steps if s.get("call_id") == call_id]
 
-    def _last_ok_attempt(self, call_id: str) -> dict | None:
-        oks = [s for s in self._attempts(call_id) if s.get("status") == StepStatus.OK]
-        return oks[-1] if oks else None
+    def _settle(self, reservation, call_id: str) -> None:
+        """Release the hold and charge what the call ACTUALLY cost.
+
+        §5 C4: a retried call counts ONCE against `max_subcalls`, but EVERY
+        attempt's tokens count against `max_total_tokens` -- the whole point of
+        that asymmetry is that retries are not free. Charging only the
+        successful attempt would under-bill a call that failed twice by two
+        attempts' prefill, which is exactly the case the rule exists for.
+
+        The same summation runs on every exit path, success or not: a failed or
+        timed-out attempt that got far enough to report usage spent those tokens
+        server-side whether or not anyone got an answer. When no attempt
+        reported any usage (the ordinary cancellation case -- a closed stream
+        never yields a final event) this settles zero, which is precisely
+        `cancel()`'s effect, so the two paths need not diverge.
+        """
+        tokens_in, tokens_out = settled_tokens(self._attempts(call_id))
+        self.enforcer.settle(reservation, tokens_in, tokens_out)
 
     def _log_attempts(self, call_id: str, parent: int | None, prompt: str,
                        answer: str | None = None) -> None:
@@ -510,7 +539,14 @@ class _EpisodeRun:
         self._final_emitted = True
         self._final_value = value
         self._final_parent = self._parent_idx
-        self._finished.set()
+        # DELIBERATELY does not set `_finished`. That event stops the
+        # wall-clock watchdog, and the cell that submitted this answer is
+        # still running -- `final_answer` is synchronous and returns into the
+        # cell. A cell that submits and then loops forever would otherwise
+        # leave the episode with no clock at all, waiting on an `exec_cell`
+        # that never returns: precisely the hang C5 exists to make impossible.
+        # The turn loop returns on its own once the cell finishes; the
+        # watchdog is cancelled there.
 
     # -- the episode ---------------------------------------------------------- #
 
@@ -518,6 +554,14 @@ class _EpisodeRun:
         cfg = self.cfg
         loop = asyncio.get_running_loop()
 
+        # The clock starts BEFORE C2, not after: chunking does O(log n)
+        # `/tokenize` round trips per boundary against the leaf server, and on
+        # a multi-megabyte corpus that is real wall time the episode spent. Ran
+        # untimed, it would be work the wall-clock budget cannot see and the
+        # trace cannot attribute -- so it is charged, and its duration is
+        # recorded so the cost stops being a guess.
+        self.enforcer.start_clock()
+        t_chunk = time.perf_counter()
         context_text = load_context(self.task.context)
         counter = _TokenCounter(self.dispatcher, loop)
         # Off-loop: every count is an HTTP round trip on the real leaf.
@@ -527,6 +571,11 @@ class _EpisodeRun:
                                  snap_to_boundary=cfg.scaffold.chunk.snap_to_boundary,
                                  snap_tolerance=cfg.scaffold.chunk.snap_tolerance)
         chunks = await asyncio.to_thread(split, context_text, chunk_cfg, counter)
+        # Recorded in the trace (via config_snapshot), not the lifecycle log:
+        # this is episode data, and I4 makes the trace store its sole home. No
+        # allow-listed lifecycle kind covers it, and inventing one would make
+        # the log the second source of truth it exists not to be.
+        chunk_ms = round((time.perf_counter() - t_chunk) * 1000, 1)
 
         async with manager.session(self.episode_id, cfg) as session:
             self.session = session
@@ -547,7 +596,7 @@ class _EpisodeRun:
                 "dry_run": cfg.scaffold.dispatcher == "mock",
                 "scaffold_instance_id": self.scaffold_instance_id,
                 "sandbox_pid": session.pid,
-                "config_snapshot": self._snapshot(context_text, chunks),
+                "config_snapshot": self._snapshot(context_text, chunks, chunk_ms),
                 "scaffold_git_sha": self.scaffold_git_sha,
                 "benchmark_version": self.benchmark_version,
             })
@@ -561,7 +610,9 @@ class _EpisodeRun:
 
             conv = RootConversation(root, cfg,
                                      system=self.registry.render_root(self.task.category))
-            self.enforcer.start_clock()
+            # The clock is already running (it started before C2 chunking); the
+            # watchdog is what makes it enforceable against a cell that never
+            # returns.
             watchdog = asyncio.create_task(self._wall_clock_watchdog(),
                                             name="c5-wall-clock")
             try:
@@ -695,7 +746,16 @@ class _EpisodeRun:
         """C5 root-window accounting from SERVER-REPORTED usage (§5): at >= the
         kill fraction of the root window the episode ends deterministically as
         `context_exhausted`. A multi-turn flail loop can fill 32K well inside
-        the wall clock, and overflow must be an outcome, never an accident."""
+        the wall clock, and overflow must be an outcome, never an accident.
+
+        Root turns are NOT admitted through `enforcer.admit()`, so root tokens
+        do not count against `max_total_tokens`. Adjudicated as correct, not a
+        gap: §5 scopes that budget to dispatch admission, the root's own spend
+        is already bounded by the 32K window plus this 90% kill, and §8's cost
+        scorecard reads `steps.tokens_in`/`tokens_out` -- which every root turn
+        writes -- so cost reporting stays complete. Admitting root turns would
+        also charge each one against `max_subcalls`, which counts any unseen
+        `call_id`."""
         used = (rt.usage.tokens_in or 0) + (rt.usage.tokens_out or 0)
         try:
             self.enforcer.note_root_usage(used, window)
@@ -735,7 +795,8 @@ class _EpisodeRun:
         return max(0, self.cfg.scaffold.budgets.max_subcalls
                    - self.enforcer.subcalls_used)
 
-    def _snapshot(self, context_text: str, chunks: list[str]) -> dict:
+    def _snapshot(self, context_text: str, chunks: list[str],
+                   chunk_ms: float = 0.0) -> dict:
         """§6 config_snapshot: the validated config plus everything about THIS
         run that a replay or a scoring query needs and the schema has no column
         for -- prompt hashes, the `/props` responses, the chat-template hash,
@@ -757,6 +818,10 @@ class _EpisodeRun:
                 "answer": self.task.answer,
                 "context_chars": len(context_text),
                 "chunks": len(chunks),
+                # C2's real cost: O(log n) /tokenize round trips per boundary.
+                # Charged against the wall clock (start_clock precedes it) and
+                # recorded here so it is measurable rather than guessed at.
+                "chunk_ms": chunk_ms,
             },
         })
 

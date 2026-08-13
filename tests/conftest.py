@@ -558,6 +558,8 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
         raw["scaffold"]["budgets"]["max_wall_clock_s"] = over["max_wall_clock_s"]
     if over.get("max_subcalls") is not None:
         raw["scaffold"]["budgets"]["max_subcalls"] = over["max_subcalls"]
+    if over.get("max_total_tokens") is not None:
+        raw["scaffold"]["budgets"]["max_total_tokens"] = over["max_total_tokens"]
     return raw
 
 
@@ -641,20 +643,21 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
 
     def factory(*, root_script=None, context="", task_text="What is the answer?",
                 category="default", answer=None, truncation_cap=None,
-                max_wall_clock_s=None, max_subcalls=None, max_turns=None,
-                leaf_fixtures=None):
+                max_wall_clock_s=None, max_subcalls=None, max_total_tokens=None,
+                max_turns=None, leaf_fixtures=None, dispatcher=None):
         server = FakeRootServer(minimal_cfg_dict, script=root_script)
         raw = _episode_cfg_dict(minimal_cfg_dict, tmp_path=tmp_path,
                                  root_port=server.port, truncation_cap=truncation_cap,
                                  max_wall_clock_s=max_wall_clock_s,
-                                 max_subcalls=max_subcalls)
+                                 max_subcalls=max_subcalls,
+                                 max_total_tokens=max_total_tokens)
         cfg = Config.model_validate(raw)
         task = Task(task_id="fixture-task", text=task_text, context=context,
                     category=category, answer=answer)
         env = _EpisodeEnv(
             cfg=cfg, task=task,
-            dispatcher=CannedDispatcher(leaf_fixtures,
-                                         parallel=cfg.scaffold.dispatch_concurrency),
+            dispatcher=dispatcher or CannedDispatcher(
+                leaf_fixtures, parallel=cfg.scaffold.dispatch_concurrency),
             server=server,
             run_kwargs={"max_turns": max_turns},
         )

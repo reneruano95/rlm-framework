@@ -18,6 +18,11 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "hypothesis>=6.112",
+    # Latency regressions here are correctness regressions: an operator abort
+    # that unwinds before killing takes 30 s (the shutdown grace, twice)
+    # instead of returning immediately, and without a bound that failure mode
+    # reads as "slow test" rather than "the kill ordering broke".
+    "pytest-timeout>=2.3",
 ]
 
 [tool.pytest.ini_options]

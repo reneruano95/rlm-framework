@@ -45,7 +45,7 @@ from typing import Any
 
 import duckdb
 
-from rlm.config import Config, load_config
+from rlm.config import Config, PromptRegistry, load_config
 from rlm.dispatcher import LLMDispatcher, MockDispatcher, ServerClient
 from rlm.episode import (
     Task,
@@ -125,6 +125,12 @@ def log_is_current(parsed: dict[str, Any], props: dict | None) -> bool:
     only trusted when its build line matches the live `/props` build_info. With
     no live probe to compare against there is nothing to cross-check, and the
     caller must say "unverified" rather than "OK".
+
+    Both halves of the build line must match when both were parsed. Accepting
+    either alone is too weak to be worth having: build NUMBERS increment, so a
+    stale log from the previous build of the same commit (or a rebuild at the
+    same number from a different commit) would pass on the half that happens to
+    agree. The check exists to catch exactly that kind of near-miss.
     """
     if not props:
         return False
@@ -133,7 +139,7 @@ def log_is_current(parsed: dict[str, Any], props: dict | None) -> bool:
     number = parsed.get("build_number")
     if not build_info or not (commit or number):
         return False
-    return bool((commit and commit in build_info) or (number and number in build_info))
+    return all(part in build_info for part in (commit, number) if part)
 
 
 # --------------------------------------------------------------------------- #
@@ -337,25 +343,43 @@ async def _probe_servers(cfg: Config, lifecycle: Lifecycle, out) -> dict[str, di
     return probed
 
 
-def _check_cache_types(cfg: Config, probed: dict[str, dict], out, err) -> bool:
+def _check_cache_types(cfg: Config, probed: dict[str, dict], out, err,
+                        *, probe_ran: bool) -> bool:
     """D27's half of the §4 handshake: cache types + flash-attn, from the
     launch log, cross-checked against the live build so a stale log cannot
-    satisfy the assertion. Reports UNVERIFIED rather than passing when the log
-    is absent, unparseable, or cannot be tied to a running server."""
+    satisfy the assertion.
+
+    UNVERIFIED IS A FAILURE, not a note. A validation gate that goes green
+    without asserting anything is worse than no gate: it converts "we never
+    checked the KV cache types" into "the KV cache types are fine" on the one
+    surface an operator runs specifically to be told otherwise. The single
+    exception is `--no-server-probe`, where the caller has explicitly asked for
+    config-and-isolation only and there is no live build to tie a log to;
+    `probe_ran` carries that distinction rather than letting an empty `probed`
+    dict stand in for it.
+    """
+    ok = True
     for role in ("root", "leaf"):
         server_cfg = getattr(cfg.servers, role)
         parsed = parse_launch_log(server_cfg.log_path)
+        unverified = None
         if not parsed:
-            print(f"{role} KV cache type: UNVERIFIED — no parseable `-lv 4` "
-                  f"launch log at {server_cfg.log_path}. D27: /props cannot "
-                  f"report cache types, so nothing here has been checked.",
-                  file=out)
-            continue
-        if not log_is_current(parsed, probed.get(role)):
-            print(f"{role} KV cache type: UNVERIFIED — the launch log at "
-                  f"{server_cfg.log_path} could not be tied to a live server "
-                  f"build, and a stale log from a previous launch would satisfy "
-                  f"this check while the running server does not.", file=out)
+            unverified = (f"no parseable `-lv 4` launch log at "
+                          f"{server_cfg.log_path}. D27: /props cannot report "
+                          f"cache types, so nothing here has been checked")
+        elif not log_is_current(parsed, probed.get(role)):
+            unverified = (f"the launch log at {server_cfg.log_path} could not be "
+                          f"tied to a live server build, and a stale log from a "
+                          f"previous launch would satisfy this check while the "
+                          f"running server does not")
+        if unverified is not None:
+            if not probe_ran:
+                print(f"{role} KV cache type: UNVERIFIED — {unverified} "
+                      f"(not a failure: --no-server-probe was requested)", file=out)
+                continue
+            print(f"{role} KV cache type: UNVERIFIED — {unverified}. Refusing to "
+                  f"start: this gate cannot pass without asserting.", file=err)
+            ok = False
             continue
         want = server_cfg.cache_type.lower()
         bad = {k: parsed.get(k) for k in ("type_k", "type_v")
@@ -368,10 +392,11 @@ def _check_cache_types(cfg: Config, probed: dict[str, dict], out, err) -> bool:
                   f"{bad}, config says cache_type={server_cfg.cache_type} "
                   f"flash_attn={server_cfg.flash_attn}. Quantized V-cache "
                   f"hard-requires flash attention; refusing to start.", file=err)
-            return False
+            ok = False
+            continue
         print(f"{role} KV cache type: OK (K/V {parsed['type_k']}, flash_attn "
               f"{parsed['flash_attn']}, from the launch log)", file=out)
-    return True
+    return ok
 
 
 def cmd_validate(args) -> int:
@@ -407,7 +432,8 @@ def cmd_validate(args) -> int:
 
         # Runs AFTER the probe: the launch log is only trustworthy when it can
         # be tied to the build that is actually answering (D27).
-        if not _check_cache_types(cfg, probed, out, err):
+        if not _check_cache_types(cfg, probed, out, err,
+                                   probe_ran=not args.no_server_probe):
             lifecycle.event("config_refused", error="kv cache type mismatch")
             return EXIT_REFUSED
 
@@ -446,8 +472,19 @@ async def _run_one(cfg: Config, task: Task, lifecycle: Lifecycle, task_path: Pat
             # D21. `export_bundle` reads what is COMMITTED, so the drain is
             # not optional: run_episode drains before returning, and nothing
             # is enqueued between there and here.
+            #
+            # Scoped to THIS episode, not the whole store: an unscoped export
+            # at every close is O(total episodes) per episode, which turns a
+            # multi-hour bench into quadratic work for a bundle nobody asked
+            # to be re-written. The episode_id is a UUID this process just
+            # minted, so interpolating it into `run_filter_sql` (which DuckDB
+            # will not take as a bound parameter in a COPY) cannot carry
+            # anything a task file influenced.
             await trace.drain()
-            trace.export_bundle(Path(cfg.trace.db_path).parent / "bundle")
+            bundles = Path(cfg.trace.db_path).parent / "bundle"
+            trace.export_bundle(bundles / result.episode_id,
+                                 f"episode_id = '{uuid.UUID(result.episode_id)}'",
+                                 blob_scope=str(uuid.UUID(result.episode_id)))
         return result
     finally:
         await trace.aclose()
@@ -523,18 +560,75 @@ def _read_episode(cfg: Config, episode_id: str) -> tuple[dict, list[dict]]:
     return episode, steps
 
 
-def _rederive_messages(cfg: Config, episode: dict, steps: list[dict],
+class PromptDrift(RlmError):
+    """A prompt file changed since the episode ran.
+
+    Kept distinct from assembly drift on purpose: they have different causes
+    and different responses, and collapsing them makes the assembly canary
+    useless (see `episode_config`).
+    """
+
+
+def episode_config(snapshot: dict) -> tuple[Config, Any]:
+    """Rebuild the config THIS EPISODE ACTUALLY RAN UNDER, from its own snapshot.
+
+    Replay must never re-derive against the LIVE config file. Bumping
+    `max_subcalls` or editing a prompt would otherwise change the re-derived
+    message array and be reported as prompt-ASSEMBLY drift -- a false alarm on
+    the one instrument whose entire job is detecting real drift, and the fastest
+    way to teach an operator to ignore it. `config_snapshot` is the canonical
+    dump of the validated model precisely so this is possible.
+
+    Prompt changes are surfaced SEPARATELY, as `PromptDrift`. The registry here
+    is built UNPINNED over the episode's own prompt paths, so a changed file is
+    reported rather than thrown: the pinned path (`Config`'s own validator)
+    raises a sha256 mismatch that reads like a config error, which buries the
+    finding instead of naming it.
+
+    The live config still decides WHERE to read from (`trace.db_path`,
+    `trace.blob_root`) and which server to talk to; the snapshot decides what
+    everything MEANT.
+    """
+    fields = {k: v for k, v in snapshot.items() if k in Config.model_fields}
+    if "scaffold" not in fields:
+        raise ConfigError("config_snapshot carries no scaffold block; this "
+                          "episode predates snapshot-based replay")
+    prompts = (fields["scaffold"].get("prompts") or {})
+    try:
+        registry = PromptRegistry.from_files(
+            root_path=Path(prompts["root"]["path"]),
+            leaf_prefix_path=Path(prompts["leaf_prefix"]["path"]),
+            strategy_paths={cat: Path(ref["path"])
+                            for cat, ref in prompts["strategy_templates"].items()},
+        ).load()
+    except KeyError as exc:
+        raise ConfigError(f"config_snapshot has no prompt path for {exc}") from exc
+
+    recorded = snapshot.get("prompt_hashes") or {}
+    if recorded and registry.hashes() != recorded:
+        now = registry.hashes()
+        differing = sorted(k for k in set(recorded) | set(now)
+                           if recorded.get(k) != now.get(k))
+        raise PromptDrift(
+            f"{len(differing)} prompt hash(es) changed since this episode ran: "
+            f"{differing}. The message array cannot be re-derived against prompt "
+            f"text the episode never saw — this is a prompt change, not "
+            f"prompt-assembly drift.")
+    return Config.model_validate(fields), registry
+
+
+def _rederive_messages(cfg: Config, registry, episode: dict, steps: list[dict],
                         blob_root: Path) -> list[list[dict]]:
     """Rebuild, from the trace ALONE, the message array sent at every root turn.
 
-    Nothing here reads the lifecycle log, the task file, or a server -- that is
-    the S3 gate condition, and it is why `compose_user_message` is a pure
-    function of trace-recoverable values and why the task's instruction text is
-    carried in `config_snapshot`.
+    `cfg`/`registry` are the EPISODE's (from `episode_config`), never the live
+    config's. Nothing here reads the lifecycle log, the task file, or a server
+    -- that is the S3 gate condition, and it is why `compose_user_message` is a
+    pure function of trace-recoverable values and why the task's instruction
+    text is carried in `config_snapshot`.
     """
     snapshot = episode.get("config_snapshot") or {}
     task_meta = snapshot.get("task") or {}
-    registry = cfg.prompt_registry().load()
     system = registry.render_root(task_meta.get("category", "default"))
     max_subcalls = cfg.scaffold.budgets.max_subcalls
 
@@ -606,8 +700,11 @@ def _render_transcript(cfg: Config, steps: list[dict], out) -> None:
             print(f"\n[{step['step_idx']}] FINAL: {step['action_payload']!r}", file=out)
 
 
-async def _verify_online(cfg: Config, episode: dict, arrays: list[list[dict]],
-                          rendered: list[str], out, err) -> bool:
+async def _verify_online(cfg: Config, ep_cfg: Config, episode: dict,
+                          arrays: list[list[dict]], rendered: list[str],
+                          out, err) -> bool:
+    """Mode (ii). `cfg` is the LIVE config (which server to ask); `ep_cfg` is
+    the episode's (how its render was parameterised)."""
     client = ServerClient(f"http://127.0.0.1:{cfg.servers.root.port}", timeout=60.0)
     try:
         props = await client.props()
@@ -623,7 +720,7 @@ async def _verify_online(cfg: Config, episode: dict, arrays: list[list[dict]],
             live = await client.apply_template(
                 messages,
                 chat_template_kwargs={
-                    "enable_thinking": cfg.scaffold.root.enable_thinking})
+                    "enable_thinking": ep_cfg.scaffold.root.enable_thinking})
             if live != stored:
                 print(f"apply-template drift at turn {n}: the live server renders "
                       f"{len(live)} bytes, the trace stored {len(stored)}", file=err)
@@ -677,11 +774,23 @@ def cmd_replay(args) -> int:
         return EXIT_MISMATCH
     print(f"root_view_hash: OK ({len(checked)} root turns rehashed offline)", file=out)
 
-    # (i, second half) The prompt-assembly canary.
+    # (i, second half) The prompt-assembly canary, re-derived against the
+    # config THIS EPISODE ran under -- never the live file (see episode_config).
+    try:
+        ep_cfg, ep_registry = episode_config(episode.get("config_snapshot") or {})
+    except PromptDrift as exc:
+        print(f"prompt drift: {exc}", file=err)
+        return EXIT_MISMATCH
+    except ConfigError as exc:
+        print(f"config_snapshot could not be rebuilt: {exc}", file=err)
+        return EXIT_MISMATCH
+    print("prompt hashes: OK (every prompt matches what this episode ran)",
+          file=out)
+
     turns = [s for s in steps
              if s["action_type"] == ActionType.REPL_EXEC and s["root_request_ref"]]
     try:
-        derived = _rederive_messages(cfg, episode, steps, blob_root)
+        derived = _rederive_messages(ep_cfg, ep_registry, episode, steps, blob_root)
     except (ConfigError, OSError, KeyError, ValueError) as exc:
         print(f"message array: could not be re-derived from the trace: {exc}",
               file=err)
@@ -701,10 +810,13 @@ def cmd_replay(args) -> int:
 
     if args.online:
         rendered = [_rendered(blob_root, s["root_request_ref"]) for s in turns]
-        if not asyncio.run(_verify_online(cfg, episode, derived, rendered, out, err)):
+        # Live config says WHERE the server is; the episode's says how its
+        # render was parameterised (enable_thinking shaped the stored bytes).
+        if not asyncio.run(_verify_online(cfg, ep_cfg, episode, derived, rendered,
+                                           out, err)):
             return EXIT_MISMATCH
 
-    _render_transcript(cfg, steps, out)
+    _render_transcript(ep_cfg, steps, out)
     return EXIT_OK
 
 

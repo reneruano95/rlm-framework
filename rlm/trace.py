@@ -270,7 +270,8 @@ class TraceLogger:
     def read_blob(self, rel: str) -> bytes:
         return (self.blob_root / rel).read_bytes()
 
-    def export_bundle(self, dest: str | os.PathLike, run_filter_sql: str = "TRUE") -> pathlib.Path:
+    def export_bundle(self, dest: str | os.PathLike, run_filter_sql: str = "TRUE",
+                       *, blob_scope: str | None = None) -> pathlib.Path:
         """The append-only bundle external readers get: a second process
         cannot open the live .duckdb file at all, so this -- episodes.parquet
         + steps.parquet + blobs.parquet -- is the only way anyone else ever
@@ -290,6 +291,14 @@ class TraceLogger:
         close per D21, where a perpetually-one-drain-behind bundle would
         make external monitoring of a multi-hour bench read wrong outcomes.
 
+        `blob_scope` narrows the blob half to ONE episode's directory. Without
+        it the blob glob walks every episode on disk no matter how tight
+        `run_filter_sql` is -- so a per-episode bundle would still pay O(all
+        blobs), which is the expensive dimension and the whole reason to
+        scope. Blob `rel` paths are unchanged either way (they stay relative
+        to `blob_root`), so a scoped bundle joins to `steps.parquet` exactly
+        like a full one.
+
         SQL INJECTION CAVEAT: `run_filter_sql` is interpolated directly into
         the COPY statements below, not parameterised -- DuckDB's COPY/FROM
         clauses do not accept bound parameters in this position. Fine for a
@@ -301,7 +310,7 @@ class TraceLogger:
         out.mkdir(parents=True, exist_ok=True)
         con = self._con
         assert con is not None, "TraceLogger not started"
-        blob_glob = (self.blob_root / "*" / "*").as_posix()
+        blob_glob = (self.blob_root / (blob_scope or "*") / "*").as_posix()
         root_re = self.blob_root.as_posix().replace("\\", "/")
         cur = con.cursor()
         try:
