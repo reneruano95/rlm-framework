@@ -22,6 +22,10 @@ ISOLATED = [
     "sandbox/winjob.py",
     "sandbox/winproc.py",
     "bridge.py",
+    # The process manager the episode runner drives for a §5 C4 rotation. It
+    # owns a PROCESS, never a connection: readiness arrives as an injected
+    # health probe, so C4 stays the only module that speaks to a server.
+    "serverproc.py",
 ]
 FORBIDDEN_ROOTS = {"httpx", "requests", "urllib", "aiohttp", "socket", "http"}
 FORBIDDEN_RLM = {"rlm.dispatcher", "rlm.rootclient"}

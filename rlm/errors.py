@@ -74,6 +74,17 @@ class SlotMismatch(DispatchError):
     served it may have held other documents."""
 
 
+class ServerRotationError(RlmError):
+    """A planned slot-pool rotation could not be carried out (spec §5 C4).
+
+    Raised by whoever owns the server process — never by C4, which starts and
+    stops nothing. It is an error rather than a warning because the only
+    alternative to a completed rotation is reusing a slot that has held another
+    document, which is R13's defect: the scaffold must fail the episode, not
+    carry on believing its pool is virgin.
+    """
+
+
 class BudgetBreach(RlmError):
     """A C5 budget was breached. Carries the outcome the episode must record."""
 
