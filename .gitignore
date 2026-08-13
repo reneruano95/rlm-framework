@@ -5,3 +5,6 @@ tools/
 models/
 __pycache__/
 *.pyc
+
+# SDD workspace (scratch, per-plan)
+.superpowers/
