@@ -395,6 +395,66 @@ async def test_leaf_enable_thinking_true_reaches_the_template(mock_server, minim
 
 
 # --------------------------------------------------------------------------- #
+# The pre-registered `chunk=` kwarg (fix round 2, §4 layout / §7 #3b).
+#
+# Measured: a chunk-first re-query reported `cache_n=546`; the SAME chunk with
+# the question moved to the front reported `cache_n=0`, twice. With one opaque
+# string, §4's [prefix][chunk][question] layout -- and so S2 gate (b)'s >80%
+# reuse -- depended entirely on the root model's formatting discipline, which
+# makes the gate a test of prompt compliance rather than of the scaffold.
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_scaffold_composes_chunk_then_question(mock_server):
+    """C4 composes the user message itself, exactly as it already composes the
+    system prefix (I1) -- the model supplies two fields, not one string."""
+    d = mock_server.dispatcher()
+    await d.query("What is the answer?", role="leaf", call_id="c1",
+                   chunk="CHUNK TEXT")
+
+    assert mock_server.template_bodies[0]["messages"][1]["content"] == (
+        "CHUNK TEXT\n\nWhat is the answer?")
+    assert d.last_step["layout"] == "chunk_question"
+
+
+async def test_the_single_string_form_still_works(mock_server):
+    """`chunk=None` is today's behaviour, byte for byte: the caller composed it
+    and the scaffold has no way to know where the chunk ended."""
+    d = mock_server.dispatcher()
+    await d.query("CHUNK TEXT\n\nWhat is the answer?", role="leaf", call_id="c1")
+
+    assert mock_server.template_bodies[0]["messages"][1]["content"] == (
+        "CHUNK TEXT\n\nWhat is the answer?")
+    assert d.last_step["layout"] == "question_only"
+
+
+async def test_two_questions_about_one_chunk_share_the_head_through_the_chunk(
+        mock_server):
+    """The property the layout exists for: with `chunk=`, the scaffold GUARANTEES
+    that two questions about one chunk share a prefix that runs through the whole
+    chunk, so the second re-query extends the slot's resident cache instead of
+    invalidating it at token 0."""
+    d = mock_server.dispatcher()
+    chunk = "CHUNK TEXT, several words long, held in a slot"
+    await d.query("First question?", role="leaf", call_id="c1", chunk=chunk)
+    await d.query("Second question?", role="leaf", call_id="c2", chunk=chunk)
+
+    r1, r2 = mock_server.rendered_prompts
+    shared = os.path.commonprefix([r1, r2])
+    assert chunk in shared, "the chunk is not inside the shared prefix"
+    assert "First question?" not in shared
+
+
+async def test_the_layout_is_recorded_per_attempt(mock_server):
+    """"Record which form was used" -- on EVERY attempt, so a gate scoring only
+    `chunk=` calls does not silently drop a retried one."""
+    mock_server.fail_times(2)
+    d = mock_server.dispatcher()
+    await d.query("Q?", role="leaf", call_id="c1", chunk="CHUNK")
+    assert [s["layout"] for s in d.steps] == ["chunk_question"] * 3
+
+
+# --------------------------------------------------------------------------- #
 # The pre-flight's off-by-one (fix round 2).
 #
 # `query()` tokenized the rendered string with /tokenize's default

@@ -397,14 +397,25 @@ def _install_asyncio_stubs() -> None:
 _FINAL_TASK_NAME = "rlm-final-answer"
 
 
-async def _llm_query_template(prompt, role="leaf", **kw):
-    """Ask a sub-model. The only way out of the sandbox.
+async def _llm_query_template(question, *, chunk=None, role="leaf"):
+    """Ask a sub-model about one excerpt. The only way out of the sandbox.
+
+    Pass the excerpt as `chunk=` and the question positionally. The scaffold
+    composes the sub-model's prompt as [system prefix][chunk][question] --
+    question LAST -- so a chunk asked twice is prefilled once and reused. That
+    layout is enforced on the scaffold's side of this pipe, not left to how
+    this call site happens to concatenate its string.
+
+    `chunk` may be omitted, in which case `question` is the whole prompt and
+    the scaffold has no way to know where the excerpt ended.
 
     C4's semaphore, /tokenize pre-flight, retries, timeouts, budget admission
     and step logging all live on the OTHER side of this pipe, where model code
-    cannot reach them.
+    cannot reach them. The signature is closed (no `**kw`): the payload's
+    fields are the scaffold's, not something a cell can extend.
     """
-    return await BRIDGE.request("llm_query", {"prompt": prompt, "role": role, **kw})
+    return await BRIDGE.request(
+        "llm_query", {"question": question, "chunk": chunk, "role": role})
 
 
 def _final_answer_template(value):

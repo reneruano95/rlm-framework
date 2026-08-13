@@ -136,6 +136,40 @@ def neutralise_control_tokens(text: str, markers: tuple[str, ...]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# §4's prompt layout, composed scaffold-side (fix round 2).
+#
+# MEASURED: a chunk-first re-query reported `cache_n=546`; the SAME chunk with
+# the question moved to the front reported `cache_n=0`, twice. As built,
+# `llm_query` took ONE opaque string which the dispatcher dropped whole into a
+# user message -- so §4's `[prefix][chunk][question]` layout, and therefore S2
+# gate (b)'s >80% reuse target, rested entirely on the root model's formatting
+# discipline. That makes the gate a test of prompt compliance, not of the
+# scaffold. The scaffold now composes the user message itself, exactly as it
+# already composes the system prefix.
+# --------------------------------------------------------------------------- #
+
+#: Which form a call used. `steps` needs no column for it (§6): it rides in the
+#: leaf request blob's `meta` stream, so an S2 gate can score only the calls
+#: that actually supplied `chunk=` rather than crediting the scaffold for a
+#: layout the model happened to type correctly.
+LAYOUT_CHUNK_QUESTION = "chunk_question"
+LAYOUT_QUESTION_ONLY = "question_only"
+
+
+def compose_leaf_user(question: str, chunk: str | None) -> str:
+    """§4's `[chunk][question]` user segment, question LAST.
+
+    One function, so the string C4 sends, the string C5 admits against and the
+    string C6 logs as `action_payload` cannot drift apart. `chunk=None` is the
+    single-string form: the caller composed it itself and the scaffold has no
+    way to know where the chunk ended -- kept working because the paper
+    harness's own call site (and every S1 prompt) uses it."""
+    if chunk is None:
+        return question
+    return f"{chunk}\n\n{question}"
+
+
+# --------------------------------------------------------------------------- #
 # ServerClient -- thin, honest wrapper over the llama-server HTTP surface
 # (recipes §serverapi). No retries, no semaphore, no step logging: those are
 # LLMDispatcher's job. This class only knows how to talk to ONE server.
@@ -324,10 +358,13 @@ class DispatchTarget:
     markers: tuple[str, ...] | None = None
 
 
-def _new_step(call_id: str, retry_idx: int, role: str) -> dict[str, Any]:
+def _new_step(call_id: str, retry_idx: int, role: str, *,
+               layout: str | None = None) -> dict[str, Any]:
     return {
         "call_id": call_id,
         "retry_idx": retry_idx,
+        # Not a `steps` column and not meant to be one -- see LAYOUT_*.
+        "layout": layout,
         "actor": Actor.LEAF if role == "leaf" else Actor.ROOT,
         "action_type": ActionType.LLM_CALL,
         "status": None,
@@ -447,10 +484,16 @@ class LLMDispatcher:
             target.markers = chat_control_markers(template)
         return target.markers
 
-    async def query(self, prompt: str, *, role: str, call_id: str) -> str:
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None) -> str:
+        """Dispatch one leaf call. `prompt` is the QUESTION; `chunk`, when
+        given, is the excerpt it is about, and C4 composes
+        `[system prefix][chunk][question]` from the two (§4). `chunk=None`
+        keeps the single-string behaviour."""
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
+        layout = LAYOUT_QUESTION_ONLY if chunk is None else LAYOUT_CHUNK_QUESTION
 
         # D14: render through the server's OWN chat template, never post the
         # caller's string raw -- that is base-model prompting against an
@@ -468,12 +511,14 @@ class LLMDispatcher:
         # only -- `target.system_prefix` is emitted verbatim, so §4's
         # byte-identical head is untouched.
         #
-        # Exactly two messages, prefix first: the layout is
-        # [system prefix][chunk][question] with the question last (the
-        # caller composes the chunk+question user string), so a re-queried
-        # chunk extends the slot's resident prefix instead of invalidating it
-        # at token 0.
-        user_message = neutralise_control_tokens(prompt, await self._markers(target))
+        # Exactly two messages, prefix first, and the user segment composed
+        # HERE from (chunk, question) so the [system prefix][chunk][question]
+        # layout holds by construction rather than by the root model's
+        # formatting discipline: a re-queried chunk then extends the slot's
+        # resident prefix instead of invalidating it at token 0 (measured
+        # cache_n 546 chunk-first vs 0 question-first).
+        user_message = neutralise_control_tokens(
+            compose_leaf_user(prompt, chunk), await self._markers(target))
         messages = [
             {"role": "system", "content": target.system_prefix},
             {"role": "user", "content": user_message},
@@ -486,7 +531,7 @@ class LLMDispatcher:
         except Exception as exc:  # noqa: BLE001 -- same class as a failed
             # pre-flight /tokenize below: nothing has been dispatched, so
             # there is no attempt to retry, only a call that cannot be built.
-            step = _new_step(call_id, 0, role)
+            step = _new_step(call_id, 0, role, layout=layout)
             step["status"] = StepStatus.ERROR
             step["error_detail"] = f"pre-flight /apply-template failed: {exc}"
             self._record(step)
@@ -508,14 +553,14 @@ class LLMDispatcher:
         except Exception as exc:  # noqa: BLE001 -- server unreachable at
             # the pre-flight stage is a distinct failure from "prompt too
             # big"; there is nothing to retry a dispatch attempt against.
-            step = _new_step(call_id, 0, role)
+            step = _new_step(call_id, 0, role, layout=layout)
             step["status"] = StepStatus.ERROR
             step["error_detail"] = f"pre-flight /tokenize failed: {exc}"
             self._record(step)
             raise DispatchError(f"pre-flight /tokenize failed for role={role!r}: {exc}") from exc
 
         if len(tokens) > target.slot_capacity_tokens:
-            step = _new_step(call_id, 0, role)
+            step = _new_step(call_id, 0, role, layout=layout)
             step["status"] = StepStatus.REJECTED
             step["error_detail"] = (
                 f"prompt ({len(tokens)} tokens) exceeds slot capacity "
@@ -526,7 +571,7 @@ class LLMDispatcher:
 
         last_exc: Exception | None = None
         for attempt in range(self._retries.max_attempts):
-            step = _new_step(call_id, attempt, role)
+            step = _new_step(call_id, attempt, role, layout=layout)
             t_dispatch = utc_now()
             step["t_dispatch"] = t_dispatch
             try:
@@ -624,9 +669,16 @@ class MockDispatcher:
         scored -- which is already true for other reasons (`dry_run=true`)."""
         return (len(text) + 3) // 4
 
-    async def query(self, prompt: str, *, role: str, call_id: str) -> str:
-        key = f"{role}:{hashlib.sha256(prompt.encode('utf-8')).hexdigest()}"
-        step = _new_step(call_id, 0, role)
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None) -> str:
+        # Keyed on the COMPOSED user string, so a fixture keyed by (role,
+        # prompt-hash) still matches whichever form the model used to build
+        # the same request (§5 dry-run mode).
+        composed = compose_leaf_user(prompt, chunk)
+        key = f"{role}:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
+        step = _new_step(call_id, 0, role,
+                          layout=(LAYOUT_QUESTION_ONLY if chunk is None
+                                  else LAYOUT_CHUNK_QUESTION))
         async with self.semaphore:
             if key not in self._fixtures:
                 step["status"] = StepStatus.ERROR

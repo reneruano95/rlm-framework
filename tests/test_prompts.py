@@ -69,6 +69,23 @@ def test_exemplars_use_the_canonical_fence_and_our_api():
     assert "asyncio.gather" in v2  # the fan-out idiom
 
 
+def test_v2_exemplars_use_the_pre_registered_chunk_kwarg():
+    """§4's layout is now enforced by the scaffold (`llm_query(q, chunk=...)`
+    composes `[prefix][chunk][question]` scaffold-side). The exemplars are what
+    the S2 gate is really testing today, so they must teach the form a gate can
+    score -- a hand-composed `chunk + "\\n\\n" + q` is indistinguishable from
+    any other single string once it crosses the bridge.
+
+    root.v1.md is deliberately NOT checked here: it is the pinned S1 A/B winner
+    and editing it would invalidate the recorded result.
+    """
+    v2 = (PROMPTS / "root.v2.md").read_text(encoding="utf-8")
+    examples = v2.split("# Worked examples", 1)[1]
+    assert "chunk=chunks[" in examples
+    assert "llm_query(chunks[i] + " not in examples
+    assert "llm_query(c + " not in examples
+
+
 def test_prompt_promise_matches_the_configured_extractor():
     """D16: the file text is generated from cell_extraction; they cannot disagree."""
     from rlm.config import load_config

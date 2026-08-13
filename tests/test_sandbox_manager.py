@@ -118,10 +118,10 @@ async def test_hijacked_llm_query_cannot_alter_scaffold_side_control(manager, cf
     async def dispatcher(payload):
         async with semaphore:                       # C4's concurrency cap
             if len(admitted) >= max_subcalls:       # C5's budget
-                refused.append(payload["prompt"])
+                refused.append(payload["question"])
                 raise SandboxError("max_subcalls exhausted")
-            admitted.append((payload["prompt"], payload["role"]))
-            return f"LEAF:{payload['prompt']}"
+            admitted.append((payload["question"], payload["role"]))
+            return f"LEAF:{payload['question']}"
 
     async with manager.session("ep-i1", cfg) as s:
         s.on_llm_query(dispatcher)

@@ -199,6 +199,37 @@ async def test_protocol_fd_desync_is_survivable_and_not_trivially_reachable(sess
     assert alive.stdout.strip() == "still here"
 
 
+async def test_llm_query_sends_chunk_and_question_as_separate_fields(session):
+    """§4's layout is enforced by the scaffold, not hoped for: the model hands
+    over two fields and C4 composes `[prefix][chunk][question]` itself. The
+    single-string form stays valid (`chunk=None`)."""
+    seen: list[dict] = []
+
+    async def handler(payload):
+        seen.append(payload)
+        return "ANSWERED"
+
+    session.on_llm_query(handler)
+    out = await session.exec_cell(
+        "print(await llm_query('Q?', chunk='CHUNK'))")
+    assert out.stdout.strip() == "ANSWERED"
+    await session.exec_cell("await llm_query('just a question')")
+
+    assert seen == [
+        {"question": "Q?", "chunk": "CHUNK", "role": "leaf"},
+        {"question": "just a question", "chunk": None, "role": "leaf"},
+    ]
+
+
+async def test_llm_query_takes_chunk_by_keyword_only(session):
+    """`llm_query(question, *, chunk=None, role="leaf")`. Keyword-only keeps the
+    paper harness's positional call site (`llm_query(prompt)`) working while
+    making a two-positional call a loud TypeError rather than a silently
+    mis-assigned role."""
+    out = await session.exec_cell("await llm_query('Q?', 'CHUNK')")
+    assert "TypeError" in out.traceback
+
+
 async def test_gather_fanout_exits_cleanly(session):
     """D9: this exact shape used to exit 0xC0000008 under AppContainer."""
     out = await session.exec_cell(

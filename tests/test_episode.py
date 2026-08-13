@@ -30,7 +30,8 @@ class _RetryingDispatcher:
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         return (len(text) + 3) // 4
 
-    async def query(self, prompt: str, *, role: str, call_id: str) -> str:
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None) -> str:
         async with self.semaphore:
             for attempt in range(self._fail + 1):
                 if attempt == self._fail:
@@ -163,6 +164,52 @@ async def test_leaf_calls_hang_off_the_repl_exec_that_spawned_them(episode_env):
     assert calls[0]["parent_step_idx"] in execs
     assert calls[0]["actor"] == "leaf" and calls[0]["depth"] == 1
     assert calls[0]["call_id"] is not None
+
+
+async def test_a_chunk_kwarg_is_composed_scaffold_side_before_dispatch(episode_env):
+    """§4's `[prefix][chunk][question]` layout is ENFORCED, not hoped for: the
+    model hands the bridge two fields and the scaffold composes the user
+    message, exactly as it already composes the system prefix (I1). The logged
+    `action_payload` is the composed string, because that is what was sent."""
+    env = episode_env(root_script=[
+        "```repl\nprint(await llm_query('Q?', chunk='CHUNK'))\n```",
+        "```repl\nfinal_answer('done')\n```",
+    ])
+    await env.run()
+
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert len(calls) == 1
+    assert calls[0]["action_payload"] == "CHUNK\n\nQ?"
+    assert env.dispatcher.last_step["layout"] == "chunk_question"
+
+
+async def test_the_single_string_llm_query_still_dispatches(episode_env):
+    """`chunk=None` is today's behaviour unchanged -- the S1 prompts and the
+    paper harness's own call site both use it."""
+    env = episode_env(root_script=[
+        "```repl\nprint(await llm_query('CHUNK\\n\\nQ?'))\n```",
+        "```repl\nfinal_answer('done')\n```",
+    ])
+    await env.run()
+
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert calls[0]["action_payload"] == "CHUNK\n\nQ?"
+    assert env.dispatcher.last_step["layout"] == "question_only"
+
+
+async def test_a_non_string_chunk_is_refused_scaffold_side(episode_env):
+    """The bridge carries whatever JSON the model wrote. Composition happens
+    scaffold-side, so a non-string chunk must be refused there with a legible
+    message rather than raising a TypeError out of the middle of C4."""
+    env = episode_env(root_script=[
+        "```repl\ntry:\n    await llm_query('Q?', chunk=[1, 2])\n"
+        "except Exception as exc:\n    print(type(exc).__name__, exc)\n```",
+        "```repl\nfinal_answer('done')\n```",
+    ])
+    await env.run()
+    execs = [s for s in env.steps() if s["action_type"] == "repl_exec"]
+    assert "chunk" in execs[0]["observation_view"]
+    assert not [s for s in env.steps() if s["action_type"] == "llm_call"]
 
 
 async def test_root_that_never_finalises_is_a_fail_with_its_own_reason(episode_env):

@@ -63,7 +63,7 @@ from rlm.budget import BudgetEnforcer
 from rlm.chunker import ChunkConfig, split
 from rlm.config import Config, config_snapshot
 from rlm.context import load_context
-from rlm.dispatcher import ServerClient
+from rlm.dispatcher import ServerClient, compose_leaf_user
 from rlm.errors import (
     ActionType,
     Actor,
@@ -444,9 +444,28 @@ class _EpisodeRun:
     async def _on_llm_query(self, payload: dict) -> str:
         """C4 dispatch under C4's semaphore, admitted by C5, logged by C6 --
         all of it in THIS process (I1). Every step written here carries
-        `parent_step_idx` = the `repl_exec` that spawned it."""
-        prompt = (payload or {}).get("prompt") or ""
-        role = (payload or {}).get("role") or "leaf"
+        `parent_step_idx` = the `repl_exec` that spawned it.
+
+        The payload carries `chunk` and `question` as SEPARATE fields, and the
+        composition into §4's `[chunk][question]` user segment happens
+        scaffold-side (`rlm.dispatcher.compose_leaf_user`) -- the same string
+        is then what C5 admits against and what C6 logs as `action_payload`,
+        because it is the string that was actually sent.
+        """
+        payload = payload or {}
+        question = payload.get("question")
+        chunk = payload.get("chunk")
+        # The bridge carries whatever JSON the cell wrote, so the types are
+        # checked HERE rather than discovered as a TypeError inside C4. The
+        # message goes back to the emitting cell, where the root can act on it.
+        for name, value in (("question", question), ("chunk", chunk)):
+            if value is not None and not isinstance(value, str):
+                raise RlmError(
+                    f"llm_query({name}=...) must be a string, got "
+                    f"{type(value).__name__}")
+        question = question or ""
+        prompt = compose_leaf_user(question, chunk)
+        role = payload.get("role") or "leaf"
         if role != "leaf":
             # I1: routing is the scaffold's. There is exactly one level below
             # the root (max_depth 1), so "leaf" is the only reachable role.
@@ -468,7 +487,8 @@ class _EpisodeRun:
             raise
 
         try:
-            answer = await self.dispatcher.query(prompt, role="leaf", call_id=call_id)
+            answer = await self.dispatcher.query(question, role="leaf",
+                                                  call_id=call_id, chunk=chunk)
         except asyncio.CancelledError:
             self._settle(reservation, call_id)
             self._log_attempts(call_id, parent, prompt)

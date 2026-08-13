@@ -1,6 +1,7 @@
 <!-- changelog (prompts/root.v2.md)
 CHANGELOG (one line per version, newest last):
 v1 | 2026-08-13 | Initial. S1 R1 A/B arm (b): the root.v1 tips body plus two compact worked REPL exemplars (a needle scan over `chunks`; an `await llm_query` fan-out ending in `final_answer()`), on fixture-shaped data only. Injected API: `context: str`, `chunks: list[str]`, `await llm_query(prompt, role="leaf") -> str`, `final_answer(value)`. Body outside the "Worked examples" section is byte-identical to root.v1.md.
+v2 | 2026-08-13 | Exemplars only: both sub-call sites now pass the excerpt as `llm_query(q, chunk=chunks[i])`, the pre-registered kwarg the scaffold uses to compose [prefix][chunk][question] itself. Everything outside "Worked examples" is untouched, so the controlled-A/B invariant against root.v1.md (v2 = v1 plus exactly one contiguous insertion) still holds and the recorded S1 tie stands. The shared tips section still teaches the hand-composed single-string form, which remains valid (`chunk=None`); it is byte-identical to root.v1.md, the pinned S1 winner, and editing it here would break the A/B control.
 NOTE: the registry loader strips this leading HTML comment and the blank line after it before rendering; the sha256 recorded in config_snapshot is over the whole file, header included.
 -->
 
@@ -102,12 +103,12 @@ Observation:
 2 hit(s): [(3, 'ISO-9001'), (7, 'BLUE-QRS-8842')]
 ```
 
-Turn 3 — two candidates, both cheap to settle with one sub-call each; chunk first, question last:
+Turn 3 — two candidates, both cheap to settle with one sub-call each; pass the chunk as `chunk=` and let the scaffold place it ahead of the question:
 
 ```repl
 q = ("Question: what clearance code does this document state?\n"
      "Reply with the code only, or NONE.")
-outs = await asyncio.gather(*(llm_query(chunks[i] + "\n\n" + q) for i, _ in hits))
+outs = await asyncio.gather(*(llm_query(q, chunk=chunks[i]) for i, _ in hits))
 cands = [(i, a.strip()) for (i, _), a in zip(hits, outs) if a.strip().upper() != "NONE"]
 print([(i, a, a in chunks[i]) for i, a in cands])
 ```
@@ -138,7 +139,7 @@ Turn 1 — one question, every chunk, in parallel. This costs one sub-call per c
 import asyncio, re
 q = ("Question: name every product this document says was recalled.\n"
      "Reply with one product name per line, exactly as written, or NONE.")
-outs = await asyncio.gather(*(llm_query(c + "\n\n" + q) for c in chunks),
+outs = await asyncio.gather(*(llm_query(q, chunk=c) for c in chunks),
                             return_exceptions=True)
 errs = [i for i, a in enumerate(outs) if isinstance(a, BaseException)]
 found = {i: a.strip() for i, a in enumerate(outs)

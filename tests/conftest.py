@@ -100,8 +100,13 @@ def manager(bootstrap_dir: Path):
 
 
 async def mock_llm_query(payload: dict) -> str:
-    """The mock dispatcher: answers every sub-call without touching a server."""
-    return f"MOCK:{payload['prompt']}"
+    """The mock dispatcher: answers every sub-call without touching a server.
+
+    Composes the two payload fields the way C4 does, so what the child sent is
+    visible in the answer."""
+    from rlm.dispatcher import compose_leaf_user
+
+    return f"MOCK:{compose_leaf_user(payload['question'], payload.get('chunk'))}"
 
 
 @pytest.fixture
@@ -653,12 +658,17 @@ class CannedDispatcher:
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         return await self._inner.count_tokens(text, role=role)
 
-    async def query(self, prompt: str, *, role: str, call_id: str) -> str:
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None) -> str:
         import hashlib
 
-        key = f"{role}:{hashlib.sha256(prompt.encode('utf-8')).hexdigest()}"
-        self._inner._fixtures.setdefault(key, f"LEAF:{prompt}")
-        return await self._inner.query(prompt, role=role, call_id=call_id)
+        from rlm.dispatcher import compose_leaf_user
+
+        composed = compose_leaf_user(prompt, chunk)
+        key = f"{role}:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
+        self._inner._fixtures.setdefault(key, f"LEAF:{composed}")
+        return await self._inner.query(prompt, role=role, call_id=call_id,
+                                        chunk=chunk)
 
 
 def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> dict:
