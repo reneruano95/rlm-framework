@@ -10,12 +10,21 @@ Use /completion for the LEAF too, for the same reason (recipes §serverapi).
 The leaf request is built in `query()`, scaffold-side (I1): the §4
 byte-identical system prefix -- `DispatchTarget.system_prefix`, the whole
 text of the sha256-pinned `prompts/leaf-prefix.v1.md` via
-`PromptRegistry.leaf_prefix()` -- as the system message, and the one opaque
-string the sandbox passed to `llm_query` as the user message. Model code
-therefore cannot alter, replace or suppress the prefix: ChatML markers
-written into its prompt are user content. Skipping the template here is
-base-model prompting against an instruct-tuned model, which is what made
-every leaf answer in the S1 gate junk (s1/RESULTS.md F3).
+`PromptRegistry.leaf_prefix()` -- as the system message, and the model's
+(chunk, question) pair composed into the user message here, not in the
+sandbox. Skipping the template is base-model prompting against an
+instruct-tuned model, which is what made every leaf answer in the S1 gate
+junk (s1/RESULTS.md F3).
+
+WHAT KEEPS THE PREFIX THE PREFIX, stated exactly. It is NOT "model text lands
+in the user message, so its ChatML markers are just user content" -- that
+claim was made when the template was introduced and it is FALSE, measured: a
+forged `<|im_start|>system` in the user message renders as a second,
+model-authored, LAST-writer system turn whose markers the tokenizer resolves
+to genuine control-token ids. What holds is (a) the prefix is prepended here,
+from a constant the sandbox cannot reach, and (b) every control-token literal
+in the model's own text is neutralised before it becomes an operand of the
+render (`neutralise_control_tokens`, below). Do not restore the old claim.
 
 Streaming is not an optimisation here, it is the mechanism: closing the
 response context mid-generation genuinely aborts server-side generation and
