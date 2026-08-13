@@ -6,9 +6,18 @@ from pathlib import Path
 import pytest
 
 PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
-FILES = ["root.v1.md", "root.v2.md", "leaf-prefix.v1.md", "strat-needle.v1.md",
-         "strat-aggregation.v1.md", "strat-synthesis.v1.md",
-         "strat-codeqa.v1.md", "strat-default.v1.md"]
+FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "leaf-prefix.v1.md",
+         "strat-needle.v1.md", "strat-aggregation.v1.md",
+         "strat-synthesis.v1.md", "strat-codeqa.v1.md", "strat-default.v1.md"]
+
+#: The two recorded S1 A/B arms. Their bytes ARE the published 6/6-vs-6/6
+#: result: editing either one retroactively invalidates it, so the hashes are
+#: pinned here as well as in s1/RESULTS.md. `root.v3.md` exists precisely so
+#: that teaching the `chunk=` form never requires touching them.
+S1_AB_ARM_HASHES = {
+    "root.v1.md": "1c58a5813e7d62cf2721843b01106b2e59cb5734b95a38e660f81229fad6f24f",
+    "root.v2.md": "6ae1a35aaf36be681eadf9e5e685b8dcd586067c53126e116af116e877ff7215",
+}
 
 
 @pytest.mark.parametrize("name", FILES)
@@ -28,7 +37,7 @@ def test_leaf_prefix_carries_no_volatile_tokens():
 
 
 def test_root_prompts_use_the_injected_api_names_exactly():
-    for name in ("root.v1.md", "root.v2.md"):
+    for name in ("root.v1.md", "root.v2.md", "root.v3.md"):
         text = (PROMPTS / name).read_text(encoding="utf-8")
         assert "llm_query" in text and "final_answer" in text
         assert "chunks" in text and "context" in text
@@ -86,15 +95,95 @@ def test_v2_exemplars_use_the_pre_registered_chunk_kwarg():
     assert "llm_query(c + " not in examples
 
 
+def test_the_recorded_s1_ab_arms_are_never_edited():
+    """v1 is the pinned S1 winner and v2 its arm; both are historical record.
+    A diff to either is not a prompt improvement, it is a retroactive edit to a
+    published measurement -- which is what `root.v3.md` exists to avoid."""
+    for name, expected in S1_AB_ARM_HASHES.items():
+        actual = hashlib.sha256((PROMPTS / name).read_bytes()).hexdigest()
+        assert actual == expected, f"{name} was edited; the S1 A/B record is broken"
+
+
+def _child_llm_query_signature():
+    """(positional, keyword-only) parameter names of the `llm_query` the
+    sandbox actually injects, read from `rlm/sandbox/child.py` by AST.
+
+    Parsed, never imported: importing that module runs the sandbox bootstrap
+    (os.dup2 on fds 0/1, an event loop, an audit hook) in the test process.
+    """
+    import ast
+    src = (Path(__file__).resolve().parents[1] / "rlm" / "sandbox" / "child.py")
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_llm_query_template")
+    return ([a.arg for a in fn.args.args], [a.arg for a in fn.args.kwonlyargs])
+
+
+def test_v3_teaches_the_chunk_form_of_the_real_injected_signature():
+    """§7 #2's gap: the scaffold composes `[prefix][chunk][question]` only when
+    the call supplies `chunk=`, and the PINNED prompt is what the running root
+    reads. v3 must therefore teach the kwarg, name it exactly as C1 injects it,
+    and never demonstrate the hand-concatenated form again."""
+    v3 = (PROMPTS / "root.v3.md").read_text(encoding="utf-8")
+    positional, kwonly = _child_llm_query_signature()
+    assert positional == ["question"] and kwonly == ["chunk", "role"], (
+        "child.py's llm_query signature moved; root.v3.md teaches the old one")
+
+    body = v3.split("-->", 1)[1]
+    signature = next(ln for ln in body.splitlines() if ln.startswith("- `await llm_query("))
+    for name in positional + kwonly:
+        assert f"{name}" in signature, f"the taught signature omits {name!r}"
+    assert "chunk: str | None = None" in signature  # optional, not a new requirement
+
+    assert "llm_query(question, chunk=chunks[i])" in body, "v3 must SHOW the chunk= form"
+    assert 'llm_query(chunks[i] + ' not in body, "the hand-composed form must not be demonstrated"
+    # The single-string form still works (`chunk=None`) and v3 must say so
+    # rather than present the kwarg as a breaking change.
+    assert "llm_query(prompt)" in body and "may be omitted" in body
+
+
+def test_v3_is_root_v1_plus_exactly_the_chunk_form():
+    """v1 won the S1 A/B, so its content is the baseline: v3 may add the
+    `chunk=` guidance and change nothing else. The three lines below are the
+    entire change surface -- they are the lines that STATE the old single-string
+    API, and leaving them in place beside the new form is what would keep the
+    root emitting `chunk=None`."""
+    body_v1 = (PROMPTS / "root.v1.md").read_text(encoding="utf-8").split("-->", 1)[1]
+    body_v3 = (PROMPTS / "root.v3.md").read_text(encoding="utf-8").split("-->", 1)[1]
+
+    kept = set(body_v3.splitlines())
+    removed = [ln for ln in body_v1.splitlines() if ln.strip() and ln not in kept]
+    assert len(removed) == 3, f"v3 dropped more of v1 than the API lines: {removed}"
+    assert removed[0].startswith('- `await llm_query(prompt: str, role:')
+    assert removed[1] == "Compose every sub-call prompt this way:"
+    assert removed[2] == r'answer = await llm_query(chunks[i] + "\n\n" + question)'
+
+    # v1's tips section, byte-identical, and still the END of the file: the
+    # scaffold appends the selected strategy block immediately after it.
+    tips = body_v1[body_v1.index("# Tips"):]
+    assert tips in body_v3, "v1's tips section must be carried over verbatim"
+    assert body_v3.endswith(tips), "the closing strategy-block sentence must stay last"
+
+
+def test_config_pins_the_v3_root_prompt():
+    """The pin is the only thing that decides what the running root reads."""
+    from rlm.config import load_config
+    cfg = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
+    assert cfg.scaffold.prompts.root.path.name == "root.v3.md"
+    actual = hashlib.sha256((PROMPTS / "root.v3.md").read_bytes()).hexdigest()
+    assert cfg.scaffold.prompts.root.sha256 == actual
+
+
 def test_prompt_promise_matches_the_configured_extractor():
     """D16: the file text is generated from cell_extraction; they cannot disagree."""
     from rlm.config import load_config
     cfg = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
-    v1 = (PROMPTS / "root.v1.md").read_text(encoding="utf-8")
-    if cfg.scaffold.cell_extraction.select == "first":
-        assert "only the first runs" in v1
-    else:
-        assert "only the last runs" in v1
+    for name in ("root.v1.md", "root.v2.md", "root.v3.md"):
+        text = (PROMPTS / name).read_text(encoding="utf-8")
+        if cfg.scaffold.cell_extraction.select == "first":
+            assert "only the first runs" in text
+        else:
+            assert "only the last runs" in text
 
 
 def test_extraction_shaped_strategies_carry_the_evidence_span_check():

@@ -70,9 +70,19 @@ scaffold:
     # fixtures. Result 6/6 vs 6/6 -- a tie at ceiling, no discrimination. The
     # pre-registered tie-break keeps the SIMPLER prompt: v2 buys +1,203 root
     # prompt tokens per episode (1,664 -> 2,867 measured on turn 1) for zero
-    # measured benefit, and a tie is not evidence for the exemplars. v1 stays
-    # pinned; the A/B is CLOSED at two variants (§9 S1 hard cap).
-    root: { path: prompts/root.v1.md, sha256: 1c58a5813e7d62cf2721843b01106b2e59cb5734b95a38e660f81229fad6f24f }
+    # measured benefit, and a tie is not evidence for the exemplars. The A/B is
+    # CLOSED at two variants (§9 S1 hard cap) and neither arm was ever edited.
+    #
+    # PINNED PROMPT IS root.v3 SINCE 2026-08-13 (§7 #2, "the layout fix is inert
+    # in production"). v3 IS the A/B winner: it is root.v1.md byte-for-byte
+    # except that its three API lines teach `llm_query(question, chunk=...)`,
+    # the kwarg C4 uses to compose [prefix][chunk][question] itself (chunk-first
+    # re-query cache_n=546 vs question-first 0). v1 stayed pinned through S1 and
+    # taught the hand-composed single string, so the running root emitted
+    # chunk=None on every call and §7 #3's gate (b) would have scored a root
+    # never taught the API it is graded on. v1/v2 remain on disk, unmodified and
+    # unpinned, as the recorded S1 arms; s1/run_s1.py re-pins them itself.
+    root: { path: prompts/root.v3.md, sha256: 3fb653e3eacafa50b53d12c08cc70982fe4a6ad19bf01cffbf7966771917b6b6 }
     leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76 }
     strategy_templates:
       needle: { path: prompts/strat-needle.v1.md, sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d }
