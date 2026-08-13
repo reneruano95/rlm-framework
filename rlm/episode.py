@@ -536,13 +536,31 @@ class _EpisodeRun:
             row.update(step_idx=self._alloc(), parent_step_idx=parent, depth=1,
                         actor=Actor.LEAF, action_type=ActionType.LLM_CALL,
                         action_payload=prompt)
-            blobs = None
+            blobs: dict[str, bytes] = {}
+            rendered = attempt.get("rendered")
+            if rendered is not None:
+                # The same instrument the root path uses (`root_view_hash` is
+                # already on the row): the EXACT rendered request, stored so a
+                # gate-(a) failure is investigable at all -- prefix drift and
+                # slot eviction produce an identical symptom, and only the
+                # bytes plus the prefix's token length tell them apart. The
+                # `meta` stream carries what §6 has no column for and needs
+                # none: which call form was used (so a gate can score only the
+                # calls that supplied `chunk=`) and the measured prefix length,
+                # next to the `tokens_cached` on this very row.
+                blobs["root_request_ref"] = tracemod.pack_blob({
+                    "rendered": rendered.encode("utf-8"),
+                    "meta": json.dumps(
+                        {"layout": attempt.get("layout"),
+                         "prefix_tokens": attempt.get("prefix_tokens")},
+                        ensure_ascii=True, separators=(",", ":")).encode("ascii"),
+                })
             if answer is not None and attempt.get("status") == StepStatus.OK:
                 # C6 must not truncate the stored record: the leaf's answer is
                 # ground truth even though the ROOT never sees it directly (it
                 # lands in a REPL variable), so it is a blob, not a view.
-                blobs = {"observation_full_ref": answer.encode("utf-8", "replace")}
-            self._put(row, blobs)
+                blobs["observation_full_ref"] = answer.encode("utf-8", "replace")
+            self._put(row, blobs or None)
 
     async def _on_final_answer(self, value: Any) -> None:
         """THE ONLY PLACE AN ANSWER IS EVER ACCEPTED.

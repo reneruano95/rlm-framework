@@ -755,6 +755,10 @@ def cmd_replay(args) -> int:
 
     # (i) The state-rule instrument. Dedup by ref: a terminal `final` step
     # points at its parent turn's blob rather than storing a second copy.
+    # LEAF steps are rehashed here too -- they carry the same pair since the S2
+    # leaf-transport fix, and the §4 prefix contract is exactly what a drifted
+    # leaf request would break. Only the message-array re-derivation below is
+    # root-only (it filters on `repl_exec`).
     checked: dict[str, str] = {}
     for step in steps:
         ref, want = step["root_request_ref"], step["root_view_hash"]
@@ -780,7 +784,8 @@ def cmd_replay(args) -> int:
         print("root_view_hash: hash mismatch — this episode stored no root "
               "request at all, so the state rule cannot be checked", file=err)
         return EXIT_MISMATCH
-    print(f"root_view_hash: OK ({len(checked)} root turns rehashed offline)", file=out)
+    print(f"root_view_hash: OK ({len(checked)} stored requests rehashed offline)",
+          file=out)
 
     # (i, second half) The prompt-assembly canary, re-derived against the
     # config THIS EPISODE ran under -- never the live file (see episode_config).

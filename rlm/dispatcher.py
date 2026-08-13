@@ -356,15 +356,36 @@ class DispatchTarget:
     #: cached for the target's lifetime -- deriving it beats hardcoding, and
     #: caching keeps that derivation off the per-call path.
     markers: tuple[str, ...] | None = None
+    #: The RENDERED system head's token length -- the whole prefix as the slot
+    #: actually holds it (template markup and BOS included), which is the
+    #: number §7 #3's gate (a) compares `tokens_cached` against. Measured once,
+    #: on the first render, and kept: recomputing it per call could not change
+    #: it (the prefix is one constant string for this target's lifetime) and
+    #: computing it and throwing it away is what makes a gate-(a) failure
+    #: uninvestigable, since prefix drift and slot eviction look identical
+    #: without it.
+    prefix_tokens: int | None = None
 
 
 def _new_step(call_id: str, retry_idx: int, role: str, *,
-               layout: str | None = None) -> dict[str, Any]:
+               layout: str | None = None, rendered: str | None = None,
+               prefix_tokens: int | None = None) -> dict[str, Any]:
+    """One attempt's step record.
+
+    `root_view_hash` is a `steps` column (§6's state-rule instrument, defined
+    for the ROOT and equally meaningful here); `rendered`, `layout` and
+    `prefix_tokens` are not, and need not be -- the caller (the episode runner)
+    turns them into the step's `root_request_ref` blob, and `rlm.trace`
+    silently drops anything not in STEP_COLS.
+    """
     return {
         "call_id": call_id,
         "retry_idx": retry_idx,
-        # Not a `steps` column and not meant to be one -- see LAYOUT_*.
         "layout": layout,
+        "rendered": rendered,
+        "prefix_tokens": prefix_tokens,
+        "root_view_hash": (None if rendered is None else
+                           hashlib.sha256(rendered.encode("utf-8")).hexdigest()),
         "actor": Actor.LEAF if role == "leaf" else Actor.ROOT,
         "action_type": ActionType.LLM_CALL,
         "status": None,
@@ -437,6 +458,20 @@ class LLMDispatcher:
     @property
     def last_step(self) -> dict[str, Any] | None:
         return self.steps[-1] if self.steps else None
+
+    def prefix_tokens(self, role: str = "leaf") -> int | None:
+        """This role's rendered system-head length in tokens, or None before
+        the first call has rendered anything.
+
+        Exposed for a gate runner: §7 #3's gate (a) compares `tokens_cached`
+        against exactly this number, and without it a failure is
+        uninvestigable -- prefix drift and slot eviction produce an identical
+        symptom. Every step also carries it (`prefix_tokens`), so a post-hoc
+        reader gets it next to the `tokens_cached` it is judging."""
+        target = self._targets.get(role)
+        if target is None:
+            raise DispatchError(f"unknown dispatch role {role!r}")
+        return target.prefix_tokens
 
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         """Token count via the TARGET server's own tokenizer.
@@ -553,14 +588,32 @@ class LLMDispatcher:
         except Exception as exc:  # noqa: BLE001 -- server unreachable at
             # the pre-flight stage is a distinct failure from "prompt too
             # big"; there is nothing to retry a dispatch attempt against.
-            step = _new_step(call_id, 0, role, layout=layout)
+            step = _new_step(call_id, 0, role, layout=layout, rendered=rendered)
             step["status"] = StepStatus.ERROR
             step["error_detail"] = f"pre-flight /tokenize failed: {exc}"
             self._record(step)
             raise DispatchError(f"pre-flight /tokenize failed for role={role!r}: {exc}") from exc
 
+        # The §4 head, measured ONCE per target. Done here rather than from a
+        # synthetic `[system, user=""]` probe because this is a real request:
+        # the head measured is the head that was actually sent, and it costs no
+        # extra render. The server is known reachable at this point (the
+        # pre-flight above just succeeded), and a failure is still only
+        # diagnostic -- it must not fail a call C4 could otherwise serve.
+        if target.prefix_tokens is None and user_message:
+            cut = rendered.rfind(user_message)
+            if cut > 0:
+                try:
+                    head = await target.client.tokenize(rendered[:cut],
+                                                         add_special=True)
+                except Exception:  # noqa: BLE001 -- diagnostic, never fatal
+                    pass
+                else:
+                    target.prefix_tokens = len(head)
+
         if len(tokens) > target.slot_capacity_tokens:
-            step = _new_step(call_id, 0, role, layout=layout)
+            step = _new_step(call_id, 0, role, layout=layout, rendered=rendered,
+                              prefix_tokens=target.prefix_tokens)
             step["status"] = StepStatus.REJECTED
             step["error_detail"] = (
                 f"prompt ({len(tokens)} tokens) exceeds slot capacity "
@@ -571,7 +624,9 @@ class LLMDispatcher:
 
         last_exc: Exception | None = None
         for attempt in range(self._retries.max_attempts):
-            step = _new_step(call_id, attempt, role, layout=layout)
+            step = _new_step(call_id, attempt, role, layout=layout,
+                              rendered=rendered,
+                              prefix_tokens=target.prefix_tokens)
             t_dispatch = utc_now()
             step["t_dispatch"] = t_dispatch
             try:

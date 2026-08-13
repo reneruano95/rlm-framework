@@ -510,6 +510,68 @@ async def test_a_rendered_prompt_of_exactly_slot_capacity_is_admitted(mock_serve
     assert tight.last_step["status"] == StepStatus.REJECTED
 
 
+# --------------------------------------------------------------------------- #
+# What a leaf step has to record for the S2 gates (fix round 2).
+#
+# The rendered leaf request was never hashed or stored, and the prefix's token
+# length was never measured -- so a gate-(a) failure was uninvestigable, since
+# prefix drift and slot eviction produce an identical symptom (a `tokens_cached`
+# below the prefix length). The root path already does this correctly
+# (rlm/rootclient.py); the leaf was the odd one out.
+# --------------------------------------------------------------------------- #
+
+
+async def test_every_leaf_attempt_records_the_hash_of_its_rendered_request(mock_server):
+    """`root_view_hash` = sha256 of the exact rendered request, the same
+    instrument §6 defines for root turns -- on EVERY attempt, including the
+    ones that failed, because those are the attempts a drift hunt starts from."""
+    mock_server.fail_times(2)
+    d = mock_server.dispatcher()
+    await d.query("q", role="leaf", call_id="c1")
+
+    want = hashlib.sha256(mock_server.rendered_prompts[0].encode("utf-8")).hexdigest()
+    assert [s["root_view_hash"] for s in d.steps] == [want] * 3
+    assert [s["rendered"] for s in d.steps] == [mock_server.rendered_prompts[0]] * 3
+
+
+async def test_a_rejected_call_still_records_what_it_would_have_sent(mock_server):
+    """A rejection is the one step where the rendered string explains the
+    decision: it is what the pre-flight counted."""
+    d = mock_server.dispatcher(slot_capacity_tokens=5)
+    with pytest.raises(DispatchError):
+        await d.query("far too many words for this tiny slot capacity",
+                       role="leaf", call_id="c1")
+    step = d.last_step
+    assert step["status"] == StepStatus.REJECTED
+    assert step["root_view_hash"] == hashlib.sha256(
+        mock_server.rendered_prompts[0].encode("utf-8")).hexdigest()
+
+
+async def test_the_prefix_token_length_is_measured_once_and_exposed(mock_server,
+                                                                     leaf_prefix):
+    """Gate (a) compares `tokens_cached` against the rendered prefix's TOKEN
+    length, so that number has to survive the call that computed it. Measured
+    once per target (the prefix is one constant string for its lifetime) and
+    stamped on every attempt, so a gate reads it next to the `tokens_cached` it
+    is judging."""
+    d = mock_server.dispatcher()
+    assert d.prefix_tokens("leaf") is None       # nothing rendered yet
+    await d.query("a question about a chunk", role="leaf", call_id="c1")
+
+    rendered = mock_server.rendered_prompts[0]
+    head = rendered[:rendered.rfind("a question about a chunk")]
+    assert leaf_prefix in head
+    want = len(await _tokenize(mock_server, head, with_pieces=False))
+    assert d.prefix_tokens("leaf") == want
+    assert d.last_step["prefix_tokens"] == want
+
+    before = len(mock_server.tokenize_bodies)
+    await d.query("another question", role="leaf", call_id="c2")
+    assert d.prefix_tokens("leaf") == want
+    assert len(mock_server.tokenize_bodies) - before == 1, (
+        "the prefix was re-measured on a later call")
+
+
 async def test_root_role_is_not_a_valid_dispatch_target_from_config(minimal_cfg_dict, mock_server):
     """Root traffic never goes through LLMDispatcher (rootclient talks to a
     raw ServerClient directly), so from_config() must not build a "root"

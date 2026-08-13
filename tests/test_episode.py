@@ -212,6 +212,43 @@ async def test_a_non_string_chunk_is_refused_scaffold_side(episode_env):
     assert not [s for s in env.steps() if s["action_type"] == "llm_call"]
 
 
+async def test_a_leaf_step_stores_its_rendered_request_like_a_root_turn(
+        episode_env, mock_server):
+    """§6's state-rule instrument, applied to the leaf. A gate-(a) failure is
+    otherwise uninvestigable: prefix drift and slot eviction produce an
+    identical symptom, and telling them apart needs the exact bytes that were
+    sent and the prefix's token length next to the `tokens_cached` being
+    judged. The root path already stores both; the leaf was the odd one out.
+
+    Runs the REAL LLMDispatcher (against the loopback fixture server) rather
+    than the canned one, because the render is what is under test."""
+    import hashlib
+    import json
+
+    from rlm.trace import unpack_blob
+
+    d = mock_server.dispatcher()
+    env = episode_env(root_script=[
+        "```repl\nprint(await llm_query('Q?', chunk='CHUNK'))\n```",
+        "```repl\nfinal_answer('done')\n```",
+    ], dispatcher=d)
+    await env.run()
+
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["root_request_ref"], "the leaf request was never stored"
+
+    blob = unpack_blob(env.blob(call["root_request_ref"]))
+    rendered = mock_server.rendered_prompts[0]
+    assert blob["rendered"].decode("utf-8") == rendered
+    assert hashlib.sha256(blob["rendered"]).hexdigest() == call["root_view_hash"]
+
+    meta = json.loads(blob["meta"])
+    assert meta["layout"] == "chunk_question"
+    assert meta["prefix_tokens"] == d.prefix_tokens("leaf") > 0
+
+
 async def test_root_that_never_finalises_is_a_fail_with_its_own_reason(episode_env):
     """§6: fail = final emitted and checker fails OR the root ended without
     emitting one; outcome_reason is what distinguishes them."""
