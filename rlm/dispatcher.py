@@ -27,12 +27,29 @@ exceeding the target's slot capacity is REJECTED without dispatch and
 logged status=rejected -- never sent to /completion.
 
 The semaphore is `asyncio.Semaphore(cfg.servers.leaf.parallel)`, owned here.
-Nothing the model runs may resize it, choose a server, or change a port.
+Nothing the model runs may resize it, choose a server, or change a port. It
+is held only around each individual dispatch attempt, not across a retry's
+backoff sleep -- a failed attempt's slot is not pinned (id_slot is never
+set on retry), so there is no affinity to preserve, and holding it across a
+1-4s sleep would starve other queued leaf calls for no benefit.
 
 Server death: retries exhausting against a dead server produce a step
 `status=error` and a raised DispatchError; the caller turns that into
 `episode.outcome=error, outcome_reason=server_unreachable`. This module
 never restarts a server mid-episode -- it has no code path that could.
+
+Sampling: `cfg.scaffold.sampling.<role>` (temperature, top_p, seed) is real,
+non-defaulted config -- §6 records it in config_snapshot as what actually
+ran, and the benchmark's seed discipline depends on the seed reaching the
+server. `from_config()` threads it into each role's `DispatchTarget`, and
+`query()` passes it on every /completion call; nothing here defaults to
+near-greedy sampling. `from_config()` builds ONLY a "leaf" target: root
+traffic never goes through LLMDispatcher (see `rlm.rootclient.
+RootConversation`, which talks to a raw `ServerClient` with its own
+`cfg.scaffold.sampling.root`), so a "root" DispatchTarget here would be
+dead code that could silently apply the leaf-sized semaphore to root
+calls if ever queried by mistake -- `query(role="root", ...)` raises
+DispatchError instead.
 """
 from __future__ import annotations
 
@@ -116,18 +133,24 @@ class ServerClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def completion(self, prompt: str, *, n_predict: int, stream: bool = True,
-                          id_slot: int | None = None, temperature: float = 0.0,
-                          seed: int = 0, cache_prompt: bool = True,
+    async def completion(self, prompt: str, *, n_predict: int, temperature: float,
+                          top_p: float, seed: int, stream: bool = True,
+                          id_slot: int | None = None, cache_prompt: bool = True,
                           stop: list[str] | None = None) -> CompletionResult:
         """POST /completion, streamed SSE. Only the FINAL event carries
         `id_slot` and `timings`; intermediate events report `id_slot: -1`.
         Closing this call's connection (task cancellation) is a genuine
-        server-side abort -- see the module docstring."""
+        server-side abort -- see the module docstring.
+
+        `temperature`/`top_p`/`seed` are required, not defaulted: this is
+        `cfg.scaffold.sampling.<role>`, real per-role config that must reach
+        the server on every call -- defaulting them here would make it easy
+        to silently ship near-greedy decoding no matter what config says."""
         body: dict[str, Any] = {
             "prompt": prompt,
             "n_predict": n_predict,
             "temperature": temperature,
+            "top_p": top_p,
             "seed": seed,
             "cache_prompt": cache_prompt,
             "stream": stream,
@@ -183,13 +206,17 @@ class ServerClient:
 @dataclass(slots=True)
 class DispatchTarget:
     """Everything C4 needs to know about ONE role's server to dispatch a
-    call and admit it: the client, the per-role generation budget, and the
-    slot capacity pre-flight rejects against (servers.<role>.ctx //
-    servers.<role>.parallel)."""
+    call and admit it: the client, the per-role generation budget, the slot
+    capacity pre-flight rejects against (servers.<role>.ctx //
+    servers.<role>.parallel), and the per-role sampling params
+    (cfg.scaffold.sampling.<role>) that must reach every /completion call."""
 
     client: ServerClient
     max_predict: int
     slot_capacity_tokens: int
+    temperature: float
+    top_p: float
+    seed: int
 
 
 def _new_step(call_id: str, retry_idx: int, role: str) -> dict[str, Any]:
@@ -232,20 +259,26 @@ class LLMDispatcher:
                      on_step: Callable[[dict[str, Any]], None] | None = None) -> "LLMDispatcher":
         """Build the real, network-talking dispatcher from a validated
         Config. Host is always 127.0.0.1 -- this is a single-box runtime and
-        ServerConfig carries no host field."""
+        ServerConfig carries no host field.
+
+        ONLY a "leaf" target is built. Root traffic never goes through
+        LLMDispatcher -- `rlm.rootclient.RootConversation` talks to a raw
+        `ServerClient` directly with `cfg.scaffold.sampling.root` -- so a
+        "root" DispatchTarget here would be dead code that real traffic
+        never reaches, and would silently apply the leaf-sized semaphore to
+        root calls if anything ever queried `role="root"` by mistake.
+        `query(role="root", ...)` raises DispatchError instead."""
         max_predict = cfg.scaffold.budgets.max_predict
+        leaf_sampling = cfg.scaffold.sampling.leaf
         targets = {
-            "root": DispatchTarget(
-                client=ServerClient(f"http://127.0.0.1:{cfg.servers.root.port}",
-                                     timeout=cfg.scaffold.retries.per_call_timeout_s),
-                max_predict=max_predict.root,
-                slot_capacity_tokens=cfg.servers.root.ctx // cfg.servers.root.parallel,
-            ),
             "leaf": DispatchTarget(
                 client=ServerClient(f"http://127.0.0.1:{cfg.servers.leaf.port}",
                                      timeout=cfg.scaffold.retries.per_call_timeout_s),
                 max_predict=max_predict.leaf,
                 slot_capacity_tokens=cfg.servers.leaf.ctx // cfg.servers.leaf.parallel,
+                temperature=leaf_sampling.temperature,
+                top_p=leaf_sampling.top_p,
+                seed=leaf_sampling.seed,
             ),
         }
         return cls(targets=targets, parallel=cfg.servers.leaf.parallel,
@@ -293,63 +326,70 @@ class LLMDispatcher:
             self._record(step)
             raise DispatchError(step["error_detail"])
 
-        async with self.semaphore:
-            last_exc: Exception | None = None
-            for attempt in range(self._retries.max_attempts):
-                step = _new_step(call_id, attempt, role)
-                t_dispatch = utc_now()
-                step["t_dispatch"] = t_dispatch
-                try:
+        last_exc: Exception | None = None
+        for attempt in range(self._retries.max_attempts):
+            step = _new_step(call_id, attempt, role)
+            t_dispatch = utc_now()
+            step["t_dispatch"] = t_dispatch
+            try:
+                # Held only around THIS attempt, not the backoff sleep
+                # below: a failed attempt pins no id_slot, so there is no
+                # affinity to preserve, and holding the semaphore across a
+                # 1-4s backoff would starve other queued leaf calls for no
+                # benefit (up to 8 idle slots under a 32-call fan-out).
+                async with self.semaphore:
                     result = await target.client.completion(
-                        prompt, n_predict=target.max_predict, stream=True)
-                except asyncio.CancelledError:
-                    # A genuine abort: closing the stream already freed the
-                    # slot server-side. No final event exists, so slot_id/
-                    # timings/tokens stay NULL on this step (recipes
-                    # §serverapi integration notes).
-                    step["status"] = StepStatus.CANCELLED
-                    step["t_end"] = utc_now()
-                    self._record(step)
-                    raise
-                except Exception as exc:  # noqa: BLE001 -- network/HTTP/
-                    # protocol failures are all retryable the same way.
-                    last_exc = exc
-                    step["status"] = StepStatus.ERROR
-                    step["error_detail"] = str(exc)
-                    step["t_end"] = utc_now()
-                    self._record(step)
-                    if attempt < self._retries.max_attempts - 1:
-                        backoff = self._retries.backoff_s[
-                            min(attempt, len(self._retries.backoff_s) - 1)]
-                        await asyncio.sleep(backoff)
-                        continue
-                    raise DispatchError(
-                        f"dispatch failed after {self._retries.max_attempts} attempts "
-                        f"(role={role!r}, call_id={call_id!r}): {exc}") from exc
-                else:
-                    t_end = utc_now()
-                    queue_ms = None
-                    if result.t_first_byte is not None:
-                        queue_ms = (
-                            (result.t_first_byte - t_dispatch).total_seconds() * 1000.0
-                            - result.prompt_ms
-                        )
-                    step.update(
-                        status=StepStatus.OK,
-                        t_first_byte=result.t_first_byte,
-                        t_end=t_end,
-                        tokens_in=result.tokens_in,
-                        tokens_out=result.tokens_out,
-                        tokens_cached=result.cache_n,
-                        slot_id=result.slot_id,
-                        latency_queue_ms=queue_ms,
-                        latency_prefill_ms=result.prompt_ms,
-                        latency_decode_ms=result.predicted_ms,
+                        prompt, n_predict=target.max_predict,
+                        temperature=target.temperature, top_p=target.top_p,
+                        seed=target.seed, stream=True)
+            except asyncio.CancelledError:
+                # A genuine abort: closing the stream already freed the
+                # slot server-side. No final event exists, so slot_id/
+                # timings/tokens stay NULL on this step (recipes
+                # §serverapi integration notes).
+                step["status"] = StepStatus.CANCELLED
+                step["t_end"] = utc_now()
+                self._record(step)
+                raise
+            except Exception as exc:  # noqa: BLE001 -- network/HTTP/
+                # protocol failures are all retryable the same way.
+                last_exc = exc
+                step["status"] = StepStatus.ERROR
+                step["error_detail"] = str(exc)
+                step["t_end"] = utc_now()
+                self._record(step)
+                if attempt < self._retries.max_attempts - 1:
+                    backoff = self._retries.backoff_s[
+                        min(attempt, len(self._retries.backoff_s) - 1)]
+                    await asyncio.sleep(backoff)
+                    continue
+                raise DispatchError(
+                    f"dispatch failed after {self._retries.max_attempts} attempts "
+                    f"(role={role!r}, call_id={call_id!r}): {exc}") from exc
+            else:
+                t_end = utc_now()
+                queue_ms = None
+                if result.t_first_byte is not None:
+                    queue_ms = (
+                        (result.t_first_byte - t_dispatch).total_seconds() * 1000.0
+                        - result.prompt_ms
                     )
-                    self._record(step)
-                    return result.content
-            # unreachable: the loop above always returns or raises.
-            raise DispatchError(f"exhausted retries with no result: {last_exc}")
+                step.update(
+                    status=StepStatus.OK,
+                    t_first_byte=result.t_first_byte,
+                    t_end=t_end,
+                    tokens_in=result.tokens_in,
+                    tokens_out=result.tokens_out,
+                    tokens_cached=result.cache_n,
+                    slot_id=result.slot_id,
+                    latency_queue_ms=queue_ms,
+                    latency_prefill_ms=result.prompt_ms,
+                    latency_decode_ms=result.predicted_ms,
+                )
+                self._record(step)
+                return result.content
+        # unreachable: the loop above always returns or raises.
+        raise DispatchError(f"exhausted retries with no result: {last_exc}")
 
 
 # --------------------------------------------------------------------------- #

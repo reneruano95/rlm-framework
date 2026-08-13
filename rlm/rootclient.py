@@ -20,6 +20,10 @@ wrong), THEN select a fenced code block per `scaffold.cell_extraction`
 prompt text (generated from the same config key, Conflict 5) can never
 disagree.
 
+Sampling: every /completion call carries `cfg.scaffold.sampling.root`
+(temperature, top_p, seed) verbatim -- real, non-defaulted config, not
+`rlm.dispatcher.ServerClient.completion`'s (deliberately absent) defaults.
+
 D26 append-only: `append_user` only ever appends; nothing already sent is
 ever rewritten. `turn()` reconstructs the assistant history message as
 exactly what the token stream contained -- the template's own text between
@@ -112,6 +116,13 @@ class RootConversation:
         self._max_predict = cfg.scaffold.budgets.max_predict.root
         self._languages = cfg.scaffold.cell_extraction.languages
         self._select = cfg.scaffold.cell_extraction.select
+        # Real, non-defaulted sampling config (§6: config_snapshot must
+        # record what actually ran; the benchmark's per-seed discipline is
+        # meaningless if this never reaches the server).
+        root_sampling = cfg.scaffold.sampling.root
+        self._temperature = root_sampling.temperature
+        self._top_p = root_sampling.top_p
+        self._seed = root_sampling.seed
         self.messages: list[dict[str, Any]] = []
         if system is not None:
             self.messages.append({"role": "system", "content": system})
@@ -130,7 +141,8 @@ class RootConversation:
         view_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
         result = await self._client.completion(
-            rendered, n_predict=self._max_predict, stream=True)
+            rendered, n_predict=self._max_predict, temperature=self._temperature,
+            top_p=self._top_p, seed=self._seed, stream=True)
         raw = result.content
 
         stripped = strip_reasoning(raw)

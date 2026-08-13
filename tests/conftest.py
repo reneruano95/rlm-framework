@@ -145,6 +145,7 @@ class MockLlamaServer:
         self.max_concurrent = 0
         self.restart_count = 0
         self.last_request_disconnected = False
+        self.last_completion_body: dict | None = None
         self._concurrent = 0
         self._fail_remaining = 0
         self._lock = threading.Lock()
@@ -184,6 +185,7 @@ class MockLlamaServer:
             def _handle_completion(self):
                 body = _read_json_body(self)
                 prompt = body.get("prompt", "")
+                outer.last_completion_body = body
                 with outer._lock:
                     outer.dispatch_count += 1
                     outer._concurrent += 1
@@ -285,19 +287,24 @@ class MockLlamaServer:
         self.shutdown()
 
     def dispatcher(self, *, slot_capacity_tokens: int = 32768, parallel: int = 4,
-                    max_predict: int = 64, max_attempts: int = 3):
+                    max_predict: int = 64, max_attempts: int = 3,
+                    temperature: float = 0.3, top_p: float = 0.9, seed: int = 1):
         from rlm.config import Retries
         from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient
 
         client = ServerClient(self.base_url, timeout=5.0)
         target = DispatchTarget(client=client, max_predict=max_predict,
-                                 slot_capacity_tokens=slot_capacity_tokens)
+                                 slot_capacity_tokens=slot_capacity_tokens,
+                                 temperature=temperature, top_p=top_p, seed=seed)
         # Fast backoff -- retry TIMING isn't what these tests assert on, and
         # the real 1s/4s backoff (scaffold.retries in config.yaml) would
         # make the retry test take ~5s for no additional coverage.
         retries = Retries(max_attempts=max_attempts, backoff_s=[0.01, 0.02],
                            per_call_timeout_s=5.0)
-        dispatcher = LLMDispatcher(targets={"leaf": target, "root": target},
+        # Only "leaf" -- mirrors the real from_config() shape (fix 4): root
+        # traffic never reaches LLMDispatcher, so no test should be able to
+        # exercise role="root" here either.
+        dispatcher = LLMDispatcher(targets={"leaf": target},
                                     parallel=parallel, retries=retries)
         self._dispatchers.append(dispatcher)
         return dispatcher
@@ -353,6 +360,7 @@ class FakeRootServer:
     def __init__(self, base_cfg_dict: dict) -> None:
         self._base_cfg_dict = base_cfg_dict
         self.last_completion_prompt: str | None = None
+        self.last_completion_body: dict | None = None
         self.last_template_kwargs: dict | None = None
         self._clients: list[Any] = []
         outer = self
@@ -397,6 +405,7 @@ class FakeRootServer:
             def _handle_completion(self):
                 body = _read_json_body(self)
                 outer.last_completion_prompt = body.get("prompt", "")
+                outer.last_completion_body = body
                 content = "```repl\nfinal_answer(1)\n```"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")

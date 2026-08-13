@@ -54,3 +54,17 @@ async def test_thinking_is_disabled_by_default(fake_root_server):
     await conv.turn()
     kw = fake_root_server.last_template_kwargs
     assert kw["chat_template_kwargs"]["enable_thinking"] is False  # D15
+
+
+async def test_root_sampling_params_reach_the_server(fake_root_server, minimal_cfg_dict):
+    """cfg.scaffold.sampling.root must reach the server on every /completion
+    call -- real, non-defaulted config (§6 config_snapshot records it as
+    what actually ran)."""
+    conv = fake_root_server.conversation(system="SYS")
+    conv.append_user("hi")
+    await conv.turn()
+    body = fake_root_server.last_completion_body
+    expected = minimal_cfg_dict["scaffold"]["sampling"]["root"]
+    assert body["temperature"] == expected["temperature"]
+    assert body["top_p"] == expected["top_p"]
+    assert body["seed"] == expected["seed"]

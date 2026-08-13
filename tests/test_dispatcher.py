@@ -1,9 +1,11 @@
 # tests/test_dispatcher.py
+import copy
 import hashlib
 
 import pytest
 
-from rlm.dispatcher import MockDispatcher
+from rlm.config import Config
+from rlm.dispatcher import LLMDispatcher, MockDispatcher
 from rlm.errors import DispatchError, StepStatus
 
 
@@ -58,3 +60,55 @@ async def test_cancellation_aborts_the_stream(mock_server):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert mock_server.last_request_disconnected
+
+
+async def test_retry_exhaustion_raises_after_max_attempts_all_logged(mock_server):
+    """Distinct from test_server_death_produces_error_status_not_a_restart,
+    which never enters the retry loop at all (it fails at the pre-flight
+    /tokenize stage against a dead server). Here the server stays fully
+    reachable -- /tokenize succeeds -- and only /completion fails, 3
+    consecutive times, so this actually exercises retry exhaustion."""
+    mock_server.fail_times(3)
+    d = mock_server.dispatcher()
+    with pytest.raises(DispatchError):
+        await d.query("q", role="leaf", call_id="c1")
+    assert len(d.steps) == 3
+    assert {s["call_id"] for s in d.steps} == {"c1"}
+    assert [s["retry_idx"] for s in d.steps] == [0, 1, 2]
+    assert all(s["status"] == StepStatus.ERROR for s in d.steps)
+    assert mock_server.restart_count == 0  # the scaffold never restarts servers
+
+
+async def test_leaf_sampling_params_reach_the_server(mock_server, minimal_cfg_dict):
+    """cfg.scaffold.sampling.leaf must reach the server on every /completion
+    call -- real, non-defaulted config, not ServerClient.completion's
+    (deliberately absent) greedy defaults."""
+    raw = copy.deepcopy(minimal_cfg_dict)
+    raw["servers"]["leaf"]["port"] = mock_server.port
+    cfg = Config.model_validate(raw)
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        await d.query("q", role="leaf", call_id="c1")
+    finally:
+        await d.aclose()
+    body = mock_server.last_completion_body
+    expected = cfg.scaffold.sampling.leaf
+    assert body["temperature"] == expected.temperature
+    assert body["top_p"] == expected.top_p
+    assert body["seed"] == expected.seed
+
+
+async def test_root_role_is_not_a_valid_dispatch_target_from_config(minimal_cfg_dict, mock_server):
+    """Root traffic never goes through LLMDispatcher (rootclient talks to a
+    raw ServerClient directly), so from_config() must not build a "root"
+    target that could silently apply the leaf-sized semaphore to root
+    calls if ever queried by mistake."""
+    raw = copy.deepcopy(minimal_cfg_dict)
+    raw["servers"]["leaf"]["port"] = mock_server.port
+    cfg = Config.model_validate(raw)
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        with pytest.raises(DispatchError):
+            await d.query("q", role="root", call_id="c1")
+    finally:
+        await d.aclose()
