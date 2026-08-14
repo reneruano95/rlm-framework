@@ -608,24 +608,27 @@ class _EpisodeRun:
             self.lifecycle.event("server_health", role="leaf", state="rotating",
                                   episode_id=self.episode_id, rotation=rotation,
                                   reason=SLOT_POOL_EXHAUSTED)
-            await self.dispatcher.quiesce()
-            try:
-                await self.process_manager.restart()
-                await self._rehandshake_leaf()
-                self.dispatcher.rotate_pool()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 -- any failure here is
-                # terminal for the episode: the alternative to a completed
-                # rotation is reusing a slot that has held another document.
-                self.lifecycle.event("server_health", role="leaf",
-                                      state="rotation_failed",
-                                      episode_id=self.episode_id,
-                                      rotation=rotation, error=repr(exc))
-                await self._trip(Outcome.ERROR, ROTATION_FAILED)
-                raise
-            finally:
-                self.dispatcher.resume()
+            # `rotating()` is quiesce -> ... -> resume with the reopen in a
+            # `finally` INSIDE C4, so no path out of this block -- including a
+            # cancellation landing on the quiesce itself -- can leave the gate
+            # closed with nobody to reopen it. That failure mode is a hang, not
+            # a refusal: parked calls would produce no step and no outcome.
+            async with self.dispatcher.rotating():
+                try:
+                    await self.process_manager.restart()
+                    await self._rehandshake_leaf()
+                    self.dispatcher.rotate_pool()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- any failure here is
+                    # terminal for the episode: the alternative to a completed
+                    # rotation is reusing a slot that has held another document.
+                    self.lifecycle.event("server_health", role="leaf",
+                                          state="rotation_failed",
+                                          episode_id=self.episode_id,
+                                          rotation=rotation, error=repr(exc))
+                    await self._trip(Outcome.ERROR, ROTATION_FAILED)
+                    raise
             self._rotations = rotation
             self.lifecycle.event(
                 "server_health", role="leaf", state="rotated",

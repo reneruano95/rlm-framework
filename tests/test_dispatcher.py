@@ -729,6 +729,49 @@ async def test_a_reassigned_slot_is_caught_and_logged_as_an_error(mock_server):
     assert step["slot_id"] == 7            # what actually served, for forensics
 
 
+async def test_the_answer_off_a_foreign_slot_is_leak_checked_before_it_is_discarded(
+        mock_server):
+    """The one answer known to have come off a slot the scaffold did not choose
+    is the one answer that MUST be checked. Recording `leak_detected=None`
+    ("not checked") on a slot mismatch is exactly backwards: a mismatched slot
+    is the highest-prior-probability leak in the system -- it is R13's own
+    reproducing condition, a document answered from a slot that has held other
+    documents. The answer is still discarded (status=error, SlotMismatch
+    raised); what changes is that the trace records what was in it."""
+    from rlm.dispatcher import SlotMismatch
+
+    mock_server.slot_override = 7            # asked for 0, answered on 7
+    mock_server.answer = f"The archive key is {FOREIGN_UUID}."
+    d = mock_server.dispatcher(parallel=4)
+    d.set_corpus(["this window says nothing",
+                  f"another window holds key {FOREIGN_UUID}"])
+    with pytest.raises(SlotMismatch):
+        await d.query("Q?", role="leaf", call_id="c1",
+                       chunk="this window says nothing")
+    step = d.steps[-1]
+    assert step["status"] == StepStatus.ERROR
+    assert step["leak_detected"] is True
+    assert FOREIGN_UUID in step["leak_detail"]
+    assert step["slot_id"] == 7
+
+
+async def test_a_clean_answer_off_a_foreign_slot_is_recorded_as_checked(mock_server):
+    """…and the verdict is the detector's, not a blanket True: a mismatch that
+    happened to return nothing foreign records `False` (checked, clean),
+    because a verdict invented by the error path would be worth nothing in the
+    S4 contamination count §8 now requires per arm."""
+    from rlm.dispatcher import SlotMismatch
+
+    mock_server.slot_override = 7
+    d = mock_server.dispatcher(parallel=4)
+    d.set_corpus(["this window says nothing", "another window entirely"])
+    with pytest.raises(SlotMismatch):
+        await d.query("Q?", role="leaf", call_id="c1",
+                       chunk="this window says nothing")
+    assert d.steps[-1]["leak_detected"] is False
+    assert d.steps[-1]["leak_detail"] is None
+
+
 async def test_the_fixture_reproduces_the_silent_reassignment_it_guards_against(mock_server):
     """Fidelity check on the fake server: without this behaviour the
     assertion above would agree with any implementation at all."""
@@ -863,6 +906,52 @@ async def test_quiesce_waits_for_in_flight_calls_and_gates_new_ones(mock_server)
     d.resume()
     assert await asyncio.wait_for(blocked, timeout=5)
     assert mock_server.requested_slots()[-1] == 0   # a virgin slot on the new pool
+
+
+async def test_a_cancelled_quiesce_does_not_leave_the_gate_closed(mock_server):
+    """`quiesce()` closes the gate and then waits. Cancelling that wait --
+    a C5 budget kill, an operator Ctrl-C, or any task-group teardown while a
+    rotation is being set up -- must not leave the gate closed with nobody
+    left to reopen it: every later `query()` would park on it forever, which
+    is a hang, not a refusal. The release has to be exception-safe."""
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=4)
+    slow = asyncio.create_task(d.query("slow", role="leaf", call_id="c1"))
+    await asyncio.sleep(0.3)
+    assert d.in_flight == 1
+
+    quiesced = asyncio.create_task(d.quiesce())
+    await asyncio.sleep(0.1)
+    assert not quiesced.done()
+
+    quiesced.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await quiesced
+
+    # The gate is open again, so a new call runs instead of hanging.
+    answered = await asyncio.wait_for(
+        d.query("Q?", role="leaf", call_id="c2", chunk="w1"), timeout=5)
+    assert answered
+
+    slow.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await slow
+
+
+async def test_the_rotation_context_manager_reopens_the_gate_on_any_path(mock_server):
+    """The runner drives quiesce/rotate/resume; `rotating()` is that sequence
+    with the reopen in a `finally`, so a rotation that raises (a restart that
+    failed, a handshake that refused the new process) cannot strand parked
+    calls on a closed gate."""
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    with pytest.raises(RuntimeError):
+        async with d.rotating():
+            raise RuntimeError("the restart failed")
+    assert await asyncio.wait_for(
+        d.query("Q?", role="leaf", call_id="c1", chunk="w0"), timeout=5)
 
 
 async def test_rotating_the_pool_makes_every_slot_virgin_again(mock_server):

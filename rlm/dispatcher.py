@@ -126,9 +126,11 @@ DispatchError instead.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -690,18 +692,52 @@ class LLMDispatcher:
         return self._pool_generation
 
     async def quiesce(self) -> None:
-        """Close the gate and wait until no call holds a slot.
+        """Close the gate and wait until no call is talking to the leaf.
 
         After this returns, every call that was talking to the leaf has
-        finished and every new one is parked BEFORE it takes a slot -- which is
-        the precondition for replacing the process underneath. Deliberately
-        without a timeout of its own: a call can legitimately be mid-retry for
+        finished -- pre-flight round trips included -- and every new one is
+        parked BEFORE it sends its first byte, which is the precondition for
+        replacing the process underneath. Deliberately without a timeout of its
+        own: a call can legitimately be mid-retry for
         `max_attempts x per_call_timeout_s`, and the thing that must bound this
         wait is C5's wall clock (whose budget the rotation is spending), not a
         second, quieter deadline here.
+
+        THE WAIT IS EXCEPTION-SAFE, and that is not decoration. Closing the
+        gate and then being cancelled -- a C5 budget kill, an operator Ctrl-C,
+        a task group unwinding -- would otherwise leave the gate closed with
+        nobody left to reopen it, and every later `query()` would park on it
+        forever. That is a hang, not a refusal: it produces no step, no
+        outcome and no trace row. So any failure to complete the wait reopens
+        the gate on the way out; the caller that wanted a rotation takes its
+        error, and the traffic it was quiescing carries on against the process
+        that is still there.
         """
         self._gate.clear()
-        await self._idle.wait()
+        try:
+            await self._idle.wait()
+        except BaseException:
+            self._gate.set()
+            raise
+
+    @contextlib.asynccontextmanager
+    async def rotating(self) -> "AsyncIterator[None]":
+        """quiesce -> (caller replaces the process) -> resume, reopen guaranteed.
+
+        The whole §5 C4 sequence a caller must not get wrong, with the reopen
+        in a `finally`: a rotation that raises (a restart that failed, a
+        handshake that refused the new process, a cancellation) must still
+        leave parked calls able to take the refusal they would have taken
+        anyway. `rotate_pool()` stays the caller's to invoke, inside the block,
+        because only the caller knows whether the process was actually
+        replaced -- adopting a fresh pool for a process that never restarted is
+        R13 reintroduced by R13's own mitigation.
+        """
+        await self.quiesce()
+        try:
+            yield
+        finally:
+            self.resume()
 
     def rotate_pool(self) -> None:
         """Adopt a fresh pool: a new process has every slot virgin again.
@@ -1048,6 +1084,23 @@ class LLMDispatcher:
                 # is NOT retried: the same request would ask for the same slot
                 # and learn nothing, while the answer in hand cannot be
                 # trusted. `slot_id` records what actually served.
+                #
+                # THE DETECTOR RUNS FIRST, and on this path above all others.
+                # The answer that came off a slot C4 did not choose is the one
+                # answer in the system with the highest prior probability of
+                # carrying another document's content -- a foreign slot is
+                # R13's reproducing condition stated exactly ("a slot that has
+                # held one document injects it into answers about the next").
+                # Recording `leak_detected=None` (NOT CHECKED) here, as this
+                # did, was therefore backwards: the check was skipped precisely
+                # where it was most likely to fire, and §8's per-arm
+                # contamination count -- the S4 monitor R13 made binding --
+                # would have been blind to the events most likely to be leaks.
+                # The answer is still discarded and still not retried; what
+                # the trace gains is the verdict on what was in it.
+                verdict = self.leak_verdict(result.content, sent)
+                step["leak_detected"] = verdict.detected
+                step["leak_detail"] = verdict.detail
                 if result.slot_id != slot:
                     step["status"] = StepStatus.ERROR
                     step["error_detail"] = (
@@ -1057,10 +1110,6 @@ class LLMDispatcher:
                         "documents, so the answer is discarded (R13)")
                     self._record(step)
                     raise SlotMismatch(step["error_detail"])
-                # R13's detector, on every answer, at zero model cost.
-                verdict = self.leak_verdict(result.content, sent)
-                step["leak_detected"] = verdict.detected
-                step["leak_detail"] = verdict.detail
                 self._record(step)
                 return result.content
         # unreachable: the loop above always returns or raises.
