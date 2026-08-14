@@ -1,0 +1,54 @@
+{
+  "generator": "s2/make_sweep_fixtures.py",
+  "generator_sha256": "ceabab8f4035997c219f66393e3e7e357e50fc6a83a44712ed9fe29f191dbbb2",
+  "token_counter": "leaf:/tokenize",
+  "seed": 9,
+  "built_at": "2026-08-14T01:35:58+00:00",
+  "cells": {
+    "s2-640-p50": {
+      "cell_id": "s2-640-p50",
+      "size_tokens": 640,
+      "measured_tokens": 638,
+      "position": 0.5,
+      "chars": 2274,
+      "seed": 9,
+      "sha256": "7edf65b9107e1a854bc870823a2ded7154d7db04ab13c2d204a2cd46b2ef4b45",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Lumsdunewick Exchange is 00e8ccd9-61d6-4957-bc6e-5f5b199fbad7. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 1414,
+          "token_depth": 0.5925
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Pryldunebourne Depository enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Ilvhasksted\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Erlfenncombe\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 1616,
+          "token_depth": 0.7085
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Lumsdunewick Exchange. What is that key? Reply with the key itself and nothing else.",
+          "expected": "00e8ccd9-61d6-4957-bc6e-5f5b199fbad7",
+          "expected_kind": "uuid",
+          "entity": "the Lumsdunewick Exchange"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Pryldunebourne Depository has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Ilvhasksted Erlfenncombe",
+          "expected_kind": "name",
+          "entity": "the Pryldunebourne Depository"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Aldfennness Registry. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Aldfennness Registry"
+        }
+      },
+      "chunk_path": "s2\\fixtures-refusal-640-s9\\s2-640-p50.chunk.txt"
+    }
+  }
+}

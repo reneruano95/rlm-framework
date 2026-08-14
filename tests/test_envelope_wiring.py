@@ -80,7 +80,7 @@ def test_a_pinned_envelope_block_that_drifted_is_refused(tmp_path):
 
 
 @pytest.mark.parametrize("name", ["leaf-prefix.v1.md", "leaf-prefix.v2.md",
-                                  "leaf-envelope.v1.md"])
+                                  "leaf-envelope.v1.md", "leaf-envelope.v2.md"])
 def test_the_leaf_prompt_files_carry_no_volatile_token(name):
     """§4's byte-identical head: no timestamps, ids or counters may enter the
     prefix. The changelog header carries dates and is stripped before render,
@@ -89,9 +89,30 @@ def test_the_leaf_prompt_files_carry_no_volatile_token(name):
 
     body = _strip_changelog((PROMPTS / name).read_text(encoding="utf-8"))
     assert "2026" not in body
-    assert "{" not in body or name == "leaf-envelope.v1.md"   # only JSON examples
+    if not name.startswith("leaf-envelope"):
+        assert "{" not in body          # only the envelope's JSON examples
     for volatile in ("run_id", "episode_id", "task_id", "timestamp", "chunk_index"):
         assert volatile not in body
+
+
+def test_the_envelope_block_ships_at_v2_and_v1_stays_on_disk_unedited():
+    """v1's override clause pointed the wrong way — it said it outranked the
+    instructions "above", while §4 puts the QUESTION last, so the question's
+    "reply with the key itself and nothing else" won and a smoke run returned 12
+    bare answers and zero JSON. v2 names the question explicitly. v1 is kept,
+    unmodified and unpinned, because the registry rule is monotonic versions and
+    because the reason it was superseded is part of the record."""
+    from rlm.config import _strip_changelog
+
+    v1 = _strip_changelog((PROMPTS / "leaf-envelope.v1.md").read_text(encoding="utf-8"))
+    v2 = _strip_changelog((PROMPTS / "leaf-envelope.v2.md").read_text(encoding="utf-8"))
+    assert "overrides any formatting instruction above" in v1
+    assert "including the question's own" in v2
+    # The contract itself did not move: same three fields, same abstain rule, so
+    # the correction is about WHERE the format wins, not about what it asks for.
+    for clause in ('`"answer"`', '`"evidence"`', '`"abstain"`',
+                   'Set `"abstain": true` whenever the excerpt does not answer'):
+        assert clause in v1 and clause in v2
 
 
 def test_v1_is_untouched_by_this_work():

@@ -116,24 +116,51 @@ class PinnedLeafCaller:
     slot_capacity_tokens: int | None = None
     markers: tuple[str, ...] = field(default_factory=tuple)
     prefix_tokens: int | None = None
+    #: Does this caller's prefix ask for the JSON envelope? Carried, not acted
+    #: on: the caller still sends and records ONE un-retried draw, and the
+    #: parse/validate happens in the scorer. A retry here would confound the S2
+    #: refusal A/B -- an arm that emits more malformed replies would silently
+    #: get more draws at the same question (`s2/run_refusal_ab.py`).
+    envelope: bool = False
+
+    @property
+    def prefix_sha256(self) -> str:
+        """The rendered prefix's own hash, on every record. §4's byte-identical
+        head is the contract the whole A/B rests on, and an arm labelled `v2`
+        that actually sent `v1` bytes would be undetectable without this."""
+        return hashlib.sha256(self.system_prefix.encode("utf-8")).hexdigest()
 
     @classmethod
-    def from_config(cls, cfg: Config, *, timeout: float | None = None) -> "PinnedLeafCaller":
+    def from_config(cls, cfg: Config, *, timeout: float | None = None,
+                    system_prefix: str | None = None,
+                    envelope: bool | None = None) -> "PinnedLeafCaller":
         """Production's bytes and production's sampling, from the validated
         config — including the sha256-pinned leaf prefix, which is the ONE
-        string §4's byte-identical-head contract is about."""
+        string §4's byte-identical-head contract is about.
+
+        `system_prefix`/`envelope` override that pair, and ONLY that pair, for
+        the refusal A/B: its arms differ in exactly the system head (v1 or v2,
+        with or without the envelope block), and every other byte — sampling,
+        max_predict, slot capacity, the user-segment composition — has to stay
+        the shipped config's or the arms would differ in more than one thing.
+        Both overrides still come from sha256-pinned registry files; there is no
+        path here for an inline prompt string.
+        """
         leaf = cfg.servers.leaf
         sampling = cfg.scaffold.sampling.leaf
         return cls(
             client=ServerClient(
                 f"http://127.0.0.1:{leaf.port}",
                 timeout=timeout or cfg.scaffold.retries.per_call_timeout_s),
-            system_prefix=cfg.prompt_registry().load().leaf_prefix(),
+            system_prefix=(cfg.prompt_registry().load().leaf_prefix()
+                           if system_prefix is None else system_prefix),
             max_predict=cfg.scaffold.budgets.max_predict.leaf,
             temperature=sampling.temperature,
             top_p=sampling.top_p,
             enable_thinking=cfg.scaffold.leaf.enable_thinking,
             slot_capacity_tokens=leaf.ctx // leaf.parallel,
+            envelope=(cfg.scaffold.leaf_envelope.enabled if envelope is None
+                      else envelope),
         )
 
     async def aclose(self) -> None:

@@ -159,7 +159,7 @@ scaffold:
     # hash-pinned even while `scaffold.leaf_envelope.enabled` is false, so a
     # drifted or deleted block is refused at config load rather than at the
     # moment someone flips the switch.
-    leaf_envelope: { path: prompts/leaf-envelope.v1.md, sha256: fb8b9b1d23f28b0c7cc584bd387be363167b2bae099fe0ee1ea055888945d285 }
+    leaf_envelope: { path: prompts/leaf-envelope.v2.md, sha256: 58d813fa36766e4ea9800b9004577d31b6d71fcbb26d38f4b0ef83d911d12867 }
     strategy_templates:
       needle: { path: prompts/strat-needle.v1.md, sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d }
       # PINNED v2 SINCE 2026-08-13. v1 was authored against a PARTITIONING
