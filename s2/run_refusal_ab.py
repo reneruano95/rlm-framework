@@ -687,10 +687,12 @@ async def _amain(args) -> int:
     dirs = [Path(d) for d in args.fixtures]
     cells, corpus = load_cells(dirs)
 
+    report_md = Path(args.report_md) if args.report_md else REPORT_MD
     if args.phase == "report":
         records = _attach_chunks(read_runs(args.out), corpus)
-        REPORT_MD.write_text(regenerate(records), encoding="utf-8", newline="\n")
-        print(f"wrote {REPORT_MD}")
+        report_md.write_text(regenerate(records, report_md), encoding="utf-8",
+                             newline="\n")
+        print(f"wrote {report_md}")
         return 0
 
     from rlm.config import PromptRegistry, load_config
@@ -743,8 +745,9 @@ async def _amain(args) -> int:
 
     if not args.no_report:
         records = _attach_chunks(read_runs(args.out), corpus)
-        REPORT_MD.write_text(regenerate(records), encoding="utf-8", newline="\n")
-        print(f"wrote {REPORT_MD}")
+        report_md.write_text(regenerate(records, report_md), encoding="utf-8",
+                             newline="\n")
+        print(f"wrote {report_md}")
     return 0
 
 
@@ -764,6 +767,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seeds", nargs="+", type=int, default=list(TRIAL_SEEDS))
     parser.add_argument("--first-slot", type=int, default=0,
                         help="first never-reused slot index (R13)")
+    parser.add_argument("--report-md", default=None,
+                        help="where to render the report (default "
+                             "s2/REFUSAL-AB.md). The secondary chunk-size run "
+                             "gets its own file so BOTH reports stay generated "
+                             "artifacts rather than one being hand-copied.")
     parser.add_argument("--no-report", action="store_true")
     args = parser.parse_args(argv)
     return asyncio.run(_amain(args))
