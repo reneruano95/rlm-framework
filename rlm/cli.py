@@ -656,10 +656,16 @@ def episode_config(snapshot: dict) -> tuple[Config, Any]:
         raise ConfigError("config_snapshot carries no scaffold block; this "
                           "episode predates snapshot-based replay")
     prompts = (fields["scaffold"].get("prompts") or {})
+    # The envelope block is optional and only present from the S2 A/B onward.
+    # It must be rebuilt when the snapshot has it, or `registry.hashes()` comes
+    # back missing the `leaf_envelope.*` entries the episode recorded and every
+    # replay of an envelope episode reads as prompt DRIFT.
+    envelope_ref = prompts.get("leaf_envelope")
     try:
         registry = PromptRegistry.from_files(
             root_path=Path(prompts["root"]["path"]),
             leaf_prefix_path=Path(prompts["leaf_prefix"]["path"]),
+            leaf_envelope_path=(Path(envelope_ref["path"]) if envelope_ref else None),
             strategy_paths={cat: Path(ref["path"])
                             for cat, ref in prompts["strategy_templates"].items()},
         ).load()

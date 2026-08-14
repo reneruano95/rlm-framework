@@ -146,7 +146,20 @@ scaffold:
     # never taught the API it is graded on. v1/v2 remain on disk, unmodified and
     # unpinned, as the recorded S1 arms; s1/run_s1.py re-pins them itself.
     root: { path: prompts/root.v3.md, sha256: 3fb653e3eacafa50b53d12c08cc70982fe4a6ad19bf01cffbf7966771917b6b6 }
+    # LEAF PREFIX: v1 REMAINS PINNED pending the S2 refusal A/B
+    # (`s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
+    # refusal-strengthened arm; v1 is the control behind every leaf measurement
+    # recorded so far -- including the 95% false-positive rate the A/B exists to
+    # attack -- and is never edited. Whichever arm wins is pinned HERE, once,
+    # with the measurement cited.
     leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76 }
+    # The envelope's format block, appended to whichever prefix is pinned. Its
+    # own file and its own hash so the 2x2 (prefix x envelope) varies on two
+    # independent axes and neither prefix carries the format. Declared and
+    # hash-pinned even while `scaffold.leaf_envelope.enabled` is false, so a
+    # drifted or deleted block is refused at config load rather than at the
+    # moment someone flips the switch.
+    leaf_envelope: { path: prompts/leaf-envelope.v1.md, sha256: fb8b9b1d23f28b0c7cc584bd387be363167b2bae099fe0ee1ea055888945d285 }
     strategy_templates:
       needle: { path: prompts/strat-needle.v1.md, sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d }
       # PINNED v2 SINCE 2026-08-13. v1 was authored against a PARTITIONING
@@ -162,7 +175,13 @@ scaffold:
       synthesis: { path: prompts/strat-synthesis.v1.md, sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c }
       code_qa: { path: prompts/strat-codeqa.v1.md, sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e }
       default: { path: prompts/strat-default.v1.md, sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415 }
-  leaf_envelope: { enabled: false }
+  # DECIDED BY THE S2 A/B (`s2/REFUSAL-AB.md`), not by taste. `enabled` appends
+  # the format block to the leaf prefix and makes C4 parse/validate the reply
+  # scaffold-side; `grammar` is the SEPARATE server-side enforcement flag and is
+  # never trusted even when on -- llama.cpp has documented silent fail-open on
+  # schema-parse failure (§13), so scaffold-side validation runs identically
+  # either way.
+  leaf_envelope: { enabled: false, grammar: false }
   sandbox:
     # MUST be the real base interpreter, never the venv's Scripts\python.exe
     # trampoline (262 KB stub that re-execs the real interpreter as a CHILD

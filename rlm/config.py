@@ -159,11 +159,32 @@ class StrategyTemplates(_Strict):
 class PromptsCfg(_Strict):
     root: PromptRef
     leaf_prefix: PromptRef
+    #: The envelope's format instructions, APPENDED to whichever leaf prefix is
+    #: pinned rather than baked into one (spec §5, the S2 leaf-envelope A/B).
+    #: Its own file and its own sha256 so prefix and envelope vary
+    #: independently: that is what makes `leaf-prefix.v1.md` -- the control
+    #: behind every leaf measurement recorded so far -- usable as an arm of the
+    #: A/B without being edited. `null` when the envelope is not in use.
+    leaf_envelope: PromptRef | None = None
     strategy_templates: StrategyTemplates
 
 
 class LeafEnvelope(_Strict):
+    """The S2 leaf-envelope A/B's two switches (spec §5, §10 R5).
+
+    `enabled` turns on the whole mechanism: the format block is appended to the
+    leaf prefix, and C4 parses and validates the reply scaffold-side.
+
+    `grammar` is the SEPARATE, optional, server-side enforcement flag, and it is
+    off by default and never trusted even when on: llama.cpp has documented
+    silent fail-open on schema-parse failure (§13), so a server that accepted a
+    grammar is not evidence that one was applied. Scaffold-side validation runs
+    identically either way -- `grammar` can only change what the model emits,
+    never what the scaffold believes about it.
+    """
+
     enabled: bool = False
+    grammar: bool = False
 
 
 class SandboxCfg(_Strict):
@@ -361,6 +382,18 @@ class Config(_Strict):
                 "head-only output"
             )
 
+        # The envelope needs its format block, or it is on in name only: the
+        # leaf would be asked for nothing in particular and C4 would reject
+        # every plain-text reply it got back, turning the switch into a way to
+        # fail every leaf call three times.
+        if s.leaf_envelope.enabled and s.prompts.leaf_envelope is None:
+            raise ValueError(
+                "scaffold.leaf_envelope.enabled is true but "
+                "scaffold.prompts.leaf_envelope is null: the envelope's format "
+                "instructions must be a pinned registry file, appended to the "
+                "leaf prefix (spec §5)"
+            )
+
         # Every prompt path exists and its sha256 matches the pinned value
         # (when pinned) — brief's own qualifier. A no-op today (config.yaml
         # ships every sha256 as null); once Task 14 pins real hashes, a
@@ -387,9 +420,12 @@ class Config(_Strict):
 
     def _prompt_refs(self) -> list[tuple[str, PromptRef]]:
         prompts = self.scaffold.prompts
+        envelope = ([("leaf_envelope", prompts.leaf_envelope)]
+                    if prompts.leaf_envelope is not None else [])
         return [
             ("root", prompts.root),
             ("leaf_prefix", prompts.leaf_prefix),
+            *envelope,
             ("strategy_templates.needle", prompts.strategy_templates.needle),
             ("strategy_templates.aggregation", prompts.strategy_templates.aggregation),
             ("strategy_templates.synthesis", prompts.strategy_templates.synthesis),
@@ -423,6 +459,10 @@ class Config(_Strict):
             root_sha256=prompts.root.sha256,
             leaf_prefix_path=prompts.leaf_prefix.path,
             leaf_prefix_sha256=prompts.leaf_prefix.sha256,
+            leaf_envelope_path=(prompts.leaf_envelope.path
+                                if prompts.leaf_envelope else None),
+            leaf_envelope_sha256=(prompts.leaf_envelope.sha256
+                                  if prompts.leaf_envelope else None),
             strategy_paths={cat: ref.path for cat, ref in strategy_refs.items()},
             strategy_sha256={
                 cat: ref.sha256 for cat, ref in strategy_refs.items()
@@ -523,10 +563,16 @@ class PromptRegistry:
     root_sha256: str | None = None
     leaf_prefix_sha256: str | None = None
     strategy_sha256: dict[str, str] = field(default_factory=dict)
+    #: The envelope format block, appended to the leaf prefix when the envelope
+    #: is on. Its own file so the prefix arm and the envelope arm of the S2 A/B
+    #: vary independently and `leaf-prefix.v1.md` never has to be edited.
+    leaf_envelope_path: Path | None = None
+    leaf_envelope_sha256: str | None = None
 
     def __post_init__(self) -> None:
         self._root_body: str | None = None
         self._leaf_prefix_body: str | None = None
+        self._leaf_envelope_body: str | None = None
         self._strategy_bodies: dict[str, str] = {}
         self._hashes: dict[str, str] = {}
         self._loaded = False
@@ -541,6 +587,8 @@ class PromptRegistry:
         root_sha256: str | None = None,
         leaf_prefix_sha256: str | None = None,
         strategy_sha256: dict[str, str] | None = None,
+        leaf_envelope_path: Path | None = None,
+        leaf_envelope_sha256: str | None = None,
     ) -> "PromptRegistry":
         return cls(
             root_path=root_path,
@@ -549,6 +597,8 @@ class PromptRegistry:
             root_sha256=root_sha256,
             leaf_prefix_sha256=leaf_prefix_sha256,
             strategy_sha256=dict(strategy_sha256 or {}),
+            leaf_envelope_path=leaf_envelope_path,
+            leaf_envelope_sha256=leaf_envelope_sha256,
         )
 
     def _load_one(self, name: str, path: Path, pinned: str | None) -> str:
@@ -574,6 +624,10 @@ class PromptRegistry:
         self._leaf_prefix_body = self._load_one(
             "leaf_prefix", self.leaf_prefix_path, self.leaf_prefix_sha256
         )
+        if self.leaf_envelope_path is not None:
+            self._leaf_envelope_body = self._load_one(
+                "leaf_envelope", self.leaf_envelope_path, self.leaf_envelope_sha256
+            )
         for category, path in self.strategy_paths.items():
             pinned = self.strategy_sha256.get(category)
             self._strategy_bodies[category] = self._load_one(
@@ -604,6 +658,29 @@ class PromptRegistry:
         self._ensure_loaded()
         assert self._leaf_prefix_body is not None
         return self._leaf_prefix_body
+
+    def leaf_envelope(self) -> str:
+        self._ensure_loaded()
+        if self._leaf_envelope_body is None:
+            raise ConfigError(
+                "no leaf envelope block is declared "
+                "(scaffold.prompts.leaf_envelope is null)")
+        return self._leaf_envelope_body
+
+    def render_leaf(self, *, envelope: bool) -> str:
+        """§4's byte-identical leaf head: the prefix, plus the envelope block
+        when the envelope is on.
+
+        ONE concatenation, from two pinned files, computed once per dispatcher
+        and held as a constant for its lifetime -- so the head stays
+        byte-identical across every call in the run, which is the property §4's
+        prefix contract and R3's drift detector both rest on. Nothing volatile
+        can enter it: both operands are file bytes with their changelog headers
+        stripped.
+        """
+        if not envelope:
+            return self.leaf_prefix()
+        return f"{self.leaf_prefix()}\n\n{self.leaf_envelope()}"
 
     def hashes(self) -> dict[str, str]:
         self._ensure_loaded()

@@ -232,6 +232,7 @@ def test_all_null_sha256_validates_fine_even_though_files_dont_exist(tmp_path, m
     prompts = minimal_cfg_dict["scaffold"]["prompts"]
     prompts["root"] = {"path": str(missing), "sha256": None}
     prompts["leaf_prefix"] = {"path": str(missing), "sha256": None}
+    prompts["leaf_envelope"] = {"path": str(missing), "sha256": None}
     for cat in prompts["strategy_templates"]:
         prompts["strategy_templates"][cat] = {"path": str(missing), "sha256": None}
     cfg = Config.model_validate(minimal_cfg_dict)  # must not raise

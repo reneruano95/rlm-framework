@@ -265,7 +265,14 @@ class MockLlamaServer:
         # reported slot so a test can stage a mismatch on an IN-range request.
         self.total_slots = 8
         self.answer: str | None = None
+        #: Successive answers, one per /completion, for tests whose subject is
+        #: what happens BETWEEN attempts -- the envelope's retry-on-parse-failure
+        #: is the only way to see a call recover from a bad draw. The last entry
+        #: repeats once the script runs out, so a test can end on a good answer
+        #: without counting attempts.
+        self.answer_script: list[str] | None = None
         self.slot_override: int | None = None
+        self.completion_count = 0
         # Request-level capture, for the D14 leaf-template contract: the
         # ORDER of the endpoints hit, every /apply-template body, and every
         # string /apply-template handed back (which is what /completion must
@@ -403,7 +410,7 @@ class MockLlamaServer:
                         outer._concurrent -= 1
 
             def _stream_normal(self, prompt, served):
-                content = outer.answer if outer.answer is not None else f"echo:{prompt}"
+                content = outer.next_answer(prompt)
                 _write_sse_event(self, {"content": content, "stop": False,
                                          "id_slot": -1, "tokens_predicted": 1,
                                          "tokens_evaluated": 4})
@@ -526,6 +533,18 @@ class MockLlamaServer:
             return requested
         return requested % self.total_slots
 
+    def next_answer(self, prompt: str) -> str:
+        """`answer_script` wins, then `answer`, then the echo every existing
+        test is written against."""
+        with self._lock:
+            i = self.completion_count
+            self.completion_count += 1
+        if self.answer_script:
+            return self.answer_script[min(i, len(self.answer_script) - 1)]
+        if self.answer is not None:
+            return self.answer
+        return f"echo:{prompt}"
+
     def requested_slots(self) -> list[int | None]:
         return [b.get("id_slot") for b in self.completion_bodies]
 
@@ -543,7 +562,8 @@ class MockLlamaServer:
                     backoff_s: list[float] | None = None,
                     system_prefix: str | None = None,
                     enable_thinking: bool = False,
-                    slot_pool: int | None = None):
+                    slot_pool: int | None = None,
+                    envelope: bool = False):
         from rlm.config import Retries
         from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient, SlotPool
 
@@ -556,7 +576,8 @@ class MockLlamaServer:
                                  temperature=temperature, top_p=top_p, seed=seed,
                                  system_prefix=(leaf_prefix_text() if system_prefix is None
                                                 else system_prefix),
-                                 enable_thinking=enable_thinking)
+                                 enable_thinking=enable_thinking,
+                                 envelope=envelope)
         # Fast backoff by default -- retry TIMING isn't what most of these
         # tests assert on, and the real 1s/4s backoff (scaffold.retries in
         # config.yaml) would make them take ~5s for no additional coverage.
@@ -819,6 +840,8 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
     prompts = raw["scaffold"]["prompts"]
     prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
     prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+    if prompts.get("leaf_envelope"):
+        prompts["leaf_envelope"]["path"] = str(REPO_ROOT / prompts["leaf_envelope"]["path"])
     for ref in prompts["strategy_templates"].values():
         ref["path"] = str(REPO_ROOT / ref["path"])
     raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
@@ -973,6 +996,8 @@ def valid_config_file(minimal_cfg_dict: dict, tmp_path: Path) -> Path:
     prompts = raw["scaffold"]["prompts"]
     prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
     prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+    if prompts.get("leaf_envelope"):
+        prompts["leaf_envelope"]["path"] = str(REPO_ROOT / prompts["leaf_envelope"]["path"])
     for ref in prompts["strategy_templates"].values():
         ref["path"] = str(REPO_ROOT / ref["path"])
     raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")

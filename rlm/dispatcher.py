@@ -137,10 +137,14 @@ from typing import Any, Callable
 import httpx
 
 from rlm.config import Config, Retries
+from rlm.envelope import ParseResult as EnvelopeParse
+from rlm.envelope import parse as envelope_parse
+from rlm.envelope import payload as envelope_payload
 from rlm.errors import (
     ActionType,
     Actor,
     DispatchError,
+    EnvelopeParseError,
     PreflightFailed,
     SlotMismatch,
     SlotPoolExhausted,
@@ -589,6 +593,12 @@ class DispatchTarget:
     #: uninvestigable, since prefix drift and slot eviction look identical
     #: without it.
     prefix_tokens: int | None = None
+    #: Does this target's prefix ask for the JSON envelope, and must C4
+    #: therefore parse and validate one scaffold-side (spec §5, `rlm.envelope`)?
+    #: Off by default: the envelope is opt-in, decided by the S2 A/B
+    #: (`s2/REFUSAL-AB.md`), and every measurement recorded before it exists was
+    #: taken with plain-text answers.
+    envelope: bool = False
 
 
 def _new_step(call_id: str, retry_idx: int, role: str, *,
@@ -628,6 +638,12 @@ def _new_step(call_id: str, retry_idx: int, role: str, *,
         # None means NOT CHECKED -- never "checked and clean".
         "leak_detected": None,
         "leak_detail": None,
+        # The model's output VERBATIM on every attempt that produced one. Not a
+        # `steps` column (§6 stores it as the observation blob); it is here so
+        # an attempt REJECTED for a malformed envelope still carries the text it
+        # was rejected for -- otherwise a run reports a count of envelope
+        # failures with nothing to audit them against.
+        "response_text": None,
     }
 
 
@@ -688,7 +704,8 @@ class LLMDispatcher:
         # config_snapshot would stop describing what actually ran). Read once,
         # at construction: re-reading per call could not change the bytes for
         # the better and could only introduce mid-episode prefix drift.
-        leaf_prefix = cfg.prompt_registry().load().leaf_prefix()
+        use_envelope = cfg.scaffold.leaf_envelope.enabled
+        leaf_prefix = cfg.prompt_registry().load().render_leaf(envelope=use_envelope)
         targets = {
             "leaf": DispatchTarget(
                 client=ServerClient(f"http://127.0.0.1:{cfg.servers.leaf.port}",
@@ -700,6 +717,7 @@ class LLMDispatcher:
                 seed=leaf_sampling.seed,
                 system_prefix=leaf_prefix,
                 enable_thinking=cfg.scaffold.leaf.enable_thinking,
+                envelope=use_envelope,
             ),
         }
         # R13/§5 C4: the pool is sized by the server's --parallel, which is
@@ -940,8 +958,11 @@ class LLMDispatcher:
         return target.markers
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> str:
-        """Dispatch one leaf call. `prompt` is the QUESTION; `chunk`, when
+                     chunk: str | None = None) -> "str | dict[str, Any]":
+        """Dispatch one leaf call. Returns the answer STRING, or -- when this
+        target asks for the JSON envelope -- the parsed envelope as a dict
+        (`rlm.envelope.payload`). Off by default, so every existing caller and
+        every measurement recorded before the S2 A/B keeps the string. `prompt` is the QUESTION; `chunk`, when
         given, is the excerpt it is about, and C4 composes
         `[system prefix][chunk][question]` from the two (§4). `chunk=None`
         keeps the single-string behaviour.
@@ -1020,7 +1041,7 @@ class LLMDispatcher:
                 self._idle.set()
 
     async def _query_once(self, prompt: str, *, role: str, call_id: str,
-                           chunk: str | None = None) -> str:
+                           chunk: str | None = None) -> "str | dict[str, Any]":
         """One pre-flight-and-dispatch pass, already gated and counted."""
         target = self._targets.get(role)
         if target is None:
@@ -1148,7 +1169,7 @@ class LLMDispatcher:
             self._record(step)
             raise
         try:
-            answer = await self._attempts_loop(
+            answer, parsed = await self._attempts_loop(
                 target, role, call_id, base, layout, rendered, sent, slot)
         except asyncio.CancelledError:
             raise
@@ -1160,13 +1181,33 @@ class LLMDispatcher:
             self.slots.mark_failed(window)
             raise
         self.slots.mark_answered(window)
-        return answer
+        if parsed is None:
+            return answer
+        # The span check, IN PROCESS AND FREE: whitespace-normalized substring
+        # match of each quoted span against the chunk that was actually sent.
+        # Zero model calls, no judge, no second opinion -- and, measured, no
+        # great power either: §10 R5 puts its catch rate at 7/66 = 11%, because
+        # 89% of the leaf's wrong answers quote a genuine in-chunk span
+        # belonging to a DIFFERENT entity. It ships because the A/B has to price
+        # the whole envelope, and it is reported as what it is.
+        return envelope_payload(parsed, chunk=chunk)
 
     async def _attempts_loop(self, target: DispatchTarget, role: str, call_id: str,
                               base: int, layout: str, rendered: str, sent: str,
-                              slot: int) -> str:
-        """The retry loop for one call, on one already-acquired slot."""
+                              slot: int) -> tuple[str, "EnvelopeParse | None"]:
+        """The retry loop for one call, on one already-acquired slot.
+
+        Returns the answer verbatim plus, when this target asks for the JSON
+        envelope, the parsed envelope that came with it. A malformed envelope is
+        retried HERE, through this same loop and this same backoff, rather than
+        in a wrapper of its own: §5 says "one retry on parse failure through
+        C4's existing retry machinery", and a second loop outside this one would
+        give a format failure its own retry budget on top of the transport's --
+        the call would then cost up to max_attempts^2 dispatches and the A/B's
+        cost column would be measuring the scaffold.
+        """
         last_exc: Exception | None = None
+        last_raw = ""
         for attempt in range(self._retries.max_attempts):
             step = _new_step(call_id, base + attempt, role, layout=layout,
                               rendered=rendered,
@@ -1258,6 +1299,8 @@ class LLMDispatcher:
                 verdict = self.leak_verdict(result.content, sent)
                 step["leak_detected"] = verdict.detected
                 step["leak_detail"] = verdict.detail
+                step["response_text"] = result.content
+                last_raw = result.content
                 if result.slot_id != slot:
                     step["status"] = StepStatus.ERROR
                     step["error_detail"] = (
@@ -1267,10 +1310,38 @@ class LLMDispatcher:
                         "documents, so the answer is discarded (R13)")
                     self._record(step)
                     raise SlotMismatch(step["error_detail"])
+
+                parsed: EnvelopeParse | None = None
+                if target.envelope:
+                    parsed = envelope_parse(result.content)
+                    if not parsed.ok:
+                        # A format failure, not a transport failure -- but it
+                        # takes the same road, because the remedy is the same
+                        # (draw again) and because giving it a road of its own
+                        # would double the retry budget. The step is ERROR so
+                        # the attempt is visible and countable in the trace;
+                        # `response_text` above already carries what could not
+                        # be parsed.
+                        step["status"] = StepStatus.ERROR
+                        step["error_detail"] = parsed.error
+                        step["t_end"] = utc_now()
+                        self._record(step)
+                        if attempt < self._retries.max_attempts - 1:
+                            backoff = self._retries.backoff_s[
+                                min(attempt, len(self._retries.backoff_s) - 1)]
+                            await asyncio.sleep(backoff)
+                            continue
+                        raise EnvelopeParseError(
+                            f"leaf did not return a valid envelope in "
+                            f"{self._retries.max_attempts} attempts "
+                            f"(role={role!r}, call_id={call_id!r}): {parsed.error}",
+                            raw=result.content)
+
                 self._record(step)
-                return result.content
+                return result.content, parsed
         # unreachable: the loop above always returns or raises.
-        raise DispatchError(f"exhausted retries with no result: {last_exc}")
+        raise DispatchError(f"exhausted retries with no result: {last_exc}"
+                            + (f" (last output: {last_raw[:120]!r})" if last_raw else ""))
 
 
 # --------------------------------------------------------------------------- #

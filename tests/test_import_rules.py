@@ -17,6 +17,10 @@ ISOLATED = [
     # must stay importable by the trace/analysis side (which audits recorded
     # answers offline) without dragging in an HTTP client.
     "leakcheck.py",
+    # The leaf JSON envelope's parser/validator: C4 calls it on every leaf
+    # answer, and the trace/analysis side re-derives envelope verdicts offline
+    # from stored answers. Neither needs an HTTP client.
+    "envelope.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",

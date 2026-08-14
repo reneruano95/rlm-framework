@@ -69,6 +69,28 @@ class PreflightFailed(DispatchError):
     """
 
 
+class EnvelopeParseError(DispatchError):
+    """The leaf answered, repeatedly, with something that is not a valid
+    envelope (spec §5, the S2 leaf-envelope A/B).
+
+    THE STRUCTURED ERROR THE ROOT BRANCHES ON, and deliberately its own class:
+    a dead server and a leaf that cannot emit JSON are both `DispatchError`, but
+    they have opposite remedies -- one ends the episode, the other is a fact
+    about this chunk and this question that the root can route around (ask
+    again, ask differently, or treat the window as unanswered). Collapsing them
+    would make "the envelope costs episodes" indistinguishable from "the server
+    fell over" in the A/B.
+
+    `raw` is the last output that failed to parse, verbatim: without it a run
+    reports a count of envelope failures with no way to see what the leaf
+    actually emitted, and the MALFORMED column would be unauditable.
+    """
+
+    def __init__(self, message: str, *, raw: str = "") -> None:
+        super().__init__(message)
+        self.raw = raw
+
+
 class SlotPoolExhausted(DispatchError):
     """C4's never-reused slot pool has no virgin slot left for a NEW window,
     so the leaf server must be restarted before another window is served
