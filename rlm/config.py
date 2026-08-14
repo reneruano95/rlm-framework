@@ -308,10 +308,30 @@ class Config(_Strict):
                 f"({s.root.window_tokens})"
             )
 
-        if s.dispatch_concurrency != leaf.parallel:
+        # DECOUPLED from `leaf.parallel` (v0.2.6). The old equality read
+        # "C4 semaphore == leaf --parallel" (§5 Config schema) and was right
+        # while `--parallel` meant "how many calls this server serves at once".
+        # Under R13's never-reuse policy it means something else entirely: the
+        # SLOT POOL, i.e. how many WINDOWS one leaf process can serve before it
+        # must be rotated -- sized by the measured per-slot memory bill
+        # (62.8125 MiB of recurrent state per slot, `s2/R13-slotcount.md`), not
+        # by throughput. Dispatch concurrency is still a throughput lever, and
+        # S0 measured aggregate prefill FLAT across slots, so the two numbers
+        # answer different questions. Keeping the equality at the measured pool
+        # size would put 128 leaf calls in flight at once.
+        # What must still hold is the thing the equality protected: concurrency
+        # may not exceed the pool, because every in-flight call holds a slot.
+        if s.dispatch_concurrency < 1:
             raise ValueError(
-                f"scaffold.dispatch_concurrency ({s.dispatch_concurrency}) must equal "
-                f"servers.leaf.parallel ({leaf.parallel})"
+                f"scaffold.dispatch_concurrency ({s.dispatch_concurrency}) must be "
+                "at least 1")
+        if s.dispatch_concurrency > leaf.parallel:
+            raise ValueError(
+                f"scaffold.dispatch_concurrency ({s.dispatch_concurrency}) must not "
+                f"exceed servers.leaf.parallel ({leaf.parallel}): every in-flight "
+                "leaf call holds one never-reused slot, so more concurrent calls "
+                "than slots can only end in an exhaustion the pool was never "
+                "sized for (§5 C4, R13)"
             )
 
         # Reservation <= slot capacity. Only the leaf role admits chunk-sized

@@ -35,17 +35,21 @@ servers:
     backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
     log_path: traces/logs/leaf-server.log
     ctx: 327680
-    # R13's mitigation wants `-np 128 -c 327680` (2,560 tok/slot, 128 windows
-    # per process, 2 restarts and 13.4 s per 200K corpus). `-np` is NOT raised
-    # here yet, deliberately: the memory bill for 128 slots is ARITHMETIC, not
-    # a measurement -- ~63 MB/slot of per-slot, context-INDEPENDENT recurrent
-    # state, so ~8.1 GB at 128 slots, taking the leaf to ~35 GiB and
-    # dual-residency to ~52 GiB of the 64 GiB carve. §4 says measure it before
-    # pinning `-np 128`; the fallback if it does not fit is `-np 64`
-    # (4 restarts per 200K corpus instead of 2, +13.5 s).
-    # Until then the pool is 8 slots = 8 windows per leaf process, and the
-    # dispatcher raises SlotPoolExhausted rather than reusing one.
-    parallel: 8
+    # MEASURED AND PINNED 2026-08-13 (`s2/R13-slotcount.md`). `-np 128
+    # -c 327680` = 2,560 tok/slot, 128 windows per leaf process, 2 rotations
+    # per 200K-token corpus. The two memory axes separate cleanly: KV is priced
+    # by the TOKEN budget (3,400 MiB at every `-np`, 10.625 KiB/token at q8_0)
+    # and recurrent state by SLOT COUNT (62.8125 MiB/slot = S 60.000 + conv R
+    # 2.8125, context-independent from 40,960 down to 1,280 tok/slot). At 128
+    # that is 8,040 MiB of recurrent state, 32.244 GiB leaf residency and
+    # 51.53 GiB dual-resident of the 64 GiB carve -- 19.5% free, above the
+    # stated 15% floor -- for -1.37% prefill / +0.12% decode.
+    # 128 is the LARGEST pool that fits, on two independent grounds: `-np 192`
+    # lands at 13.4% margin (under the floor) and gives 1,706 tok/slot against
+    # the ~1,900 the 1024/768 geometry needs. `-np 64` is the named fallback
+    # and is strictly worse here (4 rotations, plus a reproducible +629 MiB of
+    # unaccounted allocation at that size).
+    parallel: 128
     # R13 (§10, §5 C4). The only measured-clean policy, and the only supported
     # value: one never-reused slot per window, both questions about a window on
     # that window's slot, a server restart when the pool is exhausted.
@@ -157,6 +161,15 @@ scaffold:
     # cost the root never reads, and the hand-run probe with thinking ON never
     # reached an answer inside 512 tokens. Off, like the root's.
     enable_thinking: false
+  # NOT `servers.leaf.parallel`, and no longer required to equal it (v0.2.6).
+  # Under never-reuse the two measure different things: `--parallel` is the
+  # POOL -- how many windows one leaf process can serve before it is rotated,
+  # sized by the measured 62.8125 MiB/slot memory bill -- while this is how
+  # many leaf calls may be in flight at once, sized by S0's finding that
+  # aggregate prefill is FLAT across slots (946.7 t/s at 8 ≈ 943.4 at 1).
+  # Tying them would put 128 calls on the wire because the memory allowed 128
+  # slots. 8 is the measured value and stands; it may not exceed the pool,
+  # since every in-flight call holds a slot.
   dispatch_concurrency: 8
 
 trace:

@@ -758,6 +758,26 @@ async def test_the_pool_is_sized_by_the_servers_parallel(minimal_cfg_dict, mock_
         await d.aclose()
 
 
+async def test_the_semaphore_is_the_concurrency_not_the_pool(minimal_cfg_dict,
+                                                              mock_server):
+    """`--parallel` sizes the POOL (how many windows one process serves before
+    it is rotated -- 128, measured in `s2/R13-slotcount.md`). The semaphore is
+    how many calls may be in flight at once (8, tuned against S0's flat
+    aggregate prefill). Tying the semaphore to the pool would put 128 leaf
+    calls on the wire at once purely because the memory bill allowed 128
+    slots."""
+    raw = copy.deepcopy(minimal_cfg_dict)
+    raw["servers"]["leaf"]["port"] = mock_server.port
+    cfg = Config.model_validate(raw)
+    assert cfg.scaffold.dispatch_concurrency != cfg.servers.leaf.parallel
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        assert d.slots.size == cfg.servers.leaf.parallel
+        assert d.semaphore._value == cfg.scaffold.dispatch_concurrency
+    finally:
+        await d.aclose()
+
+
 # --------------------------------------------------------------------------- #
 # R13 detection: the foreign-string check runs on every leaf answer.
 # --------------------------------------------------------------------------- #

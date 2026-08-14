@@ -46,7 +46,11 @@ string (the one that would actually occupy the slot); a prompt exceeding the
 target's slot capacity is REJECTED without dispatch and logged
 status=rejected -- never sent to /completion.
 
-The semaphore is `asyncio.Semaphore(cfg.servers.leaf.parallel)`, owned here.
+The semaphore is `asyncio.Semaphore(cfg.scaffold.dispatch_concurrency)`, owned
+here -- NOT `servers.leaf.parallel`, which since v0.2.6 sizes the never-reuse
+slot POOL (how many windows one leaf process serves before it is rotated, a
+memory-derived number: 62.8125 MiB of recurrent state per slot,
+`s2/R13-slotcount.md`) rather than how many calls may be in flight.
 Nothing the model runs may resize it, choose a server, or change a port. It
 is held only around each individual dispatch attempt, not across a retry's
 backoff sleep -- this window's slot is its own and can be handed to nothing
@@ -582,8 +586,10 @@ class LLMDispatcher:
         self._on_step = on_step
         self.steps: list[dict[str, Any]] = []
         # R13: one never-reused slot per window, from a pool the size of the
-        # server's --parallel. Injected so a test can size it independently;
-        # `from_config` is the only production construction and ties the two.
+        # server's --parallel -- which is NOT `parallel` above (that is the
+        # dispatch concurrency). `from_config` is the only production
+        # construction and passes both explicitly; the fallback here exists so
+        # a bare test dispatcher still gets a pool.
         self.slots = slots if slots is not None else SlotPool(parallel)
         self._chunk_index: ChunkIndex | None = None
         # Rotation plumbing (v0.2.6). `_gate` is open except while a rotation
@@ -645,7 +651,15 @@ class LLMDispatcher:
             raise DispatchError(
                 f"servers.leaf.slot_policy={cfg.servers.leaf.slot_policy!r} is "
                 "not supported; R13 has exactly one measured-clean policy")
-        return cls(targets=targets, parallel=cfg.servers.leaf.parallel,
+        # TWO different numbers, and they stopped being the same one at v0.2.6.
+        # The SEMAPHORE is `scaffold.dispatch_concurrency`: how many leaf calls
+        # may be in flight at once, tuned against S0's flat aggregate prefill.
+        # The POOL is `servers.leaf.parallel`: how many WINDOWS this process can
+        # serve before it must be rotated, sized by the measured 62.8125 MiB of
+        # per-slot recurrent state (`s2/R13-slotcount.md`). Passing the pool
+        # size as the semaphore would put 128 calls on the wire because the
+        # memory bill happened to allow 128 slots.
+        return cls(targets=targets, parallel=cfg.scaffold.dispatch_concurrency,
                     retries=cfg.scaffold.retries, on_step=on_step,
                     slots=SlotPool(cfg.servers.leaf.parallel))
 

@@ -72,8 +72,45 @@ def test_max_subcalls_covers_a_full_pass_at_the_shipped_geometry(valid_cfg):
     assert valid_cfg.scaffold.budgets.max_subcalls >= windows * 2
 
 
-def test_semaphore_equals_leaf_parallel(valid_cfg):
-    assert valid_cfg.scaffold.dispatch_concurrency == valid_cfg.servers.leaf.parallel
+def test_the_measured_slot_pool_is_pinned(valid_cfg):
+    """`s2/R13-slotcount.md` §7: `-np 128` with `-c 327680` retained. Measured
+    62.8125 MiB of per-slot recurrent state (priced by slot COUNT, not by the
+    token budget -- KV stayed at 3,400 MiB for every `-np`), 32.244 GiB leaf
+    residency, 51.53 GiB dual-resident of the 64 GiB carve (19.5% margin) and
+    -1.37% prefill. It is the largest pool that fits AND the largest the 1024/768
+    window geometry can use: 327,680/128 = 2,560 tok/slot against the ~1,900 the
+    geometry needs, while `-np 192` gives 1,706."""
+    leaf = valid_cfg.servers.leaf
+    assert leaf.parallel == 128
+    assert leaf.ctx == 327_680
+    assert leaf.ctx // leaf.parallel == 2560
+
+
+def test_dispatch_concurrency_is_not_the_slot_pool_size(valid_cfg):
+    """The equality `dispatch_concurrency == leaf.parallel` was true while
+    `--parallel` meant "how many calls this server serves at once". Under
+    never-reuse it means "how many WINDOWS one process can serve before it is
+    rotated" -- a pool size, measured against memory (`s2/R13-slotcount.md`).
+    Concurrency is a throughput lever, measured against S0's flat aggregate
+    prefill. Coupling them would put 128 leaf calls in flight at once."""
+    assert valid_cfg.scaffold.dispatch_concurrency == 8
+    assert valid_cfg.scaffold.dispatch_concurrency != valid_cfg.servers.leaf.parallel
+
+
+def test_concurrency_above_the_pool_size_is_refused(minimal_cfg_dict):
+    """Decoupled is not unconstrained: every in-flight call holds a slot, so
+    more concurrent calls than slots can only end in an exhaustion the pool
+    was never sized for."""
+    minimal_cfg_dict["scaffold"]["dispatch_concurrency"] = (
+        minimal_cfg_dict["servers"]["leaf"]["parallel"] + 1)
+    with pytest.raises(ConfigError, match="dispatch_concurrency"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_zero_concurrency_is_refused(minimal_cfg_dict):
+    minimal_cfg_dict["scaffold"]["dispatch_concurrency"] = 0
+    with pytest.raises(ConfigError, match="dispatch_concurrency"):
+        Config.model_validate(minimal_cfg_dict)
 
 
 def test_mtp_forces_root_single_slot(minimal_cfg_dict):
