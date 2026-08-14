@@ -132,7 +132,16 @@ scaffold:
     leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76 }
     strategy_templates:
       needle: { path: prompts/strat-needle.v1.md, sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d }
-      aggregation: { path: prompts/strat-aggregation.v1.md, sha256: 06613ba00253b9e4d588382efd7460f4620624edafacdc287969142f101651da }
+      # PINNED v2 SINCE 2026-08-13. v1 was authored against a PARTITIONING
+      # chunker; §7 #2's window 1,024 / stride 768 makes `chunks` overlapping
+      # windows, so ~25% of the corpus sits in two of them and v1's reduction
+      # step ("deduplicate across chunks, then count") double-counts, while its
+      # boundary-stitching tip manufactures a phantom copy of every item the
+      # overlap already covers. §8 requires this category to force coverage and
+      # punish sampling, so the counting guidance has to match the geometry the
+      # chunker actually ships. v1 stays on disk, unmodified and unpinned, as
+      # the recorded text of every run made before this date.
+      aggregation: { path: prompts/strat-aggregation.v2.md, sha256: 4baeea34d2dda4a5b1022ed5fa2366c6a6d78161238482526820eb8d34bb35fa }
       synthesis: { path: prompts/strat-synthesis.v1.md, sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c }
       code_qa: { path: prompts/strat-codeqa.v1.md, sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e }
       default: { path: prompts/strat-default.v1.md, sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415 }

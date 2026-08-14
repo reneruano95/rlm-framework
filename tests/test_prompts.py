@@ -8,6 +8,7 @@ import pytest
 PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "leaf-prefix.v1.md",
          "strat-needle.v1.md", "strat-aggregation.v1.md",
+         "strat-aggregation.v2.md",
          "strat-synthesis.v1.md", "strat-codeqa.v1.md", "strat-default.v1.md"]
 
 #: The two recorded S1 A/B arms. Their bytes ARE the published 6/6-vs-6/6
@@ -188,9 +189,32 @@ def test_prompt_promise_matches_the_configured_extractor():
 
 def test_extraction_shaped_strategies_carry_the_evidence_span_check():
     for name in ("strat-needle.v1.md", "strat-aggregation.v1.md",
-                 "strat-synthesis.v1.md"):
+                 "strat-aggregation.v2.md", "strat-synthesis.v1.md"):
         text = (PROMPTS / name).read_text(encoding="utf-8").lower()
         assert "evidence" in text, f"{name} missing the R12/R5 evidence-span check"
+
+
+def test_the_pinned_aggregation_template_counts_for_an_overlapping_chunker():
+    """The template the root actually runs must match the chunker it is given.
+
+    `chunks` has been OVERLAPPING windows since §7 #2 (window 1,024 / stride
+    768): a third of the corpus by tokens sits in two windows, by construction.
+    Two of the pinned v1 template's instructions are wrong under that geometry
+    -- summing per-chunk counts double-counts every item in an overlap, and
+    stitching a chunk's tail to the next chunk's head duplicates an item the
+    overlap already delivers whole. §8 makes aggregation the category that
+    forces coverage and punishes sampling, so this lands as a wrong answer in
+    the arm being measured, not as an error anyone sees.
+    """
+    from rlm.config import load_config
+
+    cfg = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
+    text = Path(cfg.scaffold.prompts.strategy_templates.aggregation.path).read_text(
+        encoding="utf-8").lower()
+    assert "`chunks` overlaps" in text, "the template never says the windows overlap"
+    assert "never sum per-chunk counts" in text
+    assert "not** stitch the tail" in text
+    assert "context" in text, "no non-repeating view named for occurrence counts"
 
 
 def test_config_pins_match_the_files_on_disk():
