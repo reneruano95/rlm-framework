@@ -54,6 +54,25 @@ from rlm.dispatcher import (
 #: `prepare()` renders a probe rather than a real request.
 PROBE_MARKER = "RLM-S2-PREFIX-PROBE"
 
+#: The three instruction LAYOUTS (`s2/run_distance.py`, §4 "INSTRUCTION DECAY").
+#: Composed here, scaffold-side, for the same reason C4 composes the user
+#: segment itself: a layout the model could alter is not a layout.
+#:
+#:   A — `[system prefix][chunk][question]`. TODAY'S SHIPPED LAYOUT (§4), and
+#:       the one every leaf measurement so far was taken under. Default, so
+#:       every existing caller keeps sending exactly the bytes it sent before.
+#:   B — `[system prefix][chunk][same prefix text again][question]`. The
+#:       leading prefix stays byte-identical and the chunk stays at a constant
+#:       offset, so §4's cache contract survives; the cost is the repeated
+#:       tokens.
+#:   C — `[chunk][system prefix][question]`, no leading prefix at all. Maximum
+#:       treatment, and it destroys the byte-identical head — it prices the
+#:       extreme rather than proposing it.
+LAYOUT_A = "A"
+LAYOUT_B = "B"
+LAYOUT_C = "C"
+LAYOUTS = (LAYOUT_A, LAYOUT_B, LAYOUT_C)
+
 
 @dataclass(slots=True)
 class LeafAnswer:
@@ -122,6 +141,14 @@ class PinnedLeafCaller:
     #: refusal A/B -- an arm that emits more malformed replies would silently
     #: get more draws at the same question (`s2/run_refusal_ab.py`).
     envelope: bool = False
+    #: Which of the three instruction layouts this caller composes. `"A"` is
+    #: the shipped one, so a caller that does not ask for a layout sends the
+    #: bytes every earlier S2 measurement was taken with.
+    layout: str = LAYOUT_A
+    #: Tokens in the PREFIX TEXT ITSELF (no chat-template markup), measured by
+    #: `prepare()`. Layouts B and C carry that text inside the user message, so
+    #: admission has to price it there rather than in the system head.
+    prefix_body_tokens: int | None = None
 
     @property
     def prefix_sha256(self) -> str:
@@ -190,10 +217,29 @@ class PinnedLeafCaller:
         if cut > 0:
             head = await self.client.tokenize(rendered[:cut], add_special=True)
             self.prefix_tokens = len(head)
+        self.prefix_body_tokens = len(
+            await self.client.tokenize(self.system_prefix, add_special=False))
         return self.prefix_tokens
 
+    def head_tokens(self) -> int:
+        """Tokens this caller's LAYOUT spends on instructions and markup.
+
+        Layout A pays the rendered system head once. B pays it AND the prefix
+        text again inside the user message. C pays no system head — the whole
+        instruction rides after the chunk — but still pays the user/assistant
+        markup, approximated by the measured head minus the prefix body.
+        """
+        head = self.prefix_tokens or 0
+        body = self.prefix_body_tokens or 0
+        if self.layout == LAYOUT_B:
+            return head + body
+        if self.layout == LAYOUT_C:
+            return body + max(head - body, 0)
+        return head
+
     def admits(self, chunk_tokens: int, *, question_tokens: int = 128) -> bool:
-        """Would `chunk_tokens` plus the head plus a question fit one slot?
+        """Would `chunk_tokens` plus this layout's head plus a question fit one
+        slot?
 
         Arithmetic on numbers already measured (the manifest's chunk length,
         `prepare()`'s head) rather than a pre-flight /tokenize per call: at
@@ -202,18 +248,45 @@ class PinnedLeafCaller:
         """
         if self.slot_capacity_tokens is None:
             return True
-        head = self.prefix_tokens or 0
-        return head + chunk_tokens + question_tokens <= self.slot_capacity_tokens
+        return (self.head_tokens() + chunk_tokens + question_tokens
+                <= self.slot_capacity_tokens)
+
+    def compose(self, *, question: str, chunk: str | None) -> list[dict[str, str]]:
+        """The message array for this layout, composed SCAFFOLD-SIDE.
+
+        Layout A goes through `rlm.dispatcher.compose_leaf_user` — production's
+        own function, not a copy — so the control arm is byte-identical to what
+        C4 sends. B and C interpolate the SAME prefix text (never a reworded
+        one: the variable under test is POSITION) between the chunk and the
+        question, and the chunk is still the first byte of the user message, so
+        a re-query of the same chunk still extends the cached prefix.
+        """
+        if self.layout == LAYOUT_A:
+            return [{"role": "system", "content": self.system_prefix},
+                    {"role": "user", "content": compose_leaf_user(question, chunk)}]
+        if chunk is None:
+            body = f"{self.system_prefix}\n\n{question}"
+        else:
+            body = f"{chunk}\n\n{self.system_prefix}\n\n{question}"
+        if self.layout == LAYOUT_B:
+            return [{"role": "system", "content": self.system_prefix},
+                    {"role": "user", "content": body}]
+        if self.layout == LAYOUT_C:
+            return [{"role": "user", "content": body}]
+        raise ValueError(f"unknown layout {self.layout!r}")
 
     async def ask(self, *, question: str, chunk: str | None, seed: int,
                   id_slot: int | None) -> LeafAnswer:
         """One call. No retry: a failure raises, and the caller records it."""
         t_start = time.perf_counter()
-        user_message = neutralise_control_tokens(
-            compose_leaf_user(question, chunk), self.markers)
+        messages = [
+            msg if msg["role"] != "user"
+            else {**msg, "content": neutralise_control_tokens(msg["content"],
+                                                              self.markers)}
+            for msg in self.compose(question=question, chunk=chunk)
+        ]
         rendered = await self.client.apply_template(
-            [{"role": "system", "content": self.system_prefix},
-             {"role": "user", "content": user_message}],
+            messages,
             chat_template_kwargs={"enable_thinking": self.enable_thinking})
         t_dispatch = time.perf_counter()
         result = await self.client.completion(
