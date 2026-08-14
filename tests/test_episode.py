@@ -647,6 +647,67 @@ async def test_a_failed_server_is_never_restarted(episode_env):
     assert any(s["status"] == "error" for s in env.steps())
 
 
+#: Same fan-out as FANOUT, but the cell survives a failing window so the pool
+#: can actually be drained by errors rather than the first one ending the cell.
+ERROR_TOLERANT_FANOUT = ("```repl\n"
+                         "for i in range(3):\n"
+                         "    try:\n"
+                         "        print(await llm_query('Q?', chunk=f'window {i}'))\n"
+                         "    except Exception as exc:\n"
+                         "        print('ERR', type(exc).__name__)\n"
+                         "```")
+
+
+async def test_a_pool_drained_by_errors_is_never_rotated(episode_env, mock_server):
+    """§5 C4's original rule, which the rotation quietly broke: the scaffold
+    never restarts a FAILED server.
+
+    `SlotPoolExhausted` says nothing about WHY the slots went. A pool drained
+    by three consecutive dispatch failures raises exactly the same exception
+    as a pool drained by three answered windows, so the runner relaunched a
+    failing leaf and the lifecycle log recorded it as a planned rotation --
+    `restarts 1`, every step `error`, and `[('rotating',
+    'slot_pool_exhausted'), ('rotated', None)]` in the log. That masks the
+    fault the trace exists to record, which is the entire reason rotation was
+    only ever permissible for a HEALTHY server.
+    """
+    mock_server.fail_times(10_000)          # every /completion attempt fails
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[ERROR_TOLERANT_FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+
+    assert pm.restarts == 0, "a failing leaf was relaunched"
+    assert res.outcome == Outcome.ERROR
+    assert res.reason == "slot_pool_error_drained"
+
+    health = [(e.get("state"), e.get("reason")) for e in env.lifecycle_events()
+              if e["kind"] == "server_health"]
+    assert ("rotating", "slot_pool_exhausted") not in health, health
+    assert ("rotation_refused", "slot_pool_error_drained") in health, health
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert calls and all(s["status"] == "error" for s in calls)
+
+
+async def test_a_pool_that_answered_a_window_still_rotates(episode_env, mock_server):
+    """The refusal is scoped to a generation that served NOTHING. A server
+    that answered a window on this pool has demonstrated it can serve, so a
+    single transient failure alongside it must not turn into a dead episode --
+    that would be the opposite over-correction, and it would make one flaky
+    call cost the whole coverage pass."""
+    mock_server.fail_times(3)               # exactly window 0's three attempts
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[ERROR_TOLERANT_FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+
+    assert res.outcome == Outcome.SUCCESS
+    assert pm.restarts == 1
+    assert any(e.get("state") == "rotating" for e in env.lifecycle_events())
+
+
 async def test_rotation_time_is_inside_the_episodes_measured_wall_clock(
         episode_env, mock_server):
     """§5 C4: "its wall-clock is included in the episode's measured time" --

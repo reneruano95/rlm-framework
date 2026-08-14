@@ -103,6 +103,13 @@ ROTATION_FAILED = "rotation_failed"
 #: server.
 SLOT_POOL_EXHAUSTED = "slot_pool_exhausted"
 
+#: …and the reason a rotation is REFUSED: the pool ran out because every window
+#: on it failed, not because every window on it was served. `SlotPoolExhausted`
+#: alone cannot tell those apart, and treating them alike relaunches a FAILED
+#: server while logging it as a planned rotation -- which is precisely what §5
+#: C4 forbids, and the distinction that made rotation permissible at all.
+SLOT_POOL_ERROR_DRAINED = "slot_pool_error_drained"
+
 #: Termination guard on the rotate-and-retry loop for ONE call. A rotation
 #: frees a whole pool (`--parallel` slots), so a single call needs a second one
 #: only when other calls in the same wave took every slot first; needing 16 of
@@ -534,13 +541,21 @@ class _EpisodeRun:
 
         §5 C4 (v0.2.6): the R13 mitigation gives every window a never-reused
         slot, so a pool of `--parallel` slots is spent after `--parallel`
-        windows -- window 9 on the shipped config, against 261 windows for a
-        200K corpus. Without a rotation the mitigation is inert. With one, the
+        windows -- 128 on the measured config, against 261 windows for a 200K
+        corpus. Without a rotation the mitigation is inert. With one, the
         distinction that keeps §5 C4's original rule intact is PLANNED versus
         REACTIVE: this fires on `SlotPoolExhausted` and on nothing else, so a
         server that FAILED is still never restarted (that would mask the fault
         the trace exists to record -- `DispatchError` propagates untouched,
         below).
+
+        `SlotPoolExhausted` ALONE IS NOT ENOUGH TO ESTABLISH THAT, and that
+        was the hole: a pool drained by three consecutive dispatch failures
+        raises the same exception as a pool drained by three answered windows,
+        so a failing leaf was relaunched and logged as a planned rotation.
+        C4 therefore records why each slot was consumed and this checks
+        `pool_error_drained` first -- a generation that answered nothing ends
+        the episode `outcome=error` rather than being relaunched.
 
         The retry re-dispatches the SAME `call_id`: a rotation does not make a
         new sub-call, it makes the same one land on a virgin slot, and §5 C4
@@ -563,6 +578,20 @@ class _EpisodeRun:
                     self.lifecycle.event(
                         "server_health", role="leaf", state="rotation_unavailable",
                         episode_id=self.episode_id, reason=SLOT_POOL_EXHAUSTED)
+                    raise
+                if getattr(self.dispatcher, "pool_error_drained", False):
+                    # WHY the pool emptied decides whether this is a rotation
+                    # at all. Every window on this generation failed, so the
+                    # leaf is not a healthy server that ran out of slots -- it
+                    # is a FAILED server, and §5 C4 has never permitted
+                    # restarting one: doing so masks the fault the trace exists
+                    # to record, and the lifecycle log would have called it a
+                    # planned rotation. The episode ends instead.
+                    self.lifecycle.event(
+                        "server_health", role="leaf", state="rotation_refused",
+                        episode_id=self.episode_id,
+                        reason=SLOT_POOL_ERROR_DRAINED)
+                    await self._trip(Outcome.ERROR, SLOT_POOL_ERROR_DRAINED)
                     raise
                 rotation = await self._rotate_leaf()
                 self._stamp_rotation(call_id, rotation)
