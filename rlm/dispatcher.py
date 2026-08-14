@@ -141,6 +141,7 @@ from rlm.errors import (
     ActionType,
     Actor,
     DispatchError,
+    PreflightFailed,
     SlotMismatch,
     SlotPoolExhausted,
     StepStatus,
@@ -219,6 +220,15 @@ def neutralise_control_tokens(text: str, markers: tuple[str, ...]) -> str:
 # already composes the system prefix.
 # --------------------------------------------------------------------------- #
 
+#: How many times ONE call may lose its pre-flight to a rotation and re-run it.
+#: A rotation frees a whole pool, so a call needs a second re-run only when
+#: other calls in the same wave took every slot first; needing 16 means a
+#: fan-out wider than 16 x --parallel windows, which is a structural problem
+#: the wall clock should not have to discover slowly. Mirrors
+#: `rlm.episode.MAX_ROTATIONS_PER_CALL`, which bounds the same thing one layer
+#: up (a call that lost its SLOT rather than its pre-flight).
+_MAX_PREFLIGHT_ROTATIONS = 16
+
 #: Which form a call used. `steps` needs no column for it (§6): it rides in the
 #: leaf request blob's `meta` stream, so an S2 gate can score only the calls
 #: that actually supplied `chunk=` rather than crediting the scaffold for a
@@ -278,7 +288,7 @@ class SlotPool:
     (spec §5 C4) -- C4 itself has no code path that restarts anything.
     """
 
-    __slots__ = ("size", "_by_window", "_next")
+    __slots__ = ("size", "_by_window", "_next", "_answered", "_failed")
 
     def __init__(self, size: int) -> None:
         if size < 1:
@@ -286,6 +296,15 @@ class SlotPool:
         self.size = size
         self._by_window: dict[str, int] = {}
         self._next = 0
+        # WHY each slot was consumed, not merely THAT it was. §5 C4 permits a
+        # rotation on pool exhaustion and forbids restarting a FAILED server,
+        # and without this the two are indistinguishable: a pool drained by
+        # three consecutive dispatch failures raises exactly the same
+        # `SlotPoolExhausted` as a pool drained by three answered windows, so
+        # the runner relaunched a failing server and logged it as a planned
+        # rotation.
+        self._answered: set[str] = set()
+        self._failed: set[str] = set()
 
     @property
     def remaining(self) -> int:
@@ -300,6 +319,45 @@ class SlotPool:
     @property
     def assigned(self) -> dict[str, int]:
         return dict(self._by_window)
+
+    @property
+    def answered(self) -> int:
+        """Windows on this pool that produced an answer."""
+        return len(self._answered)
+
+    @property
+    def failed(self) -> int:
+        """Windows on this pool whose call ended in an error."""
+        return len(self._failed)
+
+    @property
+    def error_drained(self) -> bool:
+        """The pool is spent and NOT ONE window on it was ever answered.
+
+        This is the "the server is failing" shape, and it is the case §5 C4's
+        original rule is about: exhaustion caused by repeated failures is not
+        healthy-pool exhaustion, and rotating on it relaunches a FAILED server
+        while the lifecycle log calls it a planned rotation -- masking exactly
+        the fault the trace exists to record.
+
+        A MIXED drain (some windows answered, some failed) is deliberately NOT
+        error-drained: a server that answered a window on this generation has
+        demonstrated it can serve, and refusing to rotate there would turn a
+        single transient failure into a dead episode. What is refused is the
+        generation that served nothing at all.
+        """
+        return self.restart_required and not self._answered
+
+    def mark_answered(self, window: str) -> None:
+        self._answered.add(window)
+        self._failed.discard(window)
+
+    def mark_failed(self, window: str) -> None:
+        """Only when the window has never been answered: a second question
+        about an already-answered window failing does not make the generation
+        an error-drained one."""
+        if window not in self._answered:
+            self._failed.add(window)
 
     def acquire(self, window: str) -> int:
         """This window's slot: its existing one, or the next virgin one."""
@@ -676,6 +734,18 @@ class LLMDispatcher:
         never by reusing a slot (R13)."""
         return self.slots.restart_required
 
+    @property
+    def pool_error_drained(self) -> bool:
+        """True when the pool is spent and NOT ONE window on it was answered.
+
+        The caller's question is not "may I have more slots?" but "is this
+        server healthy enough for §5 C4 to let me relaunch it?". Exhaustion
+        reached through failures is not healthy-pool exhaustion, and rotating
+        on it restarts a FAILED server -- which §5 C4 forbids, and which is the
+        distinction that made rotation permissible at all.
+        """
+        return self.slots.error_drained
+
     # -- rotation primitives (spec §5 C4, v0.2.6) ---------------------------- #
 
     @property
@@ -811,13 +881,22 @@ class LLMDispatcher:
 
         Deliberately `add_special=False`, unlike the pre-flight: BOS is not
         part of a chunk BODY, and adding it here would bias every boundary the
-        chunker's binary search finds by one token."""
+        chunker's binary search finds by one token.
+
+        Gated and counted like every other leaf round trip (`_admitted`): this
+        is C4's own `/tokenize` call and it sits on the critical path twice --
+        C5 admits every sub-call against it, and C2's chunker binary-searches
+        every window boundary through it. A rotation that replaced the process
+        underneath one of those would kill C2's chunking or C5's admission with
+        a bare connection error, outside any retry loop.
+        """
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
         if not text:
             return 0
-        return len(await target.client.tokenize(text))
+        async with self._admitted():
+            return len(await target.client.tokenize(text))
 
     def _record(self, step: dict[str, Any]) -> None:
         self.steps.append(step)
@@ -865,7 +944,84 @@ class LLMDispatcher:
         """Dispatch one leaf call. `prompt` is the QUESTION; `chunk`, when
         given, is the excerpt it is about, and C4 composes
         `[system prefix][chunk][question]` from the two (§4). `chunk=None`
-        keeps the single-string behaviour."""
+        keeps the single-string behaviour.
+
+        THE ROTATION GATE SITS AHEAD OF EVERYTHING, pre-flight included, and
+        the pre-flight is inside the in-flight accounting -- see `_admitted`.
+        A call makes three leaf round trips before it asks for a slot, and
+        while the gate sat after them a rotation could take the process away
+        mid-pre-flight: `quiesce()` counted only slot-holders, so it returned
+        while those requests were on the wire, and a pre-flight has no retry
+        loop. Measured on a 6-window concurrent map with a process manager that
+        genuinely removes the server: 4 of 6 windows dispatched, two lost with
+        no step at all, and the episode still reported SUCCESS.
+
+        A LOST WINDOW IS WORSE THAN A FAILED CALL HERE. The aggregation
+        strategy template prescribes a full-coverage MAP over `chunks` -- one
+        `asyncio.gather`, no early stopping -- for a benchmark category (§8)
+        whose entire purpose is to force coverage and punish sampling. A
+        partial map still prints an answer, so the failure surfaces as a wrong
+        result in the arm being measured, not as an error anyone can see.
+        """
+        for attempt in range(_MAX_PREFLIGHT_ROTATIONS + 1):
+            generation = self._pool_generation
+            # The gate FIRST, and the flight counter with it: `Event.wait()` on
+            # a set event does not suspend, so nothing runs between them and no
+            # call can start talking to a process that is about to be replaced.
+            async with self._admitted():
+                try:
+                    return await self._query_once(prompt, role=role,
+                                                   call_id=call_id, chunk=chunk)
+                except PreflightFailed:
+                    # The pre-flight died against a process the scaffold itself
+                    # was replacing. That is not this call's fault and must not
+                    # be its outcome: it re-runs its pre-flight against the new
+                    # process (the refusal is already recorded as its own
+                    # attempt, and `_retry_base` keeps the retry_idx sequence
+                    # continuous). A pre-flight that failed with NO rotation in
+                    # sight is re-raised as the DispatchError it always was --
+                    # §5 C4's server-death rule is untouched.
+                    if self._rotation_seen(generation):
+                        continue
+                    raise
+        raise DispatchError(
+            f"leaf call {call_id!r} lost its pre-flight to "
+            f"{_MAX_PREFLIGHT_ROTATIONS} consecutive rotations")
+
+    def _rotation_seen(self, generation: int) -> bool:
+        """Is a rotation in progress, or has one completed, since `generation`?
+
+        Both halves matter: the gate being closed means one is being set up
+        right now (the call will park on it), and a changed pool generation
+        means one completed while this call was mid-pre-flight.
+        """
+        return (not self._gate.is_set()) or self._pool_generation != generation
+
+    @contextlib.asynccontextmanager
+    async def _admitted(self) -> "AsyncIterator[None]":
+        """Park on the rotation gate, then count as in flight until done.
+
+        This is what `quiesce()` waits on, and it deliberately covers EVERY
+        leaf round trip rather than only the ones holding a slot: a rotation's
+        precondition is that nothing is talking to the process being replaced,
+        and `/apply-template` and `/tokenize` talk to it exactly as much as
+        `/completion` does.
+        """
+        await self._gate.wait()
+        self._in_flight += 1
+        self._idle.clear()
+        try:
+            yield
+        finally:
+            # Every exit path, cancellation included: a call that no longer
+            # talks to the server must not keep a rotation waiting.
+            self._in_flight -= 1
+            if self._in_flight == 0:
+                self._idle.set()
+
+    async def _query_once(self, prompt: str, *, role: str, call_id: str,
+                           chunk: str | None = None) -> str:
+        """One pre-flight-and-dispatch pass, already gated and counted."""
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
@@ -918,7 +1074,7 @@ class LLMDispatcher:
             step["status"] = StepStatus.ERROR
             step["error_detail"] = f"pre-flight /apply-template failed: {exc}"
             self._record(step)
-            raise DispatchError(
+            raise PreflightFailed(
                 f"pre-flight /apply-template failed for role={role!r}: {exc}") from exc
 
         # Pre-flight: token-count via the target server's /tokenize. A
@@ -940,7 +1096,8 @@ class LLMDispatcher:
             step["status"] = StepStatus.ERROR
             step["error_detail"] = f"pre-flight /tokenize failed: {exc}"
             self._record(step)
-            raise DispatchError(f"pre-flight /tokenize failed for role={role!r}: {exc}") from exc
+            raise PreflightFailed(
+                f"pre-flight /tokenize failed for role={role!r}: {exc}") from exc
 
         # The §4 head, measured ONCE per target. Done here rather than from a
         # synthetic `[system, user=""]` probe because this is a real request:
@@ -970,22 +1127,19 @@ class LLMDispatcher:
             self._record(step)
             raise DispatchError(step["error_detail"])
 
-        # The rotation gate (v0.2.6). Waited on HERE, in the same step in which
-        # the slot is taken -- `Event.wait()` on a set event does not suspend,
-        # so nothing can run between the two and no call can end up holding an
-        # assignment from a pool that is being replaced. A gated call holds
-        # neither a slot nor a semaphore permit, so a rotation cannot deadlock
-        # against the traffic it is quiescing.
-        await self._gate.wait()
-
         # R13: this window's own never-reused slot, acquired AFTER admission
         # so a prompt rejected pre-flight (nothing sent, nothing prefilled)
         # does not burn one. Held for every attempt of this call: a retry
         # re-sends the SAME document, which is same-document reuse and
         # measured clean, and a fresh slot per attempt would drain the pool
         # three times as fast as the budget assumes.
+        #
+        # The gate was taken by `query()` before any of the pre-flight above,
+        # and this call has counted as in flight throughout, so the pool it is
+        # drawing from cannot be replaced underneath it.
+        window = window_key(chunk, call_id)
         try:
-            slot = self.slots.acquire(window_key(chunk, call_id))
+            slot = self.slots.acquire(window)
         except SlotPoolExhausted as exc:
             step = _new_step(call_id, base, role, layout=layout, rendered=rendered,
                               prefix_tokens=target.prefix_tokens)
@@ -993,17 +1147,20 @@ class LLMDispatcher:
             step["error_detail"] = str(exc)
             self._record(step)
             raise
-        self._in_flight += 1
-        self._idle.clear()
         try:
-            return await self._attempts_loop(
+            answer = await self._attempts_loop(
                 target, role, call_id, base, layout, rendered, sent, slot)
-        finally:
-            # Every exit path, cancellation included: a call that no longer
-            # talks to the server must not keep a rotation waiting.
-            self._in_flight -= 1
-            if self._in_flight == 0:
-                self._idle.set()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # WHY this slot was consumed, not merely THAT it was (§5 C4). A
+            # pool drained by failures is not a healthy pool that ran out of
+            # windows, and rotating on it would relaunch a FAILED server --
+            # the one thing §5 C4 has always forbidden.
+            self.slots.mark_failed(window)
+            raise
+        self.slots.mark_answered(window)
+        return answer
 
     async def _attempts_loop(self, target: DispatchTarget, role: str, call_id: str,
                               base: int, layout: str, rendered: str, sent: str,

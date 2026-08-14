@@ -55,6 +55,20 @@ class DispatchError(RlmError):
     """A model-server call failed after its retry budget."""
 
 
+class PreflightFailed(DispatchError):
+    """A leaf call could not be BUILT: `/apply-template` or the pre-flight
+    `/tokenize` failed, so nothing was ever dispatched and no slot was burned.
+
+    Distinct from a plain `DispatchError` because it is the one dispatch
+    failure the scaffold may itself have caused: a slot-pool rotation replaces
+    the leaf process, and a call whose pre-flight was talking to the old one
+    dies here through no fault of its own. C4 re-runs the pre-flight against
+    the new process in exactly that case, and in no other -- a pre-flight that
+    failed with no rotation in sight is a server-death report and stays one
+    (spec §5 C4).
+    """
+
+
 class SlotPoolExhausted(DispatchError):
     """C4's never-reused slot pool has no virgin slot left for a NEW window,
     so the leaf server must be restarted before another window is served

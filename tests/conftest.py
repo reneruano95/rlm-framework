@@ -4,12 +4,14 @@ real config.yaml so the test suite and the shipped config never drift apart.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import http.server
 import io
 import json
 import os
 import re
+import socket
 import sys
 import threading
 import time
@@ -278,11 +280,22 @@ class MockLlamaServer:
         # dispatcher, not one per call.
         self.props_count = 0
         self.healthy = True
+        #: `take_down()`/`bring_up()`: is the process there at all? (Distinct
+        #: from `healthy`, which is a process that IS there and answers 503
+        #: while it loads its model.)
+        self.down = False
         self.chat_template = "mock-template"
         self._concurrent = 0
         self._fail_remaining = 0
         self._lock = threading.Lock()
         self._dispatchers: list[Any] = []
+        # Every live connection, so `take_down()` can break them. Closing the
+        # LISTENER is not enough to model a killed process: this handler speaks
+        # HTTP/1.1, httpx keeps its connections pooled, and a keep-alive
+        # connection's handler thread keeps answering long after the listener
+        # is gone -- so a "removed" server would go on serving the very
+        # requests a rotation test needs to see fail.
+        self._conns: set[Any] = set()
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -290,6 +303,27 @@ class MockLlamaServer:
 
             def log_message(self, fmt, *args):  # noqa: A002 -- stdlib signature
                 pass
+
+            def setup(self):
+                super().setup()
+                with outer._lock:
+                    outer._conns.add(self.connection)
+
+            def finish(self):
+                with outer._lock:
+                    outer._conns.discard(self.connection)
+                super().finish()
+
+            def handle_one_request(self):
+                # `take_down()` -> the process is gone: drop the connection
+                # with no response, which is what the client sees when the
+                # server it was talking to is killed.
+                if outer.down:
+                    self.close_connection = True
+                    with contextlib.suppress(OSError):
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                    return
+                super().handle_one_request()
 
             def do_GET(self):
                 if self.path == "/health":
@@ -420,6 +454,7 @@ class MockLlamaServer:
                 finally:
                     watcher.join(timeout=2.0)
 
+        self._handler = Handler
         self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._httpd.daemon_threads = True
         self.port = self._httpd.server_address[1]
@@ -429,6 +464,49 @@ class MockLlamaServer:
     @property
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
+
+    # -- genuine removal, for rotation tests ------------------------------- #
+    #
+    # `FakeLeafProcess` (tests/test_episode.py) replaces NOTHING: the mock
+    # server keeps answering across a "restart", so every rotation test written
+    # against it passes whether or not the scaffold actually quiesced the
+    # traffic it was about to pull the process out from under. These two make
+    # the removal real -- stop listening (new connections are refused, exactly
+    # like a killed process), then rebind the SAME port, which is what a
+    # relaunched llama-server does.
+
+    def take_down(self) -> None:
+        """The process is gone: every live connection is broken and every
+        request that arrives is answered by a reset.
+
+        Modelled as a RESET rather than as a closed listener, deliberately, and
+        the difference is measured. Closing the listener is what a killed
+        process really does, but on Windows loopback httpx spends ~2 s
+        retrying the connect before it gives up (measured), so a sub-second
+        outage is silently papered over and a test built on it asserts nothing.
+        A reset is the same failure class for the client -- the request dies
+        with no response, which is exactly what a pre-flight round trip that
+        has no retry cannot survive -- and it happens deterministically, on the
+        first attempt, at the moment the process disappears.
+
+        Breaking the live connections is the other half: this handler speaks
+        HTTP/1.1 and httpx keeps its connections pooled, so a client that
+        already holds one would otherwise keep being served by a handler
+        thread belonging to a process the test believes is gone.
+        """
+        self.down = True
+        with self._lock:
+            conns = list(self._conns)
+            self._conns.clear()
+        for conn in conns:
+            with contextlib.suppress(OSError):
+                conn.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                conn.close()
+
+    def bring_up(self) -> None:
+        """A fresh process answering on the same port, as a relaunch does."""
+        self.down = False
 
     def served_slot(self, requested: int | None) -> int:
         """Which slot this server answers on -- llama.cpp's MEASURED

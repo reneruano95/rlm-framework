@@ -458,10 +458,58 @@ class DeadLeafDispatcher:
         raise DispatchError("dispatch failed after 3 attempts: connection refused")
 
 
+class RestartingLeafProcess:
+    """A `ProcessManager` that GENUINELY takes the server away.
+
+    `FakeLeafProcess` replaces nothing -- the mock server answers throughout a
+    "restart" -- so every rotation test written against it passes whether or
+    not the scaffold quiesced the traffic whose process it was about to pull
+    out. This one stops listening for `down_s`, so anything on the wire during
+    that window fails exactly as it would against a killed process, and then
+    rebinds the same port the way a relaunched llama-server does.
+    """
+
+    def __init__(self, server, *, down_s: float = 0.2) -> None:
+        self.server = server
+        self.restarts = 0
+        self._down_s = down_s
+
+    async def restart(self) -> None:
+        self.restarts += 1
+        self.server.take_down()
+        await asyncio.sleep(self._down_s)
+        self.server.bring_up()
+
+
 FANOUT = ("```repl\n"
           "for i in range(3):\n"
           "    print(await llm_query('Q?', chunk=f'window {i}'))\n"
           "```")
+#: The shape the pinned aggregation template actually prescribes: "map once
+#: over all of `chunks`. One `asyncio.gather`, the same question for every
+#: chunk, no exceptions and no early stopping." `return_exceptions=True` so the
+#: cell survives to report per-window outcomes instead of the first failure
+#: taking the whole map down -- which is also what makes a silently partial map
+#: visible to the assertions rather than to nobody.
+#:
+#: The stagger is not decoration and it is not a synthetic race. A real map is
+#: over HUNDREDS of windows against a concurrency of 8, so calls do not arrive
+#: in one burst: they start continuously for the whole episode, and some
+#: therefore start while a rotation is in progress. A single simultaneous burst
+#: is the one arrival pattern that CANNOT expose this -- every call is already
+#: past its pre-flight before the first pool exhaustion, so nothing is on the
+#: wire when the process is replaced.
+CONCURRENT_FANOUT = (
+    "```repl\n"
+    "import asyncio\n"
+    "async def one(i):\n"
+    "    await asyncio.sleep(i * 0.08)\n"
+    "    return await llm_query('Q?', chunk=f'window {i}')\n"
+    "outs = await asyncio.gather(*[one(i) for i in range(6)],\n"
+    "                            return_exceptions=True)\n"
+    "print([type(o).__name__ if isinstance(o, BaseException) else 'ok'\n"
+    "       for o in outs])\n"
+    "```")
 FINAL = "```repl\nfinal_answer('42')\n```"
 
 
@@ -480,6 +528,55 @@ async def test_pool_exhaustion_rotates_the_leaf_and_the_episode_continues(
     ok = [s for s in env.steps()
           if s["action_type"] == "llm_call" and s["status"] == "ok"]
     assert len(ok) == 3                                    # all three answered
+
+
+async def test_a_concurrent_fanout_loses_no_window_to_a_rotation(
+        episode_env, mock_server):
+    """THE case every other rotation test misses, in the shape the benchmark
+    actually runs.
+
+    Two things had to be true at once for the sequential tests to pass a
+    broken rotation: they dispatch one call at a time, and `FakeLeafProcess`
+    replaces nothing. Here six windows go out under one `asyncio.gather` -- the
+    pinned aggregation template's own full-coverage MAP -- against a manager
+    that genuinely stops the listener. A call that has passed its pre-flight
+    but not yet taken a slot, or one re-dispatching after another call's
+    rotation, is then talking to a process that is being replaced; before the
+    gate moved ahead of the pre-flight, quiesce() returned while those round
+    trips were still on the wire and they died with `status=error` and no
+    retry.
+
+    Why this is worse than an error rate: the aggregation category exists to
+    force coverage and punish sampling, the template maps concurrently over
+    every chunk, and a partial map still prints an answer. The episode reports
+    SUCCESS with windows silently missing -- which is precisely the failure §8
+    says the category must catch.
+    """
+    pm = RestartingLeafProcess(mock_server, down_s=0.2)
+    env = episode_env(root_script=[CONCURRENT_FANOUT, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+
+    assert res.outcome == Outcome.SUCCESS
+    assert pm.restarts >= 2, "six windows on a pool of two must rotate twice"
+
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    answered = [s for s in calls if s["status"] == "ok"]
+    assert len(answered) == 6, (
+        f"{len(answered)}/6 windows answered -- the rest were lost to a "
+        f"rotation: {[(s['status'], s['error_detail']) for s in calls]}")
+
+    # Every window, once each: coverage is the property, not merely the count.
+    windows = {env.blob(s["observation_full_ref"]).decode("utf-8")
+               for s in answered}
+    assert len(windows) == 6
+
+    # The only admissible error is the pool refusal that TRIGGERS a rotation.
+    # Anything else is a leaf round trip that died against a replaced process.
+    stray = [s for s in calls if s["status"] == "error"
+             and "slot pool exhausted" not in (s["error_detail"] or "")]
+    assert stray == [], f"leaf traffic died across a rotation: {stray}"
 
 
 async def test_the_rotation_is_a_lifecycle_event_and_a_stamp_on_its_trigger(

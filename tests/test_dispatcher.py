@@ -908,6 +908,134 @@ async def test_quiesce_waits_for_in_flight_calls_and_gates_new_ones(mock_server)
     assert mock_server.requested_slots()[-1] == 0   # a virgin slot on the new pool
 
 
+async def test_quiesce_waits_for_preflight_round_trips_too(mock_server):
+    """A call makes THREE leaf round trips before it ever asks for a slot --
+    `count_tokens` (C5 admission), `/apply-template` and the pre-flight
+    `/tokenize`. They talk to the same process `/completion` does, so a
+    quiesce that only counted slot-holders returned while they were still on
+    the wire and the rotation killed the process underneath them. There is no
+    retry loop on a pre-flight: it records `status=error` and raises, so the
+    window is simply lost -- silently, since the aggregation template's
+    full-coverage MAP over `chunks` is a fan-out and a partial map still
+    prints an answer."""
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    target = d._targets["leaf"]
+    real = target.client.apply_template
+    on_wire = asyncio.Event()
+
+    async def slow_template(messages, **kw):
+        on_wire.set()
+        await asyncio.sleep(0.5)
+        return await real(messages, **kw)
+
+    target.client.apply_template = slow_template      # type: ignore[method-assign]
+    call = asyncio.create_task(d.query("Q?", role="leaf", call_id="c1", chunk="w0"))
+    await asyncio.wait_for(on_wire.wait(), timeout=5)
+    assert d.in_flight == 1, "a pre-flight round trip is not counted as in flight"
+
+    quiesced = asyncio.create_task(d.quiesce())
+    await asyncio.sleep(0.1)
+    assert not quiesced.done(), (
+        "quiesce() returned while a pre-flight was still talking to the leaf; "
+        "the rotation would kill the process underneath it")
+    assert await asyncio.wait_for(call, timeout=5)
+    await asyncio.wait_for(quiesced, timeout=5)
+
+
+async def test_the_gate_is_taken_before_any_leaf_traffic_not_after_it(mock_server):
+    """The gate has to sit ahead of ALL leaf HTTP, not just ahead of the slot
+    acquisition: a call that passed the gate check after its pre-flight was
+    already spending round trips on a process the runner was about to
+    replace."""
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    await d.quiesce()                      # a rotation is in progress
+    before = len(mock_server.request_paths)
+    blocked = asyncio.create_task(d.query("Q?", role="leaf", call_id="c1",
+                                           chunk="w0"))
+    await asyncio.sleep(0.2)
+    assert not blocked.done()
+    assert len(mock_server.request_paths) == before, (
+        "a gated call still sent pre-flight requests to the leaf")
+
+    d.resume()
+    assert await asyncio.wait_for(blocked, timeout=5)
+
+
+async def test_count_tokens_is_gated_and_counted_like_any_other_leaf_traffic(
+        mock_server):
+    """`count_tokens` is C4's own `/tokenize` round trip, and it is on the
+    critical path twice: C5 admits every sub-call against it, and C2's chunker
+    binary-searches every window boundary through it. It is leaf traffic, so a
+    rotation must wait for it and it must wait for a rotation."""
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    await d.quiesce()
+    counting = asyncio.create_task(d.count_tokens("one two three"))
+    await asyncio.sleep(0.2)
+    assert not counting.done(), "count_tokens went to the leaf through a closed gate"
+    d.resume()
+    assert await asyncio.wait_for(counting, timeout=5) == 3
+
+
+async def test_a_call_that_loses_its_preflight_to_a_rotation_retries_it(mock_server):
+    """A pre-flight that dies because the process was replaced is not the
+    call's fault and must not be its outcome. Before, `/apply-template` and
+    the pre-flight `/tokenize` had no retry at all -- one connection error
+    recorded `status=error` and raised, and the window was gone. A rotation is
+    the scaffold's own planned action; a call it interrupts re-runs its
+    pre-flight against the new process."""
+    import asyncio
+
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    target = d._targets["leaf"]
+    real = target.client.apply_template
+    rotate_now = asyncio.Event()
+    seen = {"n": 0}
+
+    async def flaky(messages, **kw):
+        seen["n"] += 1
+        if seen["n"] == 1:
+            rotate_now.set()          # the runner starts replacing the process
+            await asyncio.sleep(0.05)  # ...and quiesces, which waits for us
+            raise RuntimeError("connection refused: the process was replaced")
+        return await real(messages, **kw)
+
+    async def rotator():
+        await rotate_now.wait()
+        async with d.rotating():
+            d.rotate_pool()
+
+    target.client.apply_template = flaky              # type: ignore[method-assign]
+    spinner = asyncio.create_task(rotator())
+    answer = await asyncio.wait_for(
+        d.query("Q?", role="leaf", call_id="c1", chunk="w0"), timeout=5)
+    await asyncio.wait_for(spinner, timeout=5)
+
+    assert answer
+    assert d.pool_generation == 1
+    statuses = [(s["retry_idx"], s["status"]) for s in d.steps]
+    assert statuses == [(0, StepStatus.ERROR), (1, StepStatus.OK)], statuses
+    assert "pre-flight" in d.steps[0]["error_detail"]
+
+
+async def test_a_preflight_failure_with_no_rotation_still_fails_the_call(mock_server):
+    """The retry is scoped to the scaffold's OWN planned interruption. A leaf
+    that is simply down must still produce `status=error` and a raised
+    DispatchError -- §5 C4's server-death rule, which is the thing that keeps
+    a failed server from being quietly papered over."""
+    mock_server.kill()
+    d = mock_server.dispatcher(parallel=2, slot_pool=2)
+    with pytest.raises(DispatchError):
+        await d.query("Q?", role="leaf", call_id="c1", chunk="w0")
+    assert d.steps[-1]["status"] == StepStatus.ERROR
+    assert mock_server.restart_count == 0
+
+
 async def test_a_cancelled_quiesce_does_not_leave_the_gate_closed(mock_server):
     """`quiesce()` closes the gate and then waits. Cancelling that wait --
     a C5 budget kill, an operator Ctrl-C, or any task-group teardown while a
