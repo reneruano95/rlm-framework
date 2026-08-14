@@ -85,7 +85,7 @@ if str(REPO_ROOT) not in sys.path:  # `uv run s2/run_refusal_ab.py`
 
 from rlm.envelope import parse as envelope_parse  # noqa: E402
 from rlm.envelope import verify_evidence  # noqa: E402
-from rlm.leakcheck import ChunkIndex  # noqa: E402
+from rlm.leakcheck import ChunkIndex, identifier_tokens  # noqa: E402
 from s2.make_sweep_fixtures import MANIFEST_NAME, QUESTION_TYPES  # noqa: E402
 from s2.run_sweep import (  # noqa: E402
     CONFABULATION,
@@ -182,6 +182,33 @@ def reduce_envelope(raw: str, *, chunk: str | None) -> dict[str, Any]:
     return out
 
 
+def supplied_identifier(text: str) -> bool:
+    """Does this answer hand a root an identifier-shaped token it could submit?
+
+    WHY THIS EXISTS, and it is an honesty fix rather than a nicety. The sweep's
+    pinned `is_refusal` matches a phrase list, and the list does not contain
+    "the provided text does not contain ..." — it has `(the|this) excerpt does
+    not`, and the leaf says "provided text". A verbose refusal therefore scores
+    FALSE-POSITIVE. That biases the measurement in the worst possible
+    direction here: the treatments under test (v2's refusal argument, the
+    envelope's abstain field) are exactly the things that make refusals more
+    verbose, so the pinned classifier penalises the arms it is measuring.
+
+    Widening the phrase list is not available: it is the instrument
+    `s2/RESULTS.md` was scored with, and moving it would move the 95% baseline
+    the whole experiment is compared against. So the pinned label stays
+    primary, and this reports the mechanical sub-question underneath it —
+    **did the reply actually hand over a value?** — using `rlm.leakcheck`'s
+    identifier patterns, which are pattern-matching on shape, not on prose.
+
+    It is the number the architecture actually cares about: §2's error model
+    breaks when a root is handed a wrong key and submits it, not when a leaf is
+    wordy. A FALSE-POSITIVE carrying no identifier at all is a leaf failing to
+    say `NONE` crisply; one carrying a UUID is a leaf lying.
+    """
+    return bool(identifier_tokens(text or ""))
+
+
 def score(raw: str, *, envelope: bool, chunk: str | None, question_type: str,
           expected: str | None, expected_kind: str | None) -> dict[str, Any]:
     """One record's labels and envelope facts. `classify` is imported, never
@@ -196,6 +223,10 @@ def score(raw: str, *, envelope: bool, chunk: str | None, question_type: str,
         facts.update(reduce_envelope(raw, chunk=chunk))
     labels = classify(facts["reduced_text"], question_type=question_type,
                       expected=expected, expected_kind=expected_kind)
+    # Measured on the REDUCED text -- what a root would actually read and be
+    # able to submit -- so an envelope arm is judged on its `answer` field
+    # rather than on the JSON punctuation around it.
+    labels["supplied_identifier"] = supplied_identifier(facts["reduced_text"])
     return {**facts, **labels}
 
 
@@ -349,6 +380,7 @@ def summarize(records: list[dict]) -> dict:
                          for q in QUESTION_TYPES},
             "errors": 0, "leaks": 0, "leak_not_checked": 0, "slot_mismatch": 0,
             "envelope_parsed": 0, "envelope_failed": 0, "envelope_salvaged": 0,
+        "fp_with_identifier": 0,
             "abstain_true": 0, "abstain_with_answer": 0,
             "evidence_spans": 0, "evidence_verified": 0,
             "wall_s": [], "tokens_out": [],
@@ -359,6 +391,8 @@ def summarize(records: list[dict]) -> dict:
         cell = arm["by_qtype"][rec["question_type"]]
         cell["n"] += 1
         cell["labels"][rec["label"]] = cell["labels"].get(rec["label"], 0) + 1
+        if rec["label"] == FALSE_POSITIVE and rec.get("supplied_identifier"):
+            arm["fp_with_identifier"] += 1
         if rec.get("leak_detected") is True:
             arm["leaks"] += 1
         elif rec.get("leak_detected") is None:
@@ -443,10 +477,11 @@ def render_report(records: list[dict]) -> str:
         "",
         "## The four arms",
         "",
-        "| arm | prefix | envelope | FALSE-POSITIVE rate (absent) | CORRECT "
-        "(literal) | CORRECT (paraphrase) | MISS (fact present) | MALFORMED | "
+        "| arm | prefix | envelope | FALSE-POSITIVE rate (absent) | "
+        "...of which handed over an identifier | CORRECT (literal) | "
+        "CORRECT (paraphrase) | MISS (fact present) | MALFORMED | "
         "median wall s |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for arm_id, arm in arms.items():
         absent = arm["by_qtype"]["absent"]
@@ -461,6 +496,7 @@ def render_report(records: list[dict]) -> str:
         lines.append(
             f"| `{arm_id}` | {prefix} | {'on' if arm['envelope'] else 'off'} | "
             f"**{_rate(absent['labels'][FALSE_POSITIVE], absent['n'])}** | "
+            f"**{_rate(arm['fp_with_identifier'], absent['n'])}** | "
             f"{_rate(lit['labels'][CORRECT], lit['n'])} | "
             f"{_rate(par['labels'][CORRECT], par['n'])} | "
             f"**{_rate(present_miss, present_n)}** | "
@@ -469,9 +505,22 @@ def render_report(records: list[dict]) -> str:
 
     lines += [
         "",
-        "The two bold columns are the trade this experiment exists to price. A "
-        "leaf that abstains on everything scores 0% false positives and is "
-        "useless; any drop in the first must be read against the second.",
+        "The bold columns are the trade this experiment exists to price. A leaf "
+        "that abstains on everything scores 0% false positives and is useless, "
+        "so any drop in the first must be read against MISS.",
+        "",
+        "**\"...of which handed over an identifier\"** is the column that matters "
+        "for §2's error model, and it exists because the pinned classifier has a "
+        "known gap that biases AGAINST the treatments: `is_refusal` matches a "
+        "phrase list containing `(the|this) excerpt does not`, and this leaf "
+        "writes \"the provided text does not contain ...\", so a verbose refusal "
+        "scores FALSE-POSITIVE. Widening that list is not available — it is the "
+        "instrument `s2/RESULTS.md` was scored with, and moving it moves the "
+        "baseline. So the pinned label stays primary and this reports the "
+        "mechanical sub-question underneath it: did the reply actually hand a "
+        "root a UUID or `ENT-` code it could submit (`rlm.leakcheck` patterns, "
+        "shape not prose)? A false positive carrying no identifier is a leaf "
+        "being wordy; one carrying a UUID is a leaf lying.",
         "",
         "## Full label grid",
         "",

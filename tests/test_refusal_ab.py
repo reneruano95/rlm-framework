@@ -237,6 +237,36 @@ def test_a_contaminated_answer_is_counted_not_hidden():
     assert "**1**" in md
 
 
+def test_a_verbose_refusal_scores_FALSE_POSITIVE_but_hands_over_nothing():
+    """The pinned classifier's known gap, pinned as a test rather than fixed:
+    `is_refusal`'s phrase list has `(the|this) excerpt does not` and this leaf
+    writes "the provided text does not contain ...", so a genuine refusal scores
+    FALSE-POSITIVE. That biases against exactly the arms under test, since both
+    treatments make refusals wordier. The list is NOT widened -- it is the
+    instrument `s2/RESULTS.md` was scored with -- so the report carries the
+    mechanical sub-question instead: did the reply hand over an identifier?"""
+    verbose = ("The provided text does not contain any mention of the "
+               "Orstholtthorpe Chapterhouse or an associated archive key.")
+    out = _score(verbose, envelope=False, qtype="absent", expected=None)
+    assert out["label"] == FALSE_POSITIVE          # the pinned label, unmoved
+    assert out["supplied_identifier"] is False     # ... and it handed over nothing
+    # while a real lie hands over a key
+    lie = _score("ENT-17687", envelope=False, qtype="absent", expected=None)
+    assert lie["label"] == FALSE_POSITIVE
+    assert lie["supplied_identifier"] is True
+
+
+def test_the_identifier_column_is_measured_on_the_envelope_ANSWER_field():
+    """An envelope arm must be judged on what a root would read and submit, not
+    on the JSON punctuation around it: an abstention whose `evidence` quotes the
+    chunk has still handed over nothing."""
+    out = _score(env("", [], True), envelope=True, qtype="absent", expected=None)
+    assert out["supplied_identifier"] is False
+    out = _score(env("ENT-17687", ["ENT-17687"], False), envelope=True,
+                 qtype="absent", expected=None)
+    assert out["supplied_identifier"] is True
+
+
 def test_the_report_also_scores_envelope_arms_as_plain_text():
     """The decomposition: a reply can fail the FORMAT and still carry the
     CONTENT under test. A prose refusal to an ABSENT question is MALFORMED to
