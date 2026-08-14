@@ -43,14 +43,35 @@ def test_an_over_provisioned_leaf_slot_is_allowed(minimal_cfg_dict):
 
 
 def test_the_shipped_chunk_geometry_is_the_measured_one(valid_cfg):
-    """§7 #2 (v0.2.5): window 1,024 / stride 768. The overhead is re-derived so
-    that window + overhead = 2,560 -- R13's measured dense-slot budget, which
-    also makes 128 * 2,560 == leaf.ctx exactly, i.e. the config is arithmetic-
-    ready for the `-np 128` §4 says to measure before pinning."""
+    """§7 #2 (v0.3.0): window 640 / stride 480, superseding 1,024/768.
+
+    ONE horizon governs both distances. Facts beyond ~1,000 tokens from the
+    question become unfindable (bracket [967 pass, 1022 fail]) and INSTRUCTIONS
+    decay over the same distance -- instruction-to-generation distance is
+    (window + question), so a 1,024 window puts the system prefix ~47 tokens
+    past the measured fail point: 30/30 false positives at 1,024, 0/45 with
+    45/45 literal recall at 640. The overhead is re-derived 1,536 -> 1,920 so
+    window + overhead stays 2,560, R13's measured dense-slot budget, which
+    keeps 128 * 2,560 == leaf.ctx exactly."""
     chunk = valid_cfg.scaffold.chunk
-    assert (chunk.size_tokens, chunk.stride_tokens) == (1024, 768)
+    assert (chunk.size_tokens, chunk.stride_tokens) == (640, 480)
     assert chunk.size_tokens + chunk.overhead_tokens == 2560
     assert 128 * (chunk.size_tokens + chunk.overhead_tokens) == valid_cfg.servers.leaf.ctx
+
+
+def test_the_leaf_launch_line_disables_the_host_prompt_cache(valid_cfg):
+    """`--cache-ram 0` is load-bearing twice over, and neither reason is taste.
+
+    LATENCY (`s2/OCCUPANCY.md`): the default 8,192 MiB host prompt cache holds
+    41 entries of this config's 202.80 MiB slot state against a 128-slot pool,
+    so past 41 occupied slots the evictions per request equal the occupancy
+    exactly, at 37.5 ms each -- 272 s of a 543 s run, per-call wall 2.18 ->
+    6.69 s with `timings.prompt_ms` flat. MEASUREMENT (`s2/CACHE-INSTRUMENT.md`):
+    the same subsystem restores an idle slot's state onto a DIFFERENT slot, so
+    under the default `cache_n` is not a function of the prompts and not
+    reproducible run to run -- it is the precondition for §7 #3's gates being
+    exact (239/239, 0 tokens of error) rather than history-dependent."""
+    assert "--cache-ram 0" in valid_cfg.servers.leaf.extra_flags
 
 
 def test_a_stride_longer_than_the_window_is_refused(minimal_cfg_dict):
@@ -62,14 +83,20 @@ def test_a_stride_longer_than_the_window_is_refused(minimal_cfg_dict):
 
 
 def test_max_subcalls_covers_a_full_pass_at_the_shipped_geometry(valid_cfg):
-    """§7 #2/§8.3: coverage of a 200K-token corpus is
-    ceil((200,000 - size) / stride) + 1 windows, two questions each, and the
-    budget is spent per QUESTION. A budget below that breaks coverage
-    quietly rather than loudly."""
+    """§7 #2/§8.3: the budget is spent per QUESTION, two per window, and a
+    budget below full coverage breaks quietly rather than loudly.
+
+    The bound is NOT `ceil((200,000 - size) / stride) + 1`. That assumes every
+    window end lands exactly one stride after the last; C2's `_snap_back` moves
+    ends BACKWARD to a boundary within the tolerance, so the shortest possible
+    gap is `int(stride * (1 - snap_tolerance))` and the window count RISES.
+    This asserts the budget against the bound that no corpus can beat."""
     chunk = valid_cfg.scaffold.chunk
-    windows = -(-(200_000 - chunk.size_tokens) // chunk.stride_tokens) + 1
-    assert windows == 261
-    assert valid_cfg.scaffold.budgets.max_subcalls >= windows * 2
+    naive = -(-(200_000 - chunk.size_tokens) // chunk.stride_tokens) + 1
+    min_gap = int(chunk.stride_tokens * (1 - chunk.snap_tolerance))
+    bound = -(-200_000 // min_gap)
+    assert (naive, min_gap, bound) == (417, 432, 463)
+    assert valid_cfg.scaffold.budgets.max_subcalls >= bound * 2
 
 
 def test_the_measured_slot_pool_is_pinned(valid_cfg):
@@ -332,11 +359,13 @@ def test_the_root_has_no_slot_policy_to_set(minimal_cfg_dict):
 
 
 def test_max_subcalls_covers_a_full_200k_corpus(valid_cfg):
-    """s2/R13-mitigations.md §8.3: at window 1,024 / stride 768 a 200K-token
-    corpus is ceil((200,000 - 1,024) / 768) + 1 = 261 windows, and the budget
-    is spent per QUESTION, not per window -- 2 questions each is 522 calls.
-    The old default of 32 covered 1,024 + 31 x 768 = 24,832 tokens, i.e.
-    12.4% of the corpus, and coverage broke silently rather than loudly."""
-    windows = -(-(200_000 - 1_024) // 768) + 1
-    assert windows == 261
-    assert valid_cfg.scaffold.budgets.max_subcalls == 2 * windows == 522
+    """§7 #2 (v0.3.0): at window 640 / stride 480 the naive formula gives
+    ceil((200,000 - 640) / 480) + 1 = 417 windows = 834 calls, and MEASURING
+    the real chunker on 200,000 tokens of fixture prose gives 424 = 848 -- the
+    snap shortens gaps. The pinned value is the snap-bounded worst case,
+    ceil(200,000 / 432) = 463 windows = 926 calls, so no corpus can turn the
+    budget into silent partial coverage. (The same measurement retired the
+    previous value: 1,024/768 measured 268 windows against its formula's 261,
+    so `max_subcalls: 522` was already 14 calls short of its own geometry.)"""
+    assert valid_cfg.scaffold.budgets.max_subcalls == 926
+    assert 926 == 2 * -(-200_000 // int(480 * 0.9))

@@ -384,7 +384,7 @@ async def test_the_corpus_reaches_c4_so_every_leaf_answer_is_leak_checked(
     which is honest but useless; with it they record a real verdict.
 
     A False here is evidence, not a certificate: 138 clean calls give a 95%
-    upper bound of 2.2%, so a 522-call episode may still carry ~11
+    upper bound of 2.2%, so an 848-call episode may still carry ~19
     contaminated answers."""
     d = mock_server.dispatcher()
     env = episode_env(context="alpha beta gamma delta", root_script=[

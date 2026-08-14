@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from rlm.config import Config
-from rlm.dispatcher import LLMDispatcher, MockDispatcher
+from rlm.dispatcher import LLMDispatcher, MockDispatcher, predicted_reuse
 from rlm.errors import DispatchError, StepStatus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -853,7 +853,7 @@ async def test_an_answer_quoting_its_own_chunk_is_recorded_as_checked_and_clean(
 async def test_with_no_corpus_the_verdict_is_null_not_a_clean_bill(mock_server):
     """NULL means "not checked". Recording False would claim a check that
     never ran -- and even a real False is only evidence: 138 clean calls give
-    a 95% upper bound of 2.2%, which over ~522 leaf calls permits ~11
+    a 95% upper bound of 2.2%, which over ~848 leaf calls permits ~19
     contaminated answers per episode."""
     d = mock_server.dispatcher(parallel=4)
     mock_server.answer = f"The archive key is {FOREIGN_UUID}."
@@ -863,11 +863,84 @@ async def test_with_no_corpus_the_verdict_is_null_not_a_clean_bill(mock_server):
 
 
 # --------------------------------------------------------------------------- #
+# The reuse law (§7 #3, `s2/CACHE-INSTRUMENT.md`). Every number below is a
+# MEASURED (n_resident, lcp, ub) -> cache_n triple from that report, not an
+# invented case: the function exists to be asserted as an equality against the
+# server's counter, so a test that agreed with it by construction would be
+# worthless. `ub + 4` is 516 at the pinned `-ub 512` and 132 at `-ub 128`.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("n_resident,lcp,ub,expected,case", [
+    # A byte-identical re-send still re-evaluates the 4-token generation prompt.
+    (966, 966, 512, 962, "identical repeat"),
+    # A new document after the prefix: LCP 311 is BELOW the slot's only
+    # rollback point (966 - 516 = 450), so nothing at all is reused -- which is
+    # why gate (a)'s `cache_n >= prefix_len` is unmeetable on a first-sight
+    # chunk, at any window and any `-ub`.
+    (966, 311, 512, 0, "prefix-only newdoc"),
+    # A divergence at or after the rollback point reuses exactly the rollback
+    # point, no matter how much more the two prompts actually share.
+    (972, 693, 512, 456, "diverge"),
+    (973, 954, 512, 457, "requery"),
+    # The same identity across a 3.5x span of prompt lengths (`requery-len`).
+    (641, 600, 512, 125, "requery-len chunk 320"),
+    (962, 900, 512, 446, "requery-len chunk 640"),
+    (1607, 1500, 512, 1091, "requery-len chunk 1280"),
+    (2235, 2100, 512, 1719, "requery-len chunk 1900"),
+    # Relaunching at `-ub 128` moved the gap to exactly 132 at all four
+    # lengths, which is what makes `ub + 4` measured rather than inferred.
+    (641, 600, 128, 509, "ub128 chunk 320"),
+    # Root-turn growth is a CONTINUATION -- the previous request is a strict
+    # prefix of the next -- so it never touches the rollback point. This is the
+    # measurement that says R8's feared checkpoint invalidation does not occur
+    # for pure conversation growth on b10375.
+    (960, 956, 512, 956, "root turn 1"),
+    (1010, 1006, 512, 1006, "root turn 2"),
+    (1061, 1057, 512, 1057, "root turn 3"),
+    # A virgin slot holds nothing, so there is nothing to roll back to.
+    (0, 0, 512, 0, "virgin slot"),
+])
+def test_predicted_reuse_reproduces_the_measured_cache_n(
+        n_resident, lcp, ub, expected, case):
+    assert predicted_reuse(n_resident, lcp, ub) == expected, case
+
+
+def test_the_diverge_sweep_is_flat_at_the_rollback_point():
+    """The measurement that exposed the wrong truth model: hold the resident
+    prompt fixed, walk the divergence point across the document, and reuse is
+    FLAT while the true shared prefix more than doubles -- then falls to zero
+    below the rollback point. `cache_n` was not lying; the per-slot
+    longest-common-prefix model the spec asserted was."""
+    n_resident, ub = 966, 512
+    rollback = n_resident - ub - 4                     # 450
+    above = [predicted_reuse(n_resident, lcp, ub)
+             for lcp in (507, 605, 629, 691, 752, 821, 882)]
+    assert above == [rollback] * 7
+    assert [predicted_reuse(n_resident, lcp, ub) for lcp in (376, 435)] == [0, 0]
+
+
+def test_gate_a_as_originally_written_is_unmeetable_at_the_shipped_geometry():
+    """`cache_n >= prefix_len` on a warm slot holding a DIFFERENT chunk needs
+    `311 >= n_resident - ub - 4`, i.e. `n_resident <= 827` at `-ub 512` -- and
+    even there the reuse equals `n_resident - 516 <= 311`, so the inequality is
+    satisfiable only at the single value 827. The shipped 640-token window
+    renders ~955 tokens, well past it. This is why §7 #3 (a) is now a sha256 +
+    token-length assertion on the prefix and an equality on the residue."""
+    ub, prefix_len = 512, 311
+    rendered_640 = 955
+    assert predicted_reuse(rendered_640, prefix_len, ub) < prefix_len
+    assert predicted_reuse(315 + ub, prefix_len, ub) == prefix_len   # the coincidence
+    assert all(predicted_reuse(n, prefix_len, ub) < prefix_len
+               for n in range(316 + ub, 3000))
+
+
+# --------------------------------------------------------------------------- #
 # Slot-pool ROTATION primitives (spec v0.2.6 §5 C4).
 #
 # The never-reuse rule consumes one slot per window, so a pool of `--parallel`
 # slots dies at window `--parallel` -- window 9 on the shipped config, against
-# 261 windows for a 200K corpus. §5 C4 now permits rotating a HEALTHY leaf on
+# 424 windows for a 200K corpus. §5 C4 now permits rotating a HEALTHY leaf on
 # pool exhaustion (planned, scaffold-owned) while still forbidding the restart
 # of a FAILED one (reactive, and it would mask the fault the trace exists to
 # record). C4 owns none of that policy: it owns the three primitives the

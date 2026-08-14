@@ -79,7 +79,7 @@ when the pool is empty (`SlotPoolExhausted`) so the caller rotates the
 server instead of wrapping around into the defect.
 
 ROTATION, AND WHAT C4 DOES *NOT* OWN (v0.2.6). A pool of `--parallel` slots
-dies at window `--parallel` while a 200K corpus needs 261 windows, so the
+dies at window `--parallel` while a 200K corpus needs 424 windows, so the
 mitigation is inert without a rotation. §5 C4 permits one, narrowly: on pool
 exhaustion only, never on an error -- restarting a FAILED server would mask
 the fault the trace exists to record, while rotating a HEALTHY one on a
@@ -101,7 +101,7 @@ used one. And every answer is run through R13's foreign-string detector
 `leak_detail`.
 
 None of this makes the leaf clean: 138 virgin-slot calls with zero leaks give
-a 95% upper bound of 2.2%, and a 200K episode is ~522 leaf calls, so the
+a 95% upper bound of 2.2%, and a 200K episode is ~848 leaf calls, so the
 evidence permits roughly 11 contaminated answers per episode. The phrase
 "leak-free" is not available to this module or anything reporting on it.
 
@@ -387,6 +387,51 @@ class SlotPool:
 # --------------------------------------------------------------------------- #
 
 
+def predicted_reuse(n_resident: int, lcp: int, ub: int) -> int:
+    """How many tokens the server WILL reuse -- the measured law behind §7 #3.
+
+    `n_resident` is the token length of the prompt that last occupied the slot,
+    `lcp` the longest common token prefix between the incoming prompt and that
+    one, `ub` the server's `-ub`. Both inputs are numbers the scaffold already
+    holds: C4's pre-flight tokenizes every prompt anyway.
+
+    This replaces every threshold §7 #3 used to state against `timings.cache_n`
+    directly. `cache_n` is honest -- over 373 calls it never once exceeded what
+    the process had actually seen -- but the spec's truth model was wrong twice:
+    reuse is quantised to ONE rollback point per slot at `n_resident - ub - 4`
+    (so `cache_n` under-reported the true shared prefix on 111/373 calls, by up
+    to 497 tokens), and b10375's HOST prompt cache restores an idle slot's state
+    onto a DIFFERENT slot (so it over-reported against §4's per-slot model by up
+    to +961). Scored against this function, `cache_n` is EXACT on 239/239 calls
+    at `-ub` 512 and 128 -- `s2/CACHE-INSTRUMENT.md` §3.
+
+    TWO PRECONDITIONS, both load-bearing:
+
+    * `--cache-ram 0` (or `--no-cache-idle-slots`) must be in the launch line,
+      or cross-slot restore adds reuse this model cannot see and `cache_n`
+      stops being a function of the prompts at all. `config.yaml` pins it.
+    * `ub + 4` is a property of a BUILD and a FLAG (R11), measured at 512 and
+      at 128 (gaps 516 and 132). Re-measure it whenever `-ub` or the llama.cpp
+      build changes; `s2/run_cache_instrument.py` is the regression test.
+
+    The `+ 4` is the generation-prompt markup -- the same 4 tokens a
+    byte-identical re-send still re-evaluates (962 reused of 966).
+
+    Not wired into the dispatch path: its callers are the S2 gate runner and
+    `rlm replay`, which have both the resident prompt and the incoming one.
+    """
+    if n_resident <= 0 or lcp <= 0:
+        return 0
+    if lcp >= n_resident:                 # byte-identical re-send
+        return n_resident - 4
+    if lcp >= n_resident - 4:             # CONTINUATION: the prompt extends the slot
+        return lcp
+    rollback = n_resident - ub - 4        # DIVERGENCE: the single rollback point
+    if lcp >= rollback:
+        return max(rollback, 0)
+    return 0                              # the shared prefix is NOT available
+
+
 @dataclass(slots=True)
 class CompletionResult:
     """One /completion call's result, shaped to drop straight into a
@@ -585,13 +630,17 @@ class DispatchTarget:
     #: caching keeps that derivation off the per-call path.
     markers: tuple[str, ...] | None = None
     #: The RENDERED system head's token length -- the whole prefix as the slot
-    #: actually holds it (template markup and BOS included), which is the
-    #: number §7 #3's gate (a) compares `tokens_cached` against. Measured once,
-    #: on the first render, and kept: recomputing it per call could not change
-    #: it (the prefix is one constant string for this target's lifetime) and
-    #: computing it and throwing it away is what makes a gate-(a) failure
-    #: uninvestigable, since prefix drift and slot eviction look identical
-    #: without it.
+    #: actually holds it (template markup and BOS included). Measured once, on
+    #: the first render, and kept: recomputing it per call could not change it
+    #: (the prefix is one constant string for this target's lifetime).
+    #: §7 #3's gate (a1) asserts THIS number is stable (311 on the pinned
+    #: prefix, measured across 6 server launches and 373 calls) alongside the
+    #: prefix sha256 -- it is no longer a floor on `tokens_cached`. That
+    #: comparison is retired: `cache_n >= prefix_len` on a first-sight chunk is
+    #: unmeetable at every window and every `-ub` bar a one-token coincidence
+    #: (it needs `n_resident <= 315 + ub`), and under R13's never-reuse policy
+    #: production has no warm-slot first-sight call at all -- `cache_n` was 0 on
+    #: 236/236. The cache-side residue that CAN fail is `predicted_reuse`.
     prefix_tokens: int | None = None
     #: Does this target's prefix ask for the JSON envelope, and must C4
     #: therefore parse and validate one scaffold-side (spec §5, `rlm.envelope`)?
@@ -876,11 +925,14 @@ class LLMDispatcher:
         """This role's rendered system-head length in tokens, or None before
         the first call has rendered anything.
 
-        Exposed for a gate runner: §7 #3's gate (a) compares `tokens_cached`
-        against exactly this number, and without it a failure is
-        uninvestigable -- prefix drift and slot eviction produce an identical
-        symptom. Every step also carries it (`prefix_tokens`), so a post-hoc
-        reader gets it next to the `tokens_cached` it is judging."""
+        Exposed for a gate runner: §7 #3's gate (a1) asserts this number is
+        CONSTANT (311 on the pinned prefix) beside the prefix sha256 -- that
+        pair is the whole of R3's drift detector, and it fails the moment a
+        byte moves. It is no longer compared against `tokens_cached`: that
+        inequality is unmeetable on this stack (see `Target.prefix_tokens`),
+        and the assertion that can actually fail is `predicted_reuse`. Every
+        step also carries this number (`prefix_tokens`), so a post-hoc reader
+        gets it next to the `tokens_cached` it is judging."""
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")

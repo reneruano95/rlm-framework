@@ -202,7 +202,7 @@ def test_the_index_and_the_pure_function_agree():
 def test_detection_is_cheap_enough_to_run_on_every_leaf_call():
     """§10 R13 (3): "zero model calls, one set-membership test". The index is
     built once per corpus; a detector that re-scanned the corpus per answer
-    would cost O(corpus) on each of ~522 leaf calls in a 200K-token episode.
+    would cost O(corpus) on each of ~848 leaf calls in a 200K-token episode.
 
     300 chunks x ~4 KB is ~1.2 MB of corpus; 400 detections against it must
     stay far under a second of scanning in total."""

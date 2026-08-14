@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS steps (
     -- = checked and no foreign identifier found, TRUE = an identifier absent
     -- from the chunk sent and present in another chunk. FALSE is evidence,
     -- not a certificate: 138 clean calls give a 95% upper bound of 2.2%, and
-    -- a 200K episode is ~522 leaf calls, so ~11 contaminated answers per
+    -- a 200K episode is ~848 leaf calls, so ~19 contaminated answers per
     -- episode are permitted by the evidence. Never read a column of FALSEs as
     -- "leak-free".
     leak_detected BOOLEAN,

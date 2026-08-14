@@ -58,61 +58,110 @@ servers:
     flash_attn: "on"
     ub: 512
     b: 2048
-    extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching"]
+    # `--cache-ram 0` ADDED 2026-08-14, for two independent measured reasons.
+    # (1) LATENCY (`s2/OCCUPANCY.md`): `--cache-idle-slots` is on by default and
+    #     saves every idle slot to a host-RAM prompt cache on each new task,
+    #     against a `--cache-ram` default of 8,192 MiB while ONE slot of this
+    #     config is 202.80 MiB -- 41 entries for a 128-slot pool. Past that the
+    #     evictions per request equal the occupancy EXACTLY (0 up to 40, 1 at
+    #     41, then N) at 37.5 ms each: 7,268 evictions, 272 s of a 543 s run,
+    #     per-call wall 2.18 -> 6.69 s with `timings.prompt_ms` flat. This flag
+    #     takes it to a flat 2.05-2.16 s at every occupancy 0-127.
+    # (2) MEASUREMENT CORRECTNESS (`s2/CACHE-INSTRUMENT.md`): the same host
+    #     cache restores an idle slot's state onto a DIFFERENT slot, so under
+    #     the default `timings.cache_n` is not a function of the prompts and
+    #     not reproducible run to run (the same call reported 0 or 958). With
+    #     the flag, reuse is the exact closed form §7 #3 now asserts --
+    #     239/239 calls, 0 tokens of error, at two `-ub` values.
+    # It is measured to cost the intra-window re-query NOTHING (warm prefill
+    # 50 ms and `cache_n` identical element-for-element with and without it):
+    # `--no-kv-unified` keeps the state in the slot, and the host copy was
+    # never the thing being reused. Under R13's never-reuse policy a saved
+    # entry can never be hit at all, so the 8.2 GiB it costs buys zero.
+    # `--no-cache-idle-slots` is the equivalent alternative; both measured.
+    extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching", "--cache-ram 0"]
   fallback_leaf: null
 
 scaffold:
   dispatcher: real
-  # §7 #2 (v0.2.5): WINDOW 1,024 / STRIDE 768 (25% overlap). Retrieval does not
-  # degrade with chunk size -- it falls off a cliff at absolute needle-to-
-  # question DISTANCE (38/39 correct within ~1,000 tokens, 0/39 beyond;
-  # bracket [967 pass, 1022 fail]). A 32,768-token chunk with the needle 967
-  # from the end scored 6/6 while a 1,024-token chunk with it 1,022 from the
-  # end scored 0/3, so `size_tokens: 1024` alone would still leave the HEAD of
-  # every chunk outside the horizon: the geometry is the fix, not the size.
-  # This stride puts every token within 768 tokens of the end of some window
-  # containing it, at the same sub-call count as non-overlapping 768-chunking
-  # and ~24% more prefill.
+  # §7 #2 (v0.3.0, 2026-08-14): WINDOW 640 / STRIDE 480 (25% overlap).
+  # 1,024/768 SUPERSEDED, on quality, and the reason is one measured horizon.
+  # Retrieval falls off a cliff at absolute needle-to-question DISTANCE (38/39
+  # correct within ~1,000 tokens, 0/39 beyond; bracket [967 pass, 1022 fail]),
+  # and INSTRUCTIONS decay over the same distance: instruction-to-generation
+  # distance is (window + question), so 1,024 puts the system prefix ~47 tokens
+  # PAST the measured fail point and the leaf stops obeying its own prefix --
+  # 30/30 false positives at 1,024 against 0/45 with 45/45 literal recall at
+  # 640 (`s2/DISTANCE.md`; reproduced by accident in `s2/OCCUPANCY.md` §8,
+  # 122/128 correct at 1,024 vs 128/128 twice at 640). The stride still puts
+  # every token within `stride` tokens of the end of some window containing it.
   #
-  # overhead_tokens RE-DERIVED 8192 -> 1536 so that window + overhead = 2,560,
-  # R13's measured dense-slot budget (`-np 128 -c 327680`): 128 x 2,560 is
-  # exactly servers.leaf.ctx, so this block is arithmetic-ready for the `-np`
-  # §4 requires to be measured before pinning. It covers the rendered leaf
-  # prefix (311 tokens measured), the question, the chat template's markup,
-  # max_predict.leaf (512) and the ±10% snap slack on the window.
-  chunk: { size_tokens: 1024, stride_tokens: 768, overhead_tokens: 1536, snap_to_boundary: true, snap_tolerance: 0.10 }
+  # THE PRICE, MEASURED, not assumed (the "free in prefill" claim was half
+  # right). Over a 200,000-token corpus, run through THIS chunker on real
+  # fixture prose, snap on:
+  #   chunk tokens prefilled   276,826 (640/480) vs 282,475 (1024/768)  -2.0%
+  #   windows                      424            vs     268            +58%
+  #   served prompt tokens     646,130            vs 515,903            +25%
+  # -- because the 311-token rendered head and the 516-token (`ub`+4) re-query
+  # rollback are WINDOW-INDEPENDENT, so 58% more windows pay 58% more of them.
+  # Leaf wall at serial dispatch with `--cache-ram 0`: ~1,180 s vs ~884 s,
+  # +33%. Landed anyway: at 1,024 the leaf answers a question it cannot see the
+  # instructions for, so the cheaper geometry buys answers R5 says are no
+  # evidence of anything. Occupancy does NOT discriminate (`s2/OCCUPANCY.md`
+  # §6: both geometries drain the same 128-slot pool to the same ceiling, and
+  # at peak the 640 call is the CHEAPER one, 6.35 s vs 6.87 s).
+  #
+  # overhead_tokens RE-DERIVED 1536 -> 1920 so that window + overhead stays
+  # 2,560, R13's measured dense-slot budget (`-np 128 -c 327680`, 128 x 2,560 =
+  # servers.leaf.ctx exactly). It covers the rendered leaf prefix (311 tokens,
+  # measured stable across 6 server launches and 373 calls), the question, the
+  # chat template's markup, max_predict.leaf (512) and the +10% snap slack on
+  # the window -- ~950 of the 1,920, so the slot is over-provisioned by design.
+  # The smaller window makes `-np 192` (1,706 tok/slot) GEOMETRICALLY feasible
+  # for the first time; it stays refused on the measured memory floor (13.4%
+  # margin against the stated 15%, `s2/R13-slotcount.md`). `-np 128` stands.
+  chunk: { size_tokens: 640, stride_tokens: 480, overhead_tokens: 1920, snap_to_boundary: true, snap_tolerance: 0.10 }
   truncation_cap_chars: 2000
   budgets:
     max_depth: 1
-    # RAISED 32 -> 522 (s2/R13-mitigations.md §8.3). At §7 #2's window 1,024 /
-    # stride 768, a 200,000-token corpus is
-    #     windows = ceil((200,000 - 1,024) / 768) + 1 = 261
-    # and the budget is spent per QUESTION, so a full pass at 2 questions per
-    # window is 261 x 2 = 522 subcalls. The old 32 covered
-    # 1,024 + 31 x 768 = 24,832 tokens = 12.4% of such a corpus, and the
-    # shortfall showed up as quietly partial coverage, never as a breach.
-    # The other two budgets are checked against the same pass and stand:
-    # ~590K prompt tokens against max_total_tokens 1.5M, and 11.9 min of leaf
-    # work against max_wall_clock_s 900 (which leaves under 4 min for root
-    # turns -- re-derive it when §7 #2's geometry actually lands).
-    # HEADROOM CHECKED AGAINST §8's DECLARED TASK SIZES 2026-08-13, and the
-    # top of the needle category ("200K-1M chars") does NOT fit. At the 3.7727
-    # chars/token measured over the S2 fixture corpus, 1M chars = 265,060
-    # tokens = 345 windows = 690 subcalls at 2 questions per window:
-    #   max_subcalls 522        BREAKS FIRST, at 75.7% coverage, ~715 s in --
-    #                           and it breaks SILENTLY as partial coverage in
-    #                           the one category that punishes sampling.
-    #   max_wall_clock_s 900    BREAKS SECOND (~955 s incl. 2 rotations) if
-    #                           max_subcalls is raised. S0's own rule already
-    #                           says the 15-min default is valid only to
-    #                           ~250K tokens, so this is out of its stated
-    #                           scope rather than a surprise.
-    #   max_total_tokens 1.5M   HOLDS: 1.02M expected, 1.31M worst case.
-    # NOT raised here: 690 subcalls would only move the breach to the wall
-    # clock, and the wall clock is a §9/§8 per-task-size-class derivation, not
-    # a config knob to turn quietly. The low end of the range is comfortable
-    # (200K chars = 138 subcalls, 189 s).
-    max_subcalls: 522
+    # RAISED 522 -> 926 for window 640 / stride 480 (§7 #2, v0.3.0), and the
+    # DERIVATION IS NOT THE FORMULA -- the formula was measured wrong.
+    #     ceil((200,000 - 640) / 480) + 1 = 417 windows  -> 834 subcalls
+    # is what the geometry costs if every window end lands exactly one stride
+    # after the last. It does not: C2's `_snap_back` moves an end BACKWARD to
+    # the nearest boundary within the +-10% tolerance, so a gap can be as short
+    # as int(480 x 0.9) = 432 tokens and the window count RISES. Run through
+    # the real chunker on 200,000 tokens of fixture prose it is 424 windows =
+    # 848 subcalls (the shipped 1,024/768 measured 268 windows = 536 subcalls
+    # against its own formula's 261/522, so `max_subcalls: 522` was ALREADY
+    # short by 14 calls and would have truncated coverage silently -- exactly
+    # the failure mode it was raised to prevent).
+    # The bound that cannot be beaten by any corpus, and the value pinned here:
+    #     windows <= ceil(200,000 / (480 x 0.9)) = 463  -> 926 subcalls
+    # The other two budgets, checked against the measured 424-window pass:
+    #   max_total_tokens 1.5M   HOLDS. Settled actuals ~886K (848 calls x
+    #                           ~995 prompt + ~50 output); ~0.97M at the 926
+    #                           ceiling; admission adds only the in-flight
+    #                           reservations, which at serial dispatch is one.
+    #   max_wall_clock_s 900    BREACHED, ~1,180 s of leaf work before root
+    #                           turns -- and it was already breached at
+    #                           1,024/768 (~884 s), so it does NOT discriminate
+    #                           between the geometries. DELIBERATELY NOT
+    #                           RE-DERIVED: it is a §9/§8 per-task-size-class
+    #                           derivation, and `s2/OCCUPANCY.md` §7 blocks it
+    #                           on a live defect -- concurrent leaf dispatch
+    #                           corrupts the answer (31/32 correct serial,
+    #                           7/32 at 2 in flight), so the only measured-
+    #                           clean dispatch concurrency is 1 and every wall
+    #                           number here is a serial one.
+    # HEADROOM AGAINST §8's DECLARED TASK SIZES, re-checked at this geometry:
+    # 1M chars = 265,060 tokens (3.7727 chars/token, measured) = 552 windows by
+    # formula, <= 614 by the snap bound = 1,104-1,228 subcalls. max_subcalls
+    # BREAKS FIRST AGAIN, at ~75% coverage, and the wall-clock breach grows
+    # from ~955 s to ~1,560 s. §8's "full coverage of a 1M-char corpus is not
+    # affordable" therefore STANDS, with a worse margin. Not raised further:
+    # 1,228 subcalls would only move the breach to the wall clock.
+    max_subcalls: 926
     max_wall_clock_s: 900
     max_total_tokens: 1500000
     # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
@@ -213,8 +262,21 @@ scaffold:
   # many leaf calls may be in flight at once, sized by S0's finding that
   # aggregate prefill is FLAT across slots (946.7 t/s at 8 ≈ 943.4 at 1).
   # Tying them would put 128 calls on the wire because the memory allowed 128
-  # slots. 8 is the measured value and stands; it may not exceed the pool,
-  # since every in-flight call holds a slot.
+  # slots. 8 was S0's measured value; it may not exceed the pool, since every
+  # in-flight call holds a slot.
+  #
+  # LIVE BLOCKER, 2026-08-14 (`s2/OCCUPANCY.md` §7): THIS VALUE IS NOT SAFE.
+  # Concurrent leaf dispatch destroys the ANSWER, not merely the latency:
+  # 31/32 correct serial, 7/32 at 2 in flight, 3/32 at 3, 2/32 at 4, 7/128 at
+  # 8 -- degenerate text ('###/remainile'), not wrong answers. Reproduced with
+  # two independent OS processes sharing one server, so it is the server and
+  # not the async client, and R13's detector CANNOT see it (degenerate output
+  # carries no identifier to be foreign). The break is at TWO.
+  # NOT CHANGED HERE, deliberately: this is a defect of the same class as R13
+  # and gets the same treatment -- minimal reproducer, mechanism, upstream
+  # issue -- before a config edit picks a number. Every wall-clock figure in
+  # this file and in §7 #2 is a SERIAL one for exactly this reason, and
+  # `max_wall_clock_s` may not be re-derived until it is characterised.
   dispatch_concurrency: 8
 
 trace:

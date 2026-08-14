@@ -7,18 +7,29 @@ uncontrolled. B2 and B3 (§8) use this verbatim.
 The token counter is injected so this module never imports an LLM client
 (dependency rule, §5).
 
-WINDOW/STRIDE GEOMETRY (spec §7 #2, v0.2.5) — why this is no longer a
-partition. The chunk sweep found that retrieval does NOT degrade with chunk
-size: it falls off a cliff at absolute DISTANCE from the needle to the
-question, 38/39 correct within ~1,000 tokens and 0/39 beyond it (Fisher
-p ≈ 1e-21), bracket measured at [967 pass, 1022 fail]. Size is ruled out by the
-data's own counterexamples — a 32,768-token chunk with the needle 967 tokens
-from the end scored 6/6, a 1,024-token chunk with it 1,022 from the end scored
-0/3. So shipping a small `size_tokens` on a non-overlapping chunker fixes
-nothing: the HEAD of every chunk still sits outside the horizon. The lever is
-window/stride geometry, and the derived recommendation is **window 1,024 /
-stride 768** (25% overlap): same sub-call count as non-overlapping 768-chunking,
-~24% more prefill.
+WINDOW/STRIDE GEOMETRY (spec §7 #2) — why this is no longer a partition. The
+chunk sweep found that retrieval does NOT degrade with chunk size: it falls off
+a cliff at absolute DISTANCE from the needle to the question, 38/39 correct
+within ~1,000 tokens and 0/39 beyond it (Fisher p ≈ 1e-21), bracket measured at
+[967 pass, 1022 fail]. Size is ruled out by the data's own counterexamples — a
+32,768-token chunk with the needle 967 tokens from the end scored 6/6, a
+1,024-token chunk with it 1,022 from the end scored 0/3. So shipping a small
+`size_tokens` on a non-overlapping chunker fixes nothing: the HEAD of every
+chunk still sits outside the horizon. The lever is window/stride geometry.
+
+**The shipped geometry is window 640 / stride 480 (v0.3.0), not the 1,024/768
+this module was written for.** ONE horizon governs two distances: the same
+~1,000-token cliff that makes facts unfindable makes INSTRUCTIONS unobeyed, and
+instruction-to-generation distance is (window + question) — so a 1,024 window
+puts the system prefix ~47 tokens past the measured fail point (30/30 false
+positives at 1,024, 0/45 with 45/45 literal recall at 640).
+
+**Window COUNT is not `ceil((T - size) / stride) + 1`.** That formula assumes
+every end lands exactly one stride after the last; `_snap_back` moves ends
+BACKWARD, so a gap can be as short as `int(stride * (1 - snap_tolerance))` and
+the count rises — measured 424 windows against the formula's 417 over 200,000
+tokens of fixture prose. Any budget derived for full coverage (`max_subcalls`)
+must use the snap bound, `ceil(T / int(stride * (1 - tolerance)))`.
 
 **The property this module now guarantees**, and the one its tests assert:
 
@@ -51,8 +62,7 @@ back `size` tokens from its own end, so for any token p the FIRST window end
 after p belongs to a window that contains p and sits within `stride` tokens of
 it. Anchoring on starts instead (windows at 0, stride, 2·stride, …) fails at
 the head: the first `size - stride` tokens are then only ever in window 0, at
-distance up to `size` — 1,024 tokens on the shipped geometry, i.e. past the
-measured cliff.
+distance up to `size`.
 """
 from __future__ import annotations
 

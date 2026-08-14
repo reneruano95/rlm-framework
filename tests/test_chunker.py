@@ -256,16 +256,56 @@ def test_overlap_keeps_snapping_to_boundaries():
 
 
 def test_the_production_geometry_costs_the_expected_window_count():
-    """window 1,024 / stride 768 over 10,000 tokens: ceil(10000/768) = 14
-    windows, the same arithmetic §7 #2 uses to price a 200K corpus at 261."""
-    cfg = ChunkConfig(size_tokens=1024, overhead_tokens=1536,
+    """window 640 / stride 480 over 10,000 tokens (§7 #2, v0.3.0).
+
+    The naive price is ceil(10000/480) = 21 windows. The chunker may need more
+    and may never need more than the snap bound -- see
+    `test_the_window_count_can_exceed_the_naive_formula_and_never_the_snap_bound`,
+    which is why `max_subcalls` is derived from the bound and not the formula."""
+    cfg = ChunkConfig(size_tokens=640, overhead_tokens=1920,
                       snap_to_boundary=True, snap_tolerance=0.10,
-                      stride_tokens=768)
+                      stride_tokens=480)
     text = lines(10_000)
     chunks = split(text, cfg, count)
     assert geometry_violations(text, chunks, horizon_for(cfg)) == []
     assert horizon_for(cfg) == cfg.stride      # the shipped geometry promises the stride
-    assert 13 <= len(chunks) <= 15
+    naive = -(-(10_000 - 640) // 480) + 1
+    bound = -(-10_000 // int(480 * 0.9))
+    assert naive == 21 and bound == 24
+    assert naive <= len(chunks) <= bound
+
+
+def test_the_window_count_can_exceed_the_naive_formula_and_never_the_snap_bound():
+    """`max_subcalls` is a coverage guarantee, so its derivation has to be the
+    bound the chunker cannot beat -- not the formula the spec priced it with.
+
+    `ceil((T - size) / stride) + 1` assumes every window end lands exactly one
+    stride after the last. `_snap_back` moves an end BACKWARD to the nearest
+    boundary within the +-10% tolerance, so a gap can be as short as
+    `int(stride * (1 - snap_tolerance))` and the count rises. Measured on the
+    real chunker over 200,000 tokens of S2 fixture prose: 424 windows at
+    640/480 against the formula's 417, and 268 at 1,024/768 against 261 -- so
+    the shipped `max_subcalls: 522` was already 14 calls short of its own
+    geometry and would have truncated coverage silently.
+
+    Constructed here with boundaries only every 90% of a stride, which forces
+    every snap to take the full tolerance."""
+    stride, size, tol = 480, 640, 0.10
+    min_gap = int(stride * (1 - tol))          # 432
+    # Tokens separated by spaces, with a newline every `min_gap` tokens: the
+    # only boundary a backward snap can reach is a full tolerance early.
+    groups = ["  ".join(f"w{i}_{j}" for j in range(min_gap)) for i in range(20)]
+    text = "\n".join(groups)
+    total = count(text)
+    cfg = ChunkConfig(size_tokens=size, overhead_tokens=1920,
+                      snap_to_boundary=True, snap_tolerance=tol,
+                      stride_tokens=stride)
+    chunks = split(text, cfg, count)
+    naive = -(-(total - size) // stride) + 1
+    bound = -(-total // min_gap)
+    assert len(chunks) > naive          # the formula under-counts, as measured
+    assert len(chunks) <= bound         # and the bound holds
+    assert geometry_violations(text, chunks, horizon_for(cfg)) == []
 
 
 def test_rejects_a_stride_that_cannot_hold_the_geometry():
@@ -300,9 +340,9 @@ class CountingCounter:
         return count(text)
 
 
-PRODUCTION = ChunkConfig(size_tokens=1024, overhead_tokens=1536,
+PRODUCTION = ChunkConfig(size_tokens=640, overhead_tokens=1920,
                          snap_to_boundary=True, snap_tolerance=0.10,
-                         stride_tokens=768)
+                         stride_tokens=480)
 
 
 def test_windowing_cost_is_linear_in_window_count_not_in_corpus_size():
@@ -315,7 +355,7 @@ def test_windowing_cost_is_linear_in_window_count_not_in_corpus_size():
     fix: 55x the corpus in tokenized characters at 2K tokens, 80x at 8K, 130x
     at 32K, growing ~7x for every 4x of corpus, with counts-per-window
     climbing 38.7 -> 62.7 as the corpus grew. On a 200K-token corpus that is
-    hundreds of millions of characters over HTTP to build 261 windows.
+    hundreds of millions of characters over HTTP to build 424 windows.
 
     Both halves are asserted: the count per window has to be a constant (a
     function of the window, not of the corpus), and the WORK -- characters
@@ -332,7 +372,7 @@ def test_the_partition_path_is_window_bounded_too():
     costing both controls the same quadratic pre-episode work. Measured before
     the fix on this path: 1.69x the work per corpus character for 4x the
     corpus."""
-    assert_window_bounded(ChunkConfig(size_tokens=1024, overhead_tokens=1536,
+    assert_window_bounded(ChunkConfig(size_tokens=640, overhead_tokens=1920,
                                       snap_to_boundary=True, snap_tolerance=0.10))
 
 

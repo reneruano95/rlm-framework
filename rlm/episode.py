@@ -541,7 +541,7 @@ class _EpisodeRun:
 
         §5 C4 (v0.2.6): the R13 mitigation gives every window a never-reused
         slot, so a pool of `--parallel` slots is spent after `--parallel`
-        windows -- 128 on the measured config, against 261 windows for a 200K
+        windows -- 128 on the measured config, against 424 windows for a 200K
         corpus. Without a rotation the mitigation is inert. With one, the
         distinction that keeps §5 C4's original rule intact is PLANNED versus
         REACTIVE: this fires on `SlotPoolExhausted` and on nothing else, so a
