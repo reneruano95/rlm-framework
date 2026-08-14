@@ -32,6 +32,19 @@ round-tripping (`"".join(chunks) == text`) is NOT a property under overlap —
 text repeats by construction — and it is kept only on the default,
 `stride == size` path, which is today's chunker unchanged.
 
+**Clause 2 holds at `stride` on the OVERLAP path only.** On the partition path
+(`stride == size`) the snap is the symmetric one §5 C2 specifies — the nearest
+boundary within a ±10% token tolerance — so a cut may move LATER and a window
+may hold up to `size * (1 + snap_tolerance)` tokens; its head is then that far
+from its end, i.e. the tolerance further than `stride`. Found by hypothesis
+(34 tokens, size 32, sparse boundaries → one 34-token window against a stride of
+32) and pinned in `tests/test_chunker.py`
+(`test_partition_snap_may_overshoot_the_stride_horizon_by_the_tolerance`,
+`horizon_for`). It is a limit of the geometry §7 #2 CONDEMNED, not of the one it
+recommends: at `stride == size` the horizon clause is nearly vacuous anyway. The
+overlap path cannot do this — `_snap_back` and `_snap_start` are backward-only by
+construction, which is exactly what makes the shipped promise the stride.
+
 How clause 2 is obtained (and why the geometry is anchored on window ENDS):
 window ends advance by at most `stride` tokens each, and every window reaches
 back `size` tokens from its own end, so for any token p the FIRST window end

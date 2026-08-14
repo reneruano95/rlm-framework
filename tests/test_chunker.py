@@ -118,12 +118,40 @@ def token_starts(text: str) -> list[int]:
     return [m.start() for m in re.finditer(r"\S+", text)]
 
 
-def geometry_violations(text: str, chunks: list[str], stride: int) -> list[tuple]:
+def horizon_for(cfg: ChunkConfig) -> int:
+    """The largest distance-to-window-end clause 2 can promise under `cfg`.
+
+    `stride` on the OVERLAP path, and that is the guarantee the shipped 1024/768
+    geometry rests on: `_window_ends` advances ends by at most a stride (its snap
+    is backward-only), and window 0 is exactly one stride long, so no token is
+    ever further than `stride` from the end of some window containing it.
+
+    On the PARTITION path (`stride == size`, the legacy default) the snap is the
+    one §5 C2 specifies — "the nearest boundary within a ±10% token tolerance" —
+    and ± is symmetric, so a cut may move LATER and a window may hold up to
+    `size * (1 + snap_tolerance)` tokens (already pinned by
+    `test_no_chunk_exceeds_target_plus_tolerance`). The head of such a window is
+    that far from its end, which is exactly the tolerance more than `stride`.
+    Found by hypothesis at n=34/size=32/sparse17, pinned as a regression by
+    `test_partition_snap_may_overshoot_the_stride_horizon_by_the_tolerance`.
+
+    This is a limit of the geometry the sweep CONDEMNED, not of the one it
+    recommended: at `stride == size` the horizon clause is nearly vacuous anyway
+    (a token may sit a full window from the question), which is why §7 #2's fix
+    is overlap rather than a smaller size.
+    """
+    if cfg.stride < cfg.size_tokens or not cfg.snap_to_boundary:
+        return cfg.stride
+    return int(cfg.size_tokens * (1 + cfg.snap_tolerance))
+
+
+def geometry_violations(text: str, chunks: list[str], horizon: int) -> list[tuple]:
     """Every (token, why) that breaks the two-clause property.
 
     `(p, None)` = the token is in no window at all (coverage);
-    `(p, d)` = its nearest containing window's end is d > stride tokens away
-    (the horizon clause).
+    `(p, d)` = its nearest containing window's end is d > `horizon` tokens away
+    (the horizon clause). `horizon` is `horizon_for(cfg)`, which is the stride on
+    every geometry that ships.
     """
     sp = spans(text, chunks)
     bad: list[tuple] = []
@@ -133,7 +161,7 @@ def geometry_violations(text: str, chunks: list[str], stride: int) -> list[tuple
             bad.append((p, None))
             continue
         nearest = min(count(text[p:e]) for _, e in containing)
-        if nearest > stride:
+        if nearest > horizon:
             bad.append((p, nearest))
     return bad
 
@@ -235,7 +263,8 @@ def test_the_production_geometry_costs_the_expected_window_count():
                       stride_tokens=768)
     text = lines(10_000)
     chunks = split(text, cfg, count)
-    assert geometry_violations(text, chunks, cfg.stride) == []
+    assert geometry_violations(text, chunks, horizon_for(cfg)) == []
+    assert horizon_for(cfg) == cfg.stride      # the shipped geometry promises the stride
     assert 13 <= len(chunks) <= 15
 
 
@@ -347,7 +376,7 @@ def test_bounding_the_search_did_not_move_a_single_boundary():
                 ChunkConfig(100, 20, False, 0.10, stride_tokens=75)):
         chunks = split(text, cfg, count)
         assert chunks
-        assert geometry_violations(text, chunks, cfg.stride) == []
+        assert geometry_violations(text, chunks, horizon_for(cfg)) == []
         assert split(text, cfg, count) == chunks       # still deterministic
 
 
@@ -405,7 +434,7 @@ def test_the_geometry_holds_on_every_text_shape(shape):
     text = SHAPES[shape](2_000)
     chunks = split(text, OVERLAP, count)
     assert chunks
-    assert geometry_violations(text, chunks, OVERLAP.stride) == []
+    assert geometry_violations(text, chunks, horizon_for(OVERLAP)) == []
 
 
 @settings(max_examples=60, deadline=None)
@@ -431,4 +460,32 @@ def test_the_geometry_holds_for_arbitrary_sizes_and_strides(n, size, ratio, snap
     text = SHAPES[shape](n)
     chunks = split(text, cfg, count)
     assert chunks
-    assert geometry_violations(text, chunks, cfg.stride) == []
+    assert geometry_violations(text, chunks, horizon_for(cfg)) == []
+
+
+def test_partition_snap_may_overshoot_the_stride_horizon_by_the_tolerance():
+    """The one place clause 2 does NOT hold at `stride`, pinned rather than
+    hidden — hypothesis found it, and rewriting the bound without a regression
+    test would let the next widening of the tolerance pass unnoticed.
+
+    §5 C2's snap is symmetric ("±10% token tolerance"), so on the partition path
+    a cut may move LATER: here a 34-token text snaps to a single 34-token window
+    against a stride of 32, and its head sits 34 tokens from the end. The bound
+    is `size * (1 + snap_tolerance)` = 35 and it is tight. The OVERLAP path
+    cannot do this — `_snap_back`/`_snap_start` are backward-only by
+    construction, which is what makes the shipped geometry's promise the stride.
+    """
+    cfg = ChunkConfig(size_tokens=32, overhead_tokens=8, snap_to_boundary=True,
+                      snap_tolerance=0.10, stride_tokens=32)
+    text = SHAPES["sparse17"](34)
+    chunks = split(text, cfg, count)
+    assert [count(c) for c in chunks] == [34]
+    assert geometry_violations(text, chunks, cfg.stride) == [(0, 34), (3, 33)]
+    assert geometry_violations(text, chunks, horizon_for(cfg)) == []
+    assert horizon_for(cfg) == 35
+
+    # Same text, same tolerance, OVERLAPPING: the promise is the stride again.
+    over = ChunkConfig(size_tokens=32, overhead_tokens=8, snap_to_boundary=True,
+                       snap_tolerance=0.10, stride_tokens=24)
+    assert horizon_for(over) == 24
+    assert geometry_violations(text, split(text, over, count), over.stride) == []
