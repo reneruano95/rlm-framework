@@ -249,16 +249,186 @@ def test_rejects_a_stride_that_cannot_hold_the_geometry():
         split(text, ChunkConfig(100, 20, True, 0.1, stride_tokens=101), count)
 
 
-@settings(max_examples=25, deadline=None)
+# --------------------------------------------------------------------------- #
+# What windowing COSTS. Every `count_tokens` here is an HTTP round trip to the
+# leaf's /tokenize (spec §5 C2: "measured in target-leaf tokens" means that
+# counter and no other), and C2 runs inside the episode's wall clock, before a
+# single leaf call. So the number of counts AND the amount of text handed to
+# each one are correctness-adjacent, not merely tidiness.
+# --------------------------------------------------------------------------- #
+
+
+class CountingCounter:
+    """`count`, instrumented: how many round trips, over how much text."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.chars = 0
+
+    def __call__(self, text: str) -> int:
+        self.calls += 1
+        self.chars += len(text)
+        return count(text)
+
+
+PRODUCTION = ChunkConfig(size_tokens=1024, overhead_tokens=1536,
+                         snap_to_boundary=True, snap_tolerance=0.10,
+                         stride_tokens=768)
+
+
+def test_windowing_cost_is_linear_in_window_count_not_in_corpus_size():
+    """The boundary search must be bounded by a WINDOW, not by the tail.
+
+    Searching to `len(text)` makes every probe tokenize up to half the
+    remaining corpus, and the per-window tail check tokenizes all of it -- so
+    windowing is O(n) round trips over an O(n) tail, i.e. quadratic work, all
+    of it before the first leaf call. Measured on this geometry before the
+    fix: 55x the corpus in tokenized characters at 2K tokens, 80x at 8K, 130x
+    at 32K, growing ~7x for every 4x of corpus, with counts-per-window
+    climbing 38.7 -> 62.7 as the corpus grew. On a 200K-token corpus that is
+    hundreds of millions of characters over HTTP to build 261 windows.
+
+    Both halves are asserted: the count per window has to be a constant (a
+    function of the window, not of the corpus), and the WORK -- characters
+    actually sent to /tokenize -- has to stay a bounded multiple of the corpus.
+    The second is the one that was quadratic; a call-count-only assertion
+    would have passed the old code at a single size.
+    """
+    assert_window_bounded(PRODUCTION)
+
+
+def test_the_partition_path_is_window_bounded_too():
+    """`stride == size` is B2's and B3's chunker as well as today's default
+    (§8: they use the C2 chunker verbatim), so the same full-tail scan was
+    costing both controls the same quadratic pre-episode work. Measured before
+    the fix on this path: 1.69x the work per corpus character for 4x the
+    corpus."""
+    assert_window_bounded(ChunkConfig(size_tokens=1024, overhead_tokens=1536,
+                                      snap_to_boundary=True, snap_tolerance=0.10))
+
+
+def assert_window_bounded(cfg: ChunkConfig) -> None:
+    """4x the corpus must cost ~4x the windowing, not ~16x.
+
+    Both instruments, because they fail differently. `chars` is the WORK --
+    the text actually handed to `/tokenize`, i.e. the HTTP payload -- and it is
+    the one that was quadratic; `calls` is the round-trip count, which is
+    O(log window) per window by construction and grows only if the search is
+    reaching past the window. Deterministic arithmetic on a fixed fixture, so
+    the margins can be tight without being flaky.
+    """
+    small, big = lines(4_000), lines(16_000)
+    cs, cb = CountingCounter(), CountingCounter()
+    ws, wb = split(small, cfg, cs), split(big, cfg, cb)
+    assert ws and wb
+
+    work_small = cs.chars / len(small)      # tokenized chars per corpus char
+    work_big = cb.chars / len(big)
+    assert work_big <= work_small * 1.15, (
+        f"windowing cost {work_small:.1f}x the corpus at {len(small)} chars and "
+        f"{work_big:.1f}x at {len(big)}: the work per character grows with the "
+        "corpus, which is the quadratic tail scan")
+
+    per_window = (cs.calls / len(ws), cb.calls / len(wb))
+    assert per_window[1] <= per_window[0] * 1.20, (
+        f"round trips per window grew with the corpus: {per_window[0]:.1f} -> "
+        f"{per_window[1]:.1f}; the search is not window-bounded")
+    assert cb.calls / cs.calls <= 1.20 * (len(wb) / len(ws)), (
+        f"{cb.calls / cs.calls:.2f}x the round trips for "
+        f"{len(wb) / len(ws):.2f}x the windows: the count is not linear in "
+        "window count")
+
+
+def test_bounding_the_search_did_not_move_a_single_boundary():
+    """The bound is a cost fix and must be nothing else: same windows, byte
+    for byte, at both stride settings and with snapping on and off."""
+    text = lines(3_000)
+    for cfg in (CFG, OVERLAP, PRODUCTION,
+                ChunkConfig(100, 20, False, 0.10, stride_tokens=75)):
+        chunks = split(text, cfg, count)
+        assert chunks
+        assert geometry_violations(text, chunks, cfg.stride) == []
+        assert split(text, cfg, count) == chunks       # still deterministic
+
+
+# --------------------------------------------------------------------------- #
+# TEXT SHAPES. Every overlap fixture above is `lines(n)` -- a boundary between
+# every single token -- which is the one shape where snapping can barely move a
+# cut at all. Boundary snapping is the only thing in the geometry that MOVES a
+# window edge, and it moves it by up to the tolerance, so the shapes that can
+# actually stress the horizon clause are the ones where boundaries are scarce
+# (a snap has to travel) or clustered (a snap lands far from the nominal cut).
+# The property holds on all of them; what was missing was any fixture able to
+# show it.
+# --------------------------------------------------------------------------- #
+
+
+def sparse(n: int, every: int) -> str:
+    """A newline only every `every` tokens: snapping must travel to reach one."""
+    toks = [f"w{i}" for i in range(n)]
+    return " ".join(
+        tok + ("\n" if (i + 1) % every == 0 else "") for i, tok in enumerate(toks)
+    ).replace("\n ", "\n")
+
+
+def clumped(n: int) -> str:
+    """Runs of boundary-dense text alternating with long unbroken runs -- the
+    shape real corpora actually have (paragraph blocks, then a code block or a
+    table with no breaks in it)."""
+    out: list[str] = []
+    i = 0
+    dense = True
+    while i < n:
+        run = 12 if dense else 90
+        block = [f"w{j}" for j in range(i, min(n, i + run))]
+        out.append(("\n" if dense else " ").join(block))
+        i += run
+        dense = not dense
+    return "\n".join(out)
+
+
+def unbroken(n: int) -> str:
+    """No boundary anywhere: every snap must fall back to the nominal cut."""
+    return words(n)
+
+
+SHAPES = {"lines": lines, "sparse5": lambda n: sparse(n, 5),
+          "sparse17": lambda n: sparse(n, 17), "sparse60": lambda n: sparse(n, 60),
+          "clumped": clumped, "unbroken": unbroken}
+
+
+@pytest.mark.parametrize("shape", sorted(SHAPES))
+def test_the_geometry_holds_on_every_text_shape(shape):
+    """The horizon clause on the SHIPPED geometry, over boundary layouts the
+    overlap fixtures never had. `unbroken` is the control that the snapping
+    itself is not what satisfies the property."""
+    text = SHAPES[shape](2_000)
+    chunks = split(text, OVERLAP, count)
+    assert chunks
+    assert geometry_violations(text, chunks, OVERLAP.stride) == []
+
+
+@settings(max_examples=60, deadline=None)
 @given(n=st.integers(min_value=1, max_value=400),
        size=st.integers(min_value=4, max_value=60),
        ratio=st.floats(min_value=0.25, max_value=1.0),
-       snap=st.booleans())
-def test_the_geometry_holds_for_arbitrary_sizes_and_strides(n, size, ratio, snap):
+       snap=st.booleans(),
+       shape=st.sampled_from(sorted(SHAPES)))
+def test_the_geometry_holds_for_arbitrary_sizes_and_strides(n, size, ratio, snap,
+                                                             shape):
+    """Randomized over geometry AND text shape.
+
+    The shape axis is the one that was missing: with a boundary between every
+    token a snap moves a cut by at most one token, so no amount of size/stride
+    randomization could ever show a snap pushing the effective distance past
+    `stride`. Sparse boundaries (a snap travels up to the full tolerance),
+    clumped ones (it lands in a burst far from the nominal cut) and none at all
+    are where that could happen.
+    """
     stride = max(1, int(size * ratio))
     cfg = ChunkConfig(size_tokens=size, overhead_tokens=8, snap_to_boundary=snap,
                       snap_tolerance=0.10, stride_tokens=stride)
-    text = lines(n)
+    text = SHAPES[shape](n)
     chunks = split(text, cfg, count)
     assert chunks
     assert geometry_violations(text, chunks, cfg.stride) == []

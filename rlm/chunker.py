@@ -74,10 +74,41 @@ class ChunkConfig:
         return self.size_tokens if self.stride_tokens is None else self.stride_tokens
 
 
+#: First guess at how many characters hold one token, used only to size the
+#: initial search span. Any value is correct -- the span doubles until it
+#: actually holds `target` tokens -- so this only decides how many probes the
+#: doubling costs. 4 brackets the 3.77 chars/token measured over the S2 fixture
+#: corpus (`s2/fixtures/manifest.json`).
+_CHARS_PER_TOKEN_GUESS = 4
+
+
 def _char_for_token_target(text: str, target: int,
                            count_tokens: Callable[[str], int]) -> int:
-    """Smallest char offset whose prefix holds >= target tokens (binary search)."""
-    lo, hi = 0, len(text)
+    """Smallest char offset whose prefix holds >= target tokens.
+
+    BOUNDED BY THE WINDOW, not by the tail, and that is the whole point.
+    Every `count_tokens` here is an HTTP round trip to the leaf's `/tokenize`
+    (spec §5 C2), and this used to binary-search over `[0, len(text)]` -- so
+    the first probe of every boundary tokenized half the remaining corpus, and
+    the cost of windowing grew with the corpus rather than with the number of
+    windows. Measured on the shipped 1024/768 geometry before the bound: 55x
+    the corpus in tokenized characters at 2K tokens, 80x at 8K, 130x at 32K
+    -- ~7x more work for every 4x of corpus, with round trips per window
+    climbing 38.7 -> 62.7. That is quadratic work inside the episode's wall
+    clock, all of it before the first leaf call.
+
+    The span starts at a window-sized guess and DOUBLES until it holds
+    `target` tokens, so the answer is still exact (the prefix count is
+    monotone in length, and the doubling stops only once the target is
+    reached or the text runs out) while both the probe count and the text
+    each probe carries scale with `target`.
+    """
+    if target <= 0:
+        return 0
+    hi = min(len(text), max(1, target * _CHARS_PER_TOKEN_GUESS))
+    while hi < len(text) and count_tokens(text[:hi]) < target:
+        hi = min(len(text), hi * 2)
+    lo = 0
     while lo < hi:
         mid = (lo + hi) // 2
         if count_tokens(text[:mid]) < target:
@@ -127,11 +158,16 @@ def _split_partition(text: str, cfg: ChunkConfig,
     start = 0
     while start < len(text):
         rest = text[start:]
-        if count_tokens(rest) <= cfg.size_tokens:
+        # "Does the whole tail fit in one chunk?" asked WITHOUT tokenizing the
+        # whole tail: if no proper prefix of `rest` reaches `size_tokens`, the
+        # tail holds at most that many and is the last chunk. The direct
+        # `count_tokens(rest) <= size` this replaces was one full-tail round
+        # trip per chunk -- on its own, O(n) round trips over an O(n) tail.
+        cut = _char_for_token_target(rest, cfg.size_tokens, count_tokens)
+        if cut >= len(rest):
             chunks.append(rest)
             break
 
-        cut = _char_for_token_target(rest, cfg.size_tokens, count_tokens)
         if cfg.snap_to_boundary:
             cut = _snap(rest, cut, cfg, count_tokens)
         cut = max(cut, 1)  # never make zero progress
@@ -196,10 +232,15 @@ def _window_ends(text: str, cfg: ChunkConfig,
     pos = 0
     while pos < len(text):
         rest = text[pos:]
-        if count_tokens(rest) <= stride:
+        # Same window-bounded tail test as the partition path: no proper
+        # prefix reaching `stride` tokens means the tail holds at most a
+        # stride's worth, so `len(text)` is the last end. Asking
+        # `count_tokens(rest) <= stride` instead tokenized the entire
+        # remaining corpus once per window.
+        cut = _char_for_token_target(rest, stride, count_tokens)
+        if cut >= len(rest):
             ends.append(len(text))
             break
-        cut = _char_for_token_target(rest, stride, count_tokens)
         if cfg.snap_to_boundary:
             cut = _snap_back(rest, cut, stride, cfg, count_tokens)
         cut = max(cut, 1)  # never make zero progress
