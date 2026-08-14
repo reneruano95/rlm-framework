@@ -331,8 +331,12 @@ One never-reused slot per (arm, cell), from the pinned 128-slot pool; intra-cell
 <!-- HAND-WRITTEN FINDINGS BELOW — regeneration preserves this -->
 # Findings
 
-Run 2026-08-13/14, branch `capa1`, tree green at `f875b8b` (458 tests) before the
-run. Leaf: `Qwen3.6-35B-A3B-UD-Q4_K_M` on ROCm, launched exactly as the §4/S0
+Run 2026-08-13/14, branch `capa1`. **The call path that produced these 612
+answers was frozen at `959eb16`** (the harness commit); the later commits on this
+branch touched only the REPORT renderer, and every label here is re-derived from
+each record's verbatim `raw_output` by the final scorer, so no arm was scored by
+a different instrument than any other. Suite green (458 tests) at each of those
+commits. Leaf: `Qwen3.6-35B-A3B-UD-Q4_K_M` on ROCm, launched exactly as the §4/S0
 contract specifies (`-np 128 -c 327680 -ctk q8_0 -ctv q8_0 -fa on -ub 512
 -b 2048 -lm none --no-kv-unified --cont-batching`, `ROCBLAS_USE_HIPBLASLT=1`),
 one process for the whole experiment, shut down after. **612 real leaf calls**
