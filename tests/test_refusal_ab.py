@@ -16,6 +16,7 @@ import pytest
 from s2.run_refusal_ab import (
     ARMS,
     ENVELOPE_BLOCK,
+    common_cells,
     load_cells,
     reduce_envelope,
     render_report,
@@ -234,6 +235,48 @@ def test_a_contaminated_answer_is_counted_not_hidden():
     md = render_report([_record(leak_detected=True, raw_output="ENT-1")])
     assert "R13 contamination audit" in md
     assert "**1**" in md
+
+
+def test_the_report_also_scores_envelope_arms_as_plain_text():
+    """The decomposition: a reply can fail the FORMAT and still carry the
+    CONTENT under test. A prose refusal to an ABSENT question is MALFORMED to
+    the envelope scorer (the runtime could not have used it) and a correct
+    refusal to the plain-text one, and the report must show both or the
+    experiment cannot tell "the block broke the reply" from "the block changed
+    nothing"."""
+    records = [
+        _record(arm="a-v1-plain", raw_output="ENT-1"),
+        _record(arm="b-v1-envelope", envelope=True,
+                raw_output="The excerpt does not mention that organisation."),
+    ]
+    md = render_report(records)
+    assert "re-scored as PLAIN TEXT" in md
+    # envelope scorer: unusable. plain-text scorer: a correct refusal, so the
+    # false-positive rate for that arm is 0/1 in the second table.
+    assert "0/1 (0%)" in md
+
+
+def test_the_headline_tables_are_over_cells_EVERY_arm_ran():
+    """The four prefixes render to different lengths (311 / 773 / 577 / 1039
+    tokens measured), so against a fixed 2,560-token slot the plain-v1 arm
+    admits a 2,048-token cell the envelope arms cannot fit. Scoring each arm
+    over its own admitted set would compare four different corpora and call the
+    difference an effect."""
+    records = [
+        # both arms ran the shared cell ...
+        _record(arm="a-v1-plain", cell_uid="shared", raw_output="ENT-1"),
+        _record(arm="b-v1-envelope", envelope=True, cell_uid="shared",
+                raw_output=env("ENT-1", [], False)),
+        # ... only the short-prefix arm fitted the big one, and it refused there
+        _record(arm="a-v1-plain", cell_uid="big-2048", raw_output="NONE"),
+    ]
+    assert common_cells(records) == {"shared"}
+    md = render_report(records)
+    # a's false-positive rate is 1/1 on the shared cell, NOT 1/2 as it would be
+    # if the cell only it could run were folded in
+    assert "1/1 (100%)" in md
+    assert "1/2" not in md
+    assert "over the 1 cell(s) EVERY arm ran" in md
 
 
 # --------------------------------------------------------------------------- #

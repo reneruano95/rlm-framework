@@ -391,9 +391,30 @@ def _rate(num: int, den: int) -> str:
     return f"{num}/{den} ({num / den:.0%})" if den else "-"
 
 
+def common_cells(records: list[dict]) -> set[str]:
+    """Cells every arm actually ran.
+
+    THE ARMS DO NOT ADMIT THE SAME CELLS, and pretending otherwise would be the
+    experiment's worst available bug. The four prefixes render to 311 / 773 /
+    577 / 1039 tokens, so against a 2,560-token slot the plain-v1 arm admits a
+    2,048-token cell that the envelope arms cannot fit. Comparing arms over
+    their own admitted sets would compare four different corpora and call the
+    difference an effect. The headline table is therefore over the
+    INTERSECTION; the per-arm grid below it still shows everything each arm ran.
+    """
+    by_arm: dict[str, set[str]] = {}
+    for rec in records:
+        if rec.get("cell_uid"):
+            by_arm.setdefault(rec["arm"], set()).add(rec["cell_uid"])
+    if not by_arm:
+        return set()
+    return set.intersection(*by_arm.values())
+
+
 def render_report(records: list[dict]) -> str:
     records = rescore(records)
-    summary = summarize(records)
+    shared = common_cells(records)
+    summary = summarize([r for r in records if r.get("cell_uid") in shared])
     arms = summary["arms"]
     cells = sorted({r["cell_uid"] for r in records if r.get("cell_uid")})
     lines = [
@@ -405,6 +426,14 @@ def render_report(records: list[dict]) -> str:
         f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}. Labels are "
         f"RE-DERIVED from each record's verbatim `raw_output`, not read back from "
         f"the label written at run time.*",
+        "",
+        f"**Every table below is over the {len(shared)} cell(s) EVERY arm ran.** "
+        f"The four prefixes render to different lengths, so against a fixed "
+        f"2,560-token slot they do not admit the same cells; scoring each arm "
+        f"over its own admitted set would compare four different corpora and "
+        f"report the difference as an effect. Cells run by some arms but not all "
+        f"({len(cells) - len(shared)} of {len(cells)}) are excluded here and "
+        f"remain in the JSONL.",
         "",
         "Taxonomy is `s2/RESULTS.md`'s, unchanged, so the numbers are comparable: "
         "**CORRECT** / **MISS** (refused a fact that is present) / "
@@ -486,6 +515,40 @@ def render_report(records: list[dict]) -> str:
         "the whole point — it means the span check passes on answers that are "
         "wrong, which is what makes it near-inert as a defence.",
         "",
+        "## The same envelope arms, re-scored as PLAIN TEXT (format ignored)",
+        "",
+        "SECONDARY, and a decomposition rather than a second chance. The tables "
+        "above score an unparseable reply MALFORMED because that is what the "
+        "runtime gets: C4 retries it and then raises `EnvelopeParseError`. But a "
+        "reply can fail the FORMAT while still carrying the CONTENT this "
+        "experiment is about — several unparseable replies below are refusals "
+        "written in prose. Re-scoring the same raw bytes with the plain-text "
+        "classifier separates *the block changed what the model says* from *the "
+        "block broke the reply*. Only the headline table decides anything.",
+        "",
+        "| arm | FALSE-POSITIVE rate (absent) | CORRECT (literal) | "
+        "CORRECT (paraphrase) | MISS (fact present) | MALFORMED |",
+        "|---|---|---|---|---|---|",
+    ]
+    as_plain = rescore([{**r, "envelope": False} for r in records
+                        if r.get("envelope") and r.get("cell_uid") in shared])
+    for arm_id, arm in summarize(as_plain)["arms"].items():
+        absent = arm["by_qtype"]["absent"]
+        lit = arm["by_qtype"]["literal"]
+        par = arm["by_qtype"]["paraphrase"]
+        present_n = lit["n"] + par["n"]
+        present_miss = lit["labels"][MISS] + par["labels"][MISS]
+        n_all = sum(q["n"] for q in arm["by_qtype"].values())
+        malformed = sum(q["labels"][MALFORMED] for q in arm["by_qtype"].values())
+        lines.append(
+            f"| `{arm_id}` | "
+            f"**{_rate(absent['labels'][FALSE_POSITIVE], absent['n'])}** | "
+            f"{_rate(lit['labels'][CORRECT], lit['n'])} | "
+            f"{_rate(par['labels'][CORRECT], par['n'])} | "
+            f"**{_rate(present_miss, present_n)}** | {_rate(malformed, n_all)} |")
+
+    lines += [
+        "",
         "## R13 contamination audit (every answer, every arm)",
         "",
         "| arm | calls | foreign-identifier hits | NOT CHECKED | slot mismatches | errors |",
@@ -512,6 +575,8 @@ def render_report(records: list[dict]) -> str:
         "|---|---|---|---|---|---|",
     ]
     for rec in records:
+        if rec.get("cell_uid") not in shared:
+            continue
         if rec.get("label") not in (FALSE_POSITIVE, MALFORMED):
             continue
         raw = " ".join((rec.get("raw_output") or "").split())[:220]
@@ -529,6 +594,8 @@ def render_report(records: list[dict]) -> str:
     seen: set[tuple] = set()
     for rec in records:
         key = (rec.get("arm"), rec.get("label"), rec.get("question_type"))
+        if rec.get("cell_uid") not in shared:
+            continue
         if rec.get("label") in (None, FALSE_POSITIVE, MALFORMED) or key in seen:
             continue
         seen.add(key)
