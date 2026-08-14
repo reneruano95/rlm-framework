@@ -95,6 +95,23 @@ scaffold:
     # ~590K prompt tokens against max_total_tokens 1.5M, and 11.9 min of leaf
     # work against max_wall_clock_s 900 (which leaves under 4 min for root
     # turns -- re-derive it when §7 #2's geometry actually lands).
+    # HEADROOM CHECKED AGAINST §8's DECLARED TASK SIZES 2026-08-13, and the
+    # top of the needle category ("200K-1M chars") does NOT fit. At the 3.7727
+    # chars/token measured over the S2 fixture corpus, 1M chars = 265,060
+    # tokens = 345 windows = 690 subcalls at 2 questions per window:
+    #   max_subcalls 522        BREAKS FIRST, at 75.7% coverage, ~715 s in --
+    #                           and it breaks SILENTLY as partial coverage in
+    #                           the one category that punishes sampling.
+    #   max_wall_clock_s 900    BREAKS SECOND (~955 s incl. 2 rotations) if
+    #                           max_subcalls is raised. S0's own rule already
+    #                           says the 15-min default is valid only to
+    #                           ~250K tokens, so this is out of its stated
+    #                           scope rather than a surprise.
+    #   max_total_tokens 1.5M   HOLDS: 1.02M expected, 1.31M worst case.
+    # NOT raised here: 690 subcalls would only move the breach to the wall
+    # clock, and the wall clock is a §9/§8 per-task-size-class derivation, not
+    # a config knob to turn quietly. The low end of the range is comfortable
+    # (200K chars = 138 subcalls, 189 s).
     max_subcalls: 522
     max_wall_clock_s: 900
     max_total_tokens: 1500000
