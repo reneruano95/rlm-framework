@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — RLM Runtime (working name: `rlm-halo`)
 
-**Spec version:** `rlm-runtime-spec-v0.2.6` (changelog: §14)
+**Spec version:** `rlm-runtime-spec-v0.2.7` (changelog: §14)
 **Status:** Pre-implementation constitution. No code exists. §7 carries community-measured priors (off-box, mid-2026 gfx1151 data — §13); every number is still replaced by S0 on-box measurements.
 **Amendment rule:** Invariants (§3) and gates (§9) change only with a version bump and a dated changelog entry. §7 numbers and §4 sizing update in place as measurements land, no bump required.
 **Hardware target:** AMD Ryzen AI MAX+ 395 "Strix Halo", 128 GB unified LPDDR5X, 256 GB/s theoretical (~212–215 GB/s measured) bandwidth, Radeon 8060S iGPU (RDNA 3.5, gfx1151).
@@ -269,9 +269,15 @@ Optimizations in strict order of expected return. Per I5, each ships only with b
 3. **Corpus dating:** pinned commits/documents post-date the models' training cutoff where feasible; the benchmark manifest records each corpus date against the assumed cutoff.
 4. **Checker near-miss suite:** each checker's unit tests include ≥3 authored plausible-but-wrong answers that must fail, plus normalization edge cases (permissive checkers convert R5 confabulation into false passes in every arm).
 
+**Corpus-size ceiling per category (v0.2.7, forced by measurement — decide BEFORE authoring, which is why it is written here now).** At the measured 3.7727 chars/token and the window-1024/stride-768 geometry the sweep forced, a **1M-char corpus is 265,060 tokens = 345 windows = 690 sub-calls** for full coverage. Against the shipped budgets, `max_subcalls: 522` **breaks first, at 75.7% coverage, ~715 s in, with the wall clock still unspent**; raising it only moves the breach to `max_wall_clock_s: 900` (~955 s). `max_total_tokens: 1.5M` holds comfortably (1.02M expected). So **full coverage of a 1M-char corpus is not affordable on this hardware**, and neither budget was raised — raising sub-calls just relocates the failure.
+The resolution is per-category, because the categories mean different things by "covered":
+- **Needle retrieval may keep the 200K–1M range.** A needle does not require full coverage — finding it by REPL prescan and targeted windows is not sampling, it is the thesis (§2), and it is what the paper's models did unprompted. A needle task that exhausts the budget is a legitimate failure of the root's search strategy.
+- **Aggregation/counting must be sized so full coverage FITS**, because that category exists to force coverage and punish sampling — grading a root for sampling on a corpus where exhaustive reading was never affordable would measure the budget, not the root. **Cap aggregation corpora at ~250K tokens (≈945K chars ⇒ ~326 windows ⇒ 652 sub-calls)**, or below whatever the S1-derived per-size-class `max_wall_clock` supports, whichever binds first. State each aggregation task's window count in the benchmark manifest so the affordability claim is checkable rather than assumed.
+This is a pre-registration decision made while the benchmark does not yet exist; it is not tuning, and it must not be revisited after tasks are authored.
+
 Categories:
 - Needle retrieval in 200K–1M chars.
-- Aggregation/counting across the full context (forces coverage, punishes sampling). **Rule:** at least one aggregation task must defeat deterministic string matching — requiring semantic judgment per item, verified at authoring by showing a pure-regex solution scores at chance — and at least one must be regex-solvable, so the benchmark rewards the root choosing code over leaf calls when code suffices. This keeps the S4 signal decomposable into root-as-programmer vs root-as-orchestrator-of-leaves, and stops strategy templates from quietly turning the category REPL-only while the leaf-reliability surface (R5, R12) ships unmeasured.
+- Aggregation/counting across the full context (forces coverage, punishes sampling) — **corpus capped so full coverage fits the budgets, per the ceiling above**. **Rule:** at least one aggregation task must defeat deterministic string matching — requiring semantic judgment per item, verified at authoring by showing a pure-regex solution scores at chance — and at least one must be regex-solvable, so the benchmark rewards the root choosing code over leaf calls when code suffices. This keeps the S4 signal decomposable into root-as-programmer vs root-as-orchestrator-of-leaves, and stops strategy templates from quietly turning the category REPL-only while the leaf-reliability surface (R5, R12) ships unmeasured.
 - Multi-document synthesis with checkable claims.
 - Repo-level code QA.
 - At least one adversarial-context task (R12: injection-shaped text in the corpus).
