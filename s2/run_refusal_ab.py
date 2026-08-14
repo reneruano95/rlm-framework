@@ -505,9 +505,12 @@ def render_report(records: list[dict]) -> str:
 
     lines += [
         "",
-        "The bold columns are the trade this experiment exists to price. A leaf "
-        "that abstains on everything scores 0% false positives and is useless, "
-        "so any drop in the first must be read against MISS.",
+        "The bold columns are the trade this experiment exists to price, and the "
+        "false-positive rate ALONE is not a result: an arm that emits nothing "
+        "usable also scores 0%. Read it against MISS (a leaf that abstains on "
+        "everything is useless in a different way) and against MALFORMED (an arm "
+        "at 100% MALFORMED produced no answers to be wrong with, and its 0% is an "
+        "artefact of that, not a refusal).",
         "",
         "**\"...of which handed over an identifier\"** is the column that matters "
         "for §2's error model, and it exists because the pinned classifier has a "
