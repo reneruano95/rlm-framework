@@ -277,7 +277,10 @@ scaffold:
   # issue -- before a config edit picks a number. Every wall-clock figure in
   # this file and in §7 #2 is a SERIAL one for exactly this reason, and
   # `max_wall_clock_s` may not be re-derived until it is characterised.
-  dispatch_concurrency: 8
+  dispatch_concurrency: 1   # R14 (spec v0.3.1): serial only. 2 in flight = 9/32 correct vs 31/32 serial;
+                            # fan-out buys 13% wall and costs 68% of answers. Raise ONLY if the
+                            # --no-cont-batching lead is fixed upstream, and re-measure on
+                            # correct-answers-per-second, never on wall-clock alone.
 
 trace:
   db_path: traces/rlm.duckdb
