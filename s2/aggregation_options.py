@@ -107,6 +107,8 @@ def main() -> None:
     for cap in (1200, 1500):
         fit = tokens_affordable(cap)
         row(f"H  cap {cap}, agg {fit//1000}K", 20, 5, fit, cap)
+    fit = tokens_affordable(1200)
+    row(f"H  cap 1200, agg {fit//1000}K, N=30", 30, 7, fit, 1200)
     print()
 
     print(">>> B: shrink the aggregation corpus to fit the EXISTING cap")
