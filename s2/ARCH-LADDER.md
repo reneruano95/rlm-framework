@@ -39,15 +39,18 @@ that leaked from a different donor because it ran on a different slot:
 | 2048/t1 ABSENT | **1** | 1024/t1 | **1** |
 | 2048/t2 ABSENT | 0 | 1024/t3 | 0 |
 
-**This is R13, and the probe built its own trigger.** `R13-mitigations.md` §4.4
+**The probe built R13's documented condition.** `R13-mitigations.md` §4.4
 measures document *growth* down a reused slot as the leak condition ("six windows
 ascending 159 → 1,934 tokens: 4/18"). An ascending 640 → 1,024 → 2,048 ladder on
-server-chosen slots is that condition exactly. `ARCH-LADDER.md` v1 was also the
+server-chosen slots is that condition exactly — the gemma arm funnelled all 24
+documents onto slot 3, the qwen arm 18 of 24. `ARCH-LADDER.md` v1 was also the
 only report in `s2/` that recorded no launch line and no slot policy.
 
-Note that the prompt cache was **not** the culprit: the client sent
-`cache_prompt: false`, and the log join shows *zero* tokens skipped on all 24
-requests. The residue survives a full prompt re-evaluation.
+**Naming the condition is not naming the mechanism**, and §4 shows both obvious
+mechanisms are excluded by measurement. The prompt cache is not the culprit: the
+client sent `cache_prompt: false`, and the log join shows *zero* tokens skipped
+on all 24 requests. Whatever crosses between requests is not tokens in a KV
+cache, and it survives a full prompt re-evaluation.
 
 ## 2. The corrected instrument
 
@@ -113,18 +116,43 @@ neighbouring entity's key from its own chunk; gemma does that at 2,048 and at
 words provided… a 'Word Search' style cipher"), which is a failure of the same
 criterion by a different route.
 
-### Slot policy changes the answer, and contamination is not conservative
+### What actually predicts a leak — and it is not slot policy alone
 
-Same server, same moment, same prompt bytes, greedy — only slot history differs:
+All 15 greedy runs, by server geometry and slot policy:
 
-| server | policy | 640 | 1,024 | 2,048 | leaked |
-|---|---|:--:|:--:|:--:|:--:|
-| `-np 4 -c 65536` | auto / shared | 4/4 | 4/4 | 2/4 | 2 |
-| `-np 16 -c 65536` | auto / shared | 4/4 | 4/4 | 2/4 | 2 |
-| `-np 16 -c 65536` | **isolated** | 4/4 | 0/3 | — | 0 |
-| `-np 32 -c 131072` | all four policies | 4/4 | 0/4 | 0/4 | 0 |
+| server | policy | leaked | refused @640 | @1,024 |
+|---|---|:--:|:--:|:--:|
+| `-np 4 -c 65536` | auto, shared (×3 runs) | **2/24** | 4/4 | 4/4 |
+| `-np 16 -c 65536` | auto, shared (×3 runs) | **2/24** | 4/4 | 4/4 |
+| `-np 16 -c 65536` | **virgin** | 0/24 | 4/4 | 0/4 |
+| `-np 32 -c 131072` | isolated, virgin, shared, auto | 0/24 | 4/4 | 0/4 |
 
-The reused-slot arms **refuse more often at 1,024** than the clean arm does. A
+Two things follow, and the second corrects this file's first draft.
+
+**A never-reused slot does stop the leak where leaking happens** — on `-np 16`,
+virgin is 0/24 against 2/24 for the same prompts on a reused slot.
+
+**But nothing leaks on `-np 32 -c 131072` under ANY policy, including a slot
+pinned to hold all twelve documents in ascending order.** The definitive isolated
+runs in §4 were taken there, so their cleanliness is over-determined: geometry
+alone would have sufficed. It is therefore **not established that the slot policy
+is why they are clean**, and the earlier draft of this file claimed otherwise.
+
+**The mechanism remains unidentified.** Both mundane candidates are excluded by
+measurement: prefix-cache reuse (all 72 arch-qwen tasks and all 24 arch-gemma
+tasks carried **zero** tokens across requests; `prompt eval` equals the full
+rendered prompt every time) and the host prompt cache (all four arch-ladder
+server processes log **zero** "making room for prompt cache entry" lines). What
+crosses between requests is not tokens in a KV cache, and `-c 65536` versus
+`-c 131072` at identical 4,096 tokens per slot separates leaking from non-leaking
+runs for reasons this probe cannot explain. That is the open question, and it is
+worth an upstream report — the entity-correct, byte-identical-across-models
+evidence in §1 is not in doubt, only its cause.
+
+### Contamination is not conservative
+
+Leakage and refusal are perfectly anticorrelated across all 15 runs: **every arm
+that leaked refused 4/4 at 1,024; every arm that did not leak refused 0/4.** A
 leaking harness made the leaf look *better behaved* than it is, then leaked
 outright one rung later. Two consequences worth carrying forward:
 
@@ -147,12 +175,31 @@ every contamination path closed.
 
 **Corroborates rather than undermines the spec.** The parallel audit of the
 load-bearing runs (`s2/audit/`) found them clean under a detector validated on a
-known-leaking positive control: `distance.jsonl` emitted 278 identifiers, **278
-in their own chunk, 0 from another fixture**, across 91 slots that each held
-exactly one document, with 0 slot mismatches; `refusal-ab` 218/0/0 and 331/0/0
-with `refusal-ab-640`; `sweep` 75 own / 0 foreign / 3 fabricated. The positive
+known-leaking positive control. Of `distance.jsonl`'s 153 wrong answers, **76
+quote an identifier from the exact chunk that request sent, 9 quote a mangled
+string present in no fixture, 68 carry no identifier at all, and 0 come from
+another fixture** — resolved per record by its own `chunk_sha256` against all 14
+fixture directories, a wider universe than the runner's own per-phase detector.
+Of its 92 false positives, 73 quote that cell's own planted key and 0 quote
+another cell's. `refusal-ab` is 356 identifiers with exactly one non-substring,
+and that one exists in no fixture (fabrication, not leakage). The positive
 control (`sweep-run1-shared-server.jsonl`, pre-R13) yields 17 foreign identifiers
-in 54 calls, so the detector does fire when leakage is present. §4's cliff, the
+in 54 calls, correctly naming their donor fixture, so the detector fires when
+leakage is present.
+
+Two caveats found by the adversarial pass, neither of which moves the verdict:
+**85 of 91 slots** held exactly one document, not 91 — six slots (90–95) each
+served two documents inside a 12-record cache-instrumentation phase whose records
+omit `chunk_sha256`, which is why the first scan missed them. And the run
+launched **without** `--cache-ram 0` (added to `config.yaml` three hours later),
+so the host prompt cache was live. What holds the verdict up is physics rather
+than bookkeeping: all **85 cold calls report `cache_n = 0`** and prefill at
+954–1,005 tok/s against this build's independently measured 961 tok/s cold rate,
+with none faster than 1,600 — every cold call genuinely processed its whole
+prompt. The slot-index confound is killed by existing data too: `refusal-ab-640`
+ran 640-token cells at slots 60–87 for **0/21** false positives while
+`refusal-ab` ran 1,024-token cells at slots 12–54 for **30/30**, so high-slot 640
+is clean and low-slot 1,024 is saturated — the confound points the wrong way. §4's cliff, the
 false-positive rate and the instruction-decay model therefore stand — and this
 probe, a different instrument on a different fixture generator, independently
 reproduces the same ~1,000-token threshold.
