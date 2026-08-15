@@ -118,10 +118,22 @@ def test_dispatch_concurrency_is_not_the_slot_pool_size(valid_cfg):
     `--parallel` meant "how many calls this server serves at once". Under
     never-reuse it means "how many WINDOWS one process can serve before it is
     rotated" -- a pool size, measured against memory (`s2/R13-slotcount.md`).
-    Concurrency is a throughput lever, measured against S0's flat aggregate
-    prefill. Coupling them would put 128 leaf calls in flight at once."""
-    assert valid_cfg.scaffold.dispatch_concurrency == 8
+    Concurrency is a throughput lever. Coupling them would put 128 leaf calls
+    in flight at once."""
     assert valid_cfg.scaffold.dispatch_concurrency != valid_cfg.servers.leaf.parallel
+
+
+def test_dispatch_concurrency_is_pinned_to_serial_by_R14(valid_cfg):
+    """R14 (spec v0.3.1): concurrent leaf dispatch corrupts the decode.
+    Measured serial 31/32 correct, 9-10/32 at two calls in flight, 5/32 at
+    four -- and fan-out at two buys 13% of wall-clock while costing 68% of the
+    answers, so serial wins on correct-answers-per-second by 2.7x-110x.
+
+    This assertion is a tripwire, not a preference. Raising it silently would
+    change what every leaf measurement in `s2/` means. Raise it only when the
+    `--no-cont-batching` lead is characterised or fixed upstream, and re-measure
+    on correct-answers-per-second -- never on wall-clock alone."""
+    assert valid_cfg.scaffold.dispatch_concurrency == 1
 
 
 def test_concurrency_above_the_pool_size_is_refused(minimal_cfg_dict):
