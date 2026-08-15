@@ -110,6 +110,18 @@ class SlotMismatch(DispatchError):
     served it may have held other documents."""
 
 
+class PrefixDrift(DispatchError):
+    """The rendered system head changed under a live target (spec §7 #3 a1, R3).
+
+    §4's prefix contract is that the head is ONE constant string for a target's
+    lifetime: every cache measurement, the `cache_n == N_resident - ub - 4`
+    identity, and the 311-token gate all assume it. If its sha256 moves, every
+    number taken after the move describes a different prompt than the numbers
+    taken before it, so this is never retried -- drawing again cannot un-change
+    the prefix -- and it fails the episode with `outcome_reason=prefix_drift`
+    rather than degrading quietly."""
+
+
 class ServerRotationError(RlmError):
     """A planned slot-pool rotation could not be carried out (spec §5 C4).
 

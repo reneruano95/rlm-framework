@@ -1257,3 +1257,73 @@ async def test_health_is_a_poll_not_an_assertion(mock_server):
         assert await dead.health() is False            # connection refused
     finally:
         await dead.aclose()
+
+
+# --------------------------------------------------------------------------- #
+# R3 / §7 #3 (a1): the prefix-drift detector. The head's token length was
+# already measured and exposed; the sha256 half of the same gate had no
+# production code path at all, so a prefix that moved mid-episode was invisible.
+
+
+async def test_the_rendered_head_sha256_is_pinned_on_the_first_call(mock_server,
+                                                                    leaf_prefix):
+    """Gate (a1) is a PAIR -- `sha256(rendered_head)` beside its token length.
+    The hash is the half that actually detects drift: two different prefixes of
+    equal token length compare equal on length alone."""
+    d = mock_server.dispatcher()
+    assert d.prefix_sha256("leaf") is None        # nothing rendered yet
+    await d.query("a question about a chunk", role="leaf", call_id="c1")
+
+    rendered = mock_server.rendered_prompts[0]
+    head = rendered[:rendered.rfind("a question about a chunk")]
+    assert leaf_prefix in head
+    want = hashlib.sha256(head.encode("utf-8")).hexdigest()
+    assert d.prefix_sha256("leaf") == want
+    assert d.last_step["prefix_sha256"] == want
+
+
+async def test_a_prefix_that_changes_mid_target_fails_the_call_as_drift(mock_server):
+    """§4's contract is that the head is ONE constant string for the target's
+    lifetime. If it moves, every cache number taken after the move describes a
+    different prompt than the ones before it -- so this fails loudly instead of
+    quietly renumbering the experiment."""
+    from rlm.errors import PrefixDrift
+
+    d = mock_server.dispatcher()
+    await d.query("first question", role="leaf", call_id="c1")
+    pinned = d.prefix_sha256("leaf")
+
+    d._targets["leaf"].system_prefix += "\nAn extra instruction appears."
+
+    with pytest.raises(PrefixDrift) as exc:
+        await d.query("second question", role="leaf", call_id="c2")
+    assert "prefix" in str(exc.value).lower()
+    assert d.last_step["status"] == StepStatus.ERROR
+    assert d.prefix_sha256("leaf") == pinned, "the PINNED value must not move"
+
+
+async def test_drift_is_not_retried(mock_server):
+    """Drawing again cannot un-change the prefix, so a drift must cost exactly
+    one attempt -- unlike an envelope parse failure, which is retried."""
+    d = mock_server.dispatcher(max_attempts=3)
+    await d.query("first question", role="leaf", call_id="c1")
+    d._targets["leaf"].system_prefix += " drift"
+
+    before = len(mock_server.rendered_prompts)
+    with pytest.raises(Exception):
+        await d.query("second question", role="leaf", call_id="c2")
+    assert len(mock_server.rendered_prompts) - before == 1, (
+        "a drifted prefix was re-rendered and retried")
+
+
+async def test_the_head_hash_is_checked_without_a_second_tokenize(mock_server):
+    """The check must be free: the head is byte-identical by construction, so
+    hashing it costs no round trip. Re-TOKENIZING it per call would add one
+    /tokenize per leaf call -- up to `max_subcalls` of them per episode -- to
+    re-derive a number the hash already pins."""
+    d = mock_server.dispatcher()
+    await d.query("first question", role="leaf", call_id="c1")
+    before = len(mock_server.tokenize_bodies)
+    await d.query("second question", role="leaf", call_id="c2")
+    assert len(mock_server.tokenize_bodies) - before == 1, (
+        "the head was re-tokenized to check a hash that needs no server")

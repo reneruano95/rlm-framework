@@ -146,6 +146,7 @@ from rlm.errors import (
     DispatchError,
     EnvelopeParseError,
     PreflightFailed,
+    PrefixDrift,
     SlotMismatch,
     SlotPoolExhausted,
     StepStatus,
@@ -642,6 +643,16 @@ class DispatchTarget:
     #: production has no warm-slot first-sight call at all -- `cache_n` was 0 on
     #: 236/236. The cache-side residue that CAN fail is `predicted_reuse`.
     prefix_tokens: int | None = None
+    #: `sha256(rendered_head)` -- the OTHER half of §7 #3's gate (a1), and the
+    #: half that actually detects drift: two different prefixes of equal token
+    #: length compare equal on length alone. Pinned on the first render and
+    #: compared on EVERY call thereafter. Comparing costs no round trip, which
+    #: is why it can be always-on where re-tokenizing could not: the head is
+    #: byte-identical by construction, so a matching hash implies a matching
+    #: token count under this target's (fixed) tokenizer, and re-deriving that
+    #: count per call would add one /tokenize per leaf call -- up to
+    #: `max_subcalls` of them per episode -- to learn nothing new.
+    prefix_sha256: str | None = None
     #: Does this target's prefix ask for the JSON envelope, and must C4
     #: therefore parse and validate one scaffold-side (spec §5, `rlm.envelope`)?
     #: Off by default: the envelope is opt-in, decided by the S2 A/B
@@ -652,7 +663,8 @@ class DispatchTarget:
 
 def _new_step(call_id: str, retry_idx: int, role: str, *,
                layout: str | None = None, rendered: str | None = None,
-               prefix_tokens: int | None = None) -> dict[str, Any]:
+               prefix_tokens: int | None = None,
+               prefix_sha256: str | None = None) -> dict[str, Any]:
     """One attempt's step record.
 
     `root_view_hash` is a `steps` column (§6's state-rule instrument, defined
@@ -667,6 +679,7 @@ def _new_step(call_id: str, retry_idx: int, role: str, *,
         "layout": layout,
         "rendered": rendered,
         "prefix_tokens": prefix_tokens,
+        "prefix_sha256": prefix_sha256,
         "root_view_hash": (None if rendered is None else
                            hashlib.sha256(rendered.encode("utf-8")).hexdigest()),
         "actor": Actor.LEAF if role == "leaf" else Actor.ROOT,
@@ -920,6 +933,18 @@ class LLMDispatcher:
         if self._chunk_index is None:
             return NOT_CHECKED
         return self._chunk_index.foreign(answer, sent=sent)
+
+    def prefix_sha256(self, role: str = "leaf") -> str | None:
+        """This role's pinned `sha256(rendered_head)`, or None before the first
+        call has rendered anything.
+
+        The other half of gate (a1), and the enforcing half: `prefix_tokens` is
+        measured once and could not detect a prefix that changed to a different
+        string of the same length, whereas this is compared on every call and
+        raises `PrefixDrift`. Exposed for the gate runner and for
+        `config_snapshot`, which records it as the run's pinned value."""
+        target = self._targets.get(role)
+        return None if target is None else target.prefix_sha256
 
     def prefix_tokens(self, role: str = "leaf") -> int | None:
         """This role's rendered system-head length in tokens, or None before
@@ -1178,20 +1203,52 @@ class LLMDispatcher:
         # extra render. The server is known reachable at this point (the
         # pre-flight above just succeeded), and a failure is still only
         # diagnostic -- it must not fail a call C4 could otherwise serve.
-        if target.prefix_tokens is None and user_message:
+        if user_message:
             cut = rendered.rfind(user_message)
             if cut > 0:
-                try:
-                    head = await target.client.tokenize(rendered[:cut],
-                                                         add_special=True)
-                except Exception:  # noqa: BLE001 -- diagnostic, never fatal
-                    pass
-                else:
-                    target.prefix_tokens = len(head)
+                head_text = rendered[:cut]
+                head_hash = hashlib.sha256(head_text.encode("utf-8")).hexdigest()
+                if target.prefix_sha256 is None:
+                    target.prefix_sha256 = head_hash
+                elif head_hash != target.prefix_sha256:
+                    # R3 / §7 #3 (a1). NOT retried and NOT tolerated: §4's whole
+                    # prefix contract is that this string is constant for the
+                    # target's lifetime, and every cache number -- the
+                    # `cache_n == N_resident - ub - 4` identity, gate (b)'s
+                    # re-query ratio, the 311-token length -- is denominated in
+                    # it. A prefix that moves mid-episode does not degrade the
+                    # measurements, it silently redefines them.
+                    step = _new_step(call_id, base, role, layout=layout,
+                                     rendered=rendered,
+                                     prefix_tokens=target.prefix_tokens,
+                                     prefix_sha256=head_hash)
+                    step["status"] = StepStatus.ERROR
+                    step["error_detail"] = (
+                        f"prefix drift: the rendered system head changed under "
+                        f"a live {role} target (pinned "
+                        f"{target.prefix_sha256[:12]}..., now "
+                        f"{head_hash[:12]}...). §4 requires it byte-identical "
+                        f"for the target's lifetime")
+                    step["t_end"] = utc_now()
+                    self._record(step)
+                    raise PrefixDrift(step["error_detail"])
+
+                # The token length is a SEPARATE round trip, so it is measured
+                # once and pinned. With the hash checked on every call, a
+                # matching hash already implies a matching length.
+                if target.prefix_tokens is None:
+                    try:
+                        head = await target.client.tokenize(head_text,
+                                                             add_special=True)
+                    except Exception:  # noqa: BLE001 -- diagnostic, never fatal
+                        pass
+                    else:
+                        target.prefix_tokens = len(head)
 
         if len(tokens) > target.slot_capacity_tokens:
             step = _new_step(call_id, base, role, layout=layout, rendered=rendered,
-                              prefix_tokens=target.prefix_tokens)
+                              prefix_tokens=target.prefix_tokens,
+                              prefix_sha256=target.prefix_sha256)
             step["status"] = StepStatus.REJECTED
             step["error_detail"] = (
                 f"prompt ({len(tokens)} tokens) exceeds slot capacity "
@@ -1215,7 +1272,8 @@ class LLMDispatcher:
             slot = self.slots.acquire(window)
         except SlotPoolExhausted as exc:
             step = _new_step(call_id, base, role, layout=layout, rendered=rendered,
-                              prefix_tokens=target.prefix_tokens)
+                              prefix_tokens=target.prefix_tokens,
+                              prefix_sha256=target.prefix_sha256)
             step["status"] = StepStatus.ERROR
             step["error_detail"] = str(exc)
             self._record(step)
@@ -1263,7 +1321,8 @@ class LLMDispatcher:
         for attempt in range(self._retries.max_attempts):
             step = _new_step(call_id, base + attempt, role, layout=layout,
                               rendered=rendered,
-                              prefix_tokens=target.prefix_tokens)
+                              prefix_tokens=target.prefix_tokens,
+                              prefix_sha256=target.prefix_sha256)
             t_dispatch = utc_now()
             step["t_dispatch"] = t_dispatch
             try:
