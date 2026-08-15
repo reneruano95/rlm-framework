@@ -215,10 +215,45 @@ reproduces the same ~1,000-token threshold.
 models; 1,024 refuses 0/4 in both. The window sits on the correct side of the
 threshold by measurement, not by inference.
 
-**Does not settle the architecture question.** Both arms remain bounded-context
-mechanisms (recurrent state vs sliding window), so a genuinely uniform
-full-attention control is still absent from disk, and `fallback_leaf` is still
-neither confirmed nor killed. What has changed is that the question is now less
+**Does not settle the architecture question, and now cannot be settled locally.**
+Every GGUF in the library was read (`s2/gguf_arch.py`, metadata only, no model
+load) and **not one is uniform global attention**:
+
+| model | `general.architecture` | mechanism | capacity |
+|---|---|---|---|
+| Qwen3.6-35B-A3B (leaf), Qwen3.6-27B (root), **Qwen3.8-27B** | `qwen35` | recurrent (`ssm.state_size 128`, `inner_size 6144`) | fixed, context-independent |
+| gemma-4-12B / 31B / 26B-A4B / E2B / E4B | `gemma4` | sliding window | **1,024** |
+| Muse-Glimmer-30B | `muse-glimmer` | sliding window | **2,048** |
+| Nemotron-3-Nano-Omni-30B | `nemotron_h_moe` | recurrent (`ssm.state_size 128`) | fixed |
+
+This **discharges R7 checklist item 2**: `Qwen3.8-27B` is hybrid, the same family
+and the same 3:1 ratio as the current leaf — its model card gives the layer
+pattern as `16 × (3 × (Gated DeltaNet → FFN) → 1 × (Gated Attention → FFN))`, and
+the local file carries the matching `qwen35.ssm.*` keys. **It is therefore not a
+control, and swapping to it for S5 would not change the attention story.**
+
+*Noted for S5 sizing, arithmetic not measurement (same caveat §4 applies to the
+current leaf's 62.8 MiB/slot):* Qwen3.8-27B's `ssm.inner_size` is **6,144**
+against the current leaf's 4,096, over ~48 recurrent layers — about **144
+MiB/slot**, so at `-np 128` roughly **18 GiB** of recurrent state against today's
+8.04 GiB. That does not fit the current carve at `-np 128` and must be priced
+before any S5 swap.
+
+**A better test than the one originally planned, and why it still failed.** Since
+the window sizes differ across models, the horizon can be probed by *dose
+response* rather than by finding a full-attention control: gemma's window is
+**exactly 1,024**, and gemma's refusal collapses at **exactly 1,024** chunk
+tokens. Muse-Glimmer's 2,048 window predicts a clean 1,024 and a failure at
+2,048. Run (`arch_ladder_muse-swa2048_isolated.jsonl`), the arm is **invalid**:
+Muse-Glimmer emits `to=self<|message|>` and then echoes the document back, i.e.
+it wants harmony-style channel control tokens that this ChatML path does not
+produce, and it fails even LITERAL recall at 640 (2/4). That is a prompt-format
+mismatch, not a measurement. Fixing it would characterise a creative-writing
+merge rather than anything deployable, so it was not pursued.
+
+`fallback_leaf` therefore stays neither confirmed nor killed, and closing it now
+requires **downloading** a uniform-attention instruct model (Llama-3.x-8B,
+Qwen2.5-7B and Mistral-7B all qualify) rather than anything on disk. What has changed is that the question is now less
 urgent: the two families fail identically at the same threshold, which is weak
 evidence that the effect is general instruction-following decay rather than
 anything specific to Gated DeltaNet — and the geometric mitigation is measured to

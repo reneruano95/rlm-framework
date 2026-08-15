@@ -110,9 +110,54 @@ is meaningful here.
   reuse — which is one more independent line of evidence that the ~1,000-token
   horizon is real and not an artefact of how this project serves requests.
 
-**Limits, stated:** n = 20 per arm at 640 with zero failures bounds the true
-failure rate at roughly 15% by the rule of three, so this establishes "no
-detectable effect", not "provably zero". Both models were not tested — this is
-the leaf only. And the priming question is a single LITERAL; a window asked five
-or ten questions in sequence is not covered, and the accumulation case is the one
-production will actually hit at high `max_subcalls`.
+## Depth — ten questions down one slot
+
+The depth-two result above left the accumulation case open: a residue invisible
+at question two could still be obvious at question ten, and that is what
+production hits at high `max_subcalls`. Measured with `s2/carryover_depth.py`,
+same production geometry, at the shipped 640-token window.
+
+Ten questions per fixture, alternating LITERAL and ABSENT so neither kind sits
+only at the start or only at the end — a run that put every ABSENT last would
+confound position with question difficulty. Two arms:
+
+* **deep** — all ten questions down **one** never-used slot, in order
+* **shallow** — the same ten questions, each on its **own** never-used slot
+
+Question *i* is byte-identical in both arms, so any difference at position *i* is
+the slot's history and nothing else.
+
+| position | kind | deep | shallow | deep `prompt_n` |
+|---:|---|:--:|:--:|---:|
+| 0 | LITERAL | 8/8 | 8/8 | 974 |
+| 1 | ABSENT | 8/8 | 8/8 | 516 |
+| 2–8 | alternating | 8/8 each | 8/8 each | 515 |
+| 9 | ABSENT | 8/8 | 8/8 | 514 |
+| **total** | | **80/80** | **80/80** | |
+
+**80 of 80 answers byte-identical between the deep and shallow arms.** No decay
+with position, and none in the aggregate.
+
+The `prompt_n` column shows the warm path doing real work rather than the arm
+quietly degenerating into cold calls: 974 tokens evaluated for the first question
+on the slot, then ~515 for every subsequent one — about **460 tokens of document
+prefix reused per question**, which is the whole point of putting several
+questions on one window's slot.
+
+**So the accumulation case is clean too:** a window may be asked at least ten
+questions on its slot at the shipped geometry with no measurable quality cost,
+and the 2nd through 10th questions each cost roughly half the prefill of the
+first. `max_subcalls` needs no depth cap on quality grounds.
+
+## Limits, stated
+
+* n = 20 per arm at depth two and n = 8 per cell at depth ten, both with **zero**
+  failures — by the rule of three that bounds the true rate at roughly 15% and
+  31% respectively. This is "no detectable effect", not "provably zero".
+* Leaf only. The root's multi-turn path is a different mechanism (§4 R8) and is
+  not covered here.
+* **Depth was measured at 640 only.** At 1,024 the ABSENT criterion is already
+  saturated at failure, so that cell cannot show accumulation on top of it; a
+  depth run there would only test whether LITERAL recall decays, which is a
+  different question and is untested.
+* Ten is not a hundred. Nothing here says a slot asked 100 questions is safe.
