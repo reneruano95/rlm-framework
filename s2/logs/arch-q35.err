@@ -1,0 +1,31 @@
+0.00.051.411 I cmn  common_param: common_params_print_info: build 10375 (ba360efe1) with Clang 20.1.8 for Windows x86_64
+0.00.051.417 I cmn  common_param: common_params_print_info: verbosity = 4 (adjust with the `-lv N` CLI arg)
+0.00.051.474 I cmn  common_param: device_info:
+0.00.175.103 I cmn  common_param:   - ROCm0   : AMD Radeon(TM) 8060S Graphics (102129 MiB, 101974 MiB free)
+0.00.175.126 I cmn  common_param:   - CPU     : AMD RYZEN AI MAX+ 395 w/ Radeon 8060S           (65174 MiB, 39876 MiB free)
+0.00.175.869 I cmn  common_param: system_info: n_threads = 16 (n_threads_batch = 16) / 32 | ROCm : NO_VMM = 1 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | AVX512 = 1 | AVX512_VBMI = 1 | AVX512_VNNI = 1 | AVX512_BF16 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | 
+0.00.175.929 I srv          init: running without SSL
+0.00.176.002 I srv          init: using 31 threads for HTTP server
+0.00.176.230 W srv  llama_server: -----------------
+0.00.176.231 W srv  llama_server: CORS is set to allow all origins ('*') and no API key is set
+0.00.176.232 W srv  llama_server: this can be a security risk (cross-origin attacks)
+0.00.176.232 W srv  llama_server: more info: https://github.com/ggml-org/llama.cpp/pull/25655
+0.00.176.233 W srv  llama_server: -----------------
+0.00.176.260 I srv         start: binding port with default address family
+0.00.187.163 I srv    load_model: loading model 'D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf'
+0.00.187.178 I srv    load_model: local path 'D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf'
+0.00.187.197 I cmn  common_init_: fitting params to device memory ...
+0.00.187.198 I cmn  common_init_: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.00.187.206 I common_params_fit_impl: getting device memory data for initial parameters:
+0.00.187.602 E gguf_init_from_file: failed to open GGUF file 'D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf' (No such file or directory)
+0.00.189.299 E llama_model_load: error loading model: llama_model_loader: failed to load model from D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf
+0.00.189.303 E llama_model_load_from_file_impl: failed to load model
+0.00.190.121 E common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
+0.00.190.318 I common_fit_params: fitting params to free memory took 0.00 seconds
+0.00.190.360 E gguf_init_from_file: failed to open GGUF file 'D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf' (No such file or directory)
+0.00.190.369 E llama_model_load: error loading model: llama_model_loader: failed to load model from D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf
+0.00.190.370 E llama_model_load_from_file_impl: failed to load model
+0.00.190.371 E cmn  common_init_: failed to load model 'D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf'
+0.00.190.374 E srv    load_model: failed to load model, 'D:\AI\models\unsloth\Qwen3.5-9B-MTP-GGUF\Qwen3.5-9B-Q4_K_S.gguf'
+0.00.190.481 I srv    operator(): operator(): cleaning up before exit...
+0.00.191.905 E 
