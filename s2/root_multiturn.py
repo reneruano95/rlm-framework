@@ -74,20 +74,25 @@ def run_arm(label: str, thinking: bool, preserve: bool, effort: str,
         t = r.get("timings", {})
         raw = r.get("content") or ""
         prompt_n = t.get("prompt_n") or 0
-        cache_n = r.get("tokens_cached", t.get("cache_n")) or 0
+        # `timings.cache_n` is the REUSE count. The top-level `tokens_cached`
+        # is a different number and the two are "NOT interchangeable"
+        # (rlm/dispatcher.py:437-442, recipes §serverapi). This probe read
+        # the top-level field first and saw slot occupancy AFTER the call
+        # (107-token prompt reporting 1130 = 107 + 1024 generated), which is
+        # how the mistake announces itself. Both are recorded now.
+        cache_n = t.get("cache_n") or 0
+        tokens_cached_field = r.get("tokens_cached")
         rendered_n = len(post("/tokenize", {"content": rendered})["tokens"])
-        # REUSE IS rendered - evaluated, NOT `tokens_cached`. This build reports
-        # tokens_cached as the slot's occupancy AFTER the call (prompt +
-        # generation): turn 0 renders 107 tokens and reports 1130, which is
-        # 107 + 1024 generated. Dividing by the prompt gives 1056% "reuse",
-        # which is how the mistake announces itself.
+        # Reuse is derived from rendered - evaluated rather than from any cache
+        # field, so the number stands whichever field the build populates.
         reused = rendered_n - prompt_n
         rows.append({
             "arm": label, "thinking": thinking,
             "preserve_thinking": preserve if thinking else None,
             "effort": effort if thinking else None, "turn": i,
             "rendered_tokens": rendered_n,
-            "prompt_n": prompt_n, "slot_occupancy_after": cache_n,
+            "prompt_n": prompt_n, "cache_n": cache_n,
+            "tokens_cached_field": tokens_cached_field,
             "prior_total": prior_total, "reused_tokens": reused,
             "reuse_frac": round(reused / rendered_n, 3) if rendered_n else 0.0,
             "predicted_n": t.get("predicted_n"),

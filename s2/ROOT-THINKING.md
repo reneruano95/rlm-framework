@@ -82,6 +82,17 @@ turn hit the cap, leaving unclosed `<think>` blocks in the history — a plausib
 cause of the divergence. It is not the cause: re-run at 3,072 with nothing
 truncated, the collapse is *worse* (4.7% against 8.7%).
 
+**A probe bug worth recording, because it was already documented and I hit it
+anyway.** This probe first read the response's top-level `tokens_cached` field
+and treated it as a reuse count. It is not: a 107-token prompt reported 1,130,
+which is 107 + 1,024 generated — the slot's occupancy *after* the call — and
+dividing gave a nonsensical "1056% reuse". `rlm/dispatcher.py:437-442` already
+says so in as many words: `tokens_cached` in a `steps` row comes from
+**`timings.cache_n`**, "NOT the top-level `tokens_cached` field — they are NOT
+interchangeable". So the shipped code reads the right field and this probe read
+the wrong one. The reuse numbers above are unaffected: they are derived as
+`rendered − evaluated`, which does not depend on either field.
+
 ## 3. What this does not settle
 
 The accuracy win is measured **single-turn**; the cache cost is **multi-turn**.
