@@ -118,6 +118,30 @@ BASE_FLAGS: tuple[str, ...] = (
     "-lm", "none", "--no-kv-unified", "--cont-batching",
 )
 
+
+def base_flags(*, cont_batching: bool = True, ub: int = 512,
+               batch: int = 2048) -> list[str]:
+    """`BASE_FLAGS` with the three knobs R14's hypotheses 1 and 3 move.
+
+    ADDED 2026-08-14 for `s2/R14.md`. The defaults reproduce `BASE_FLAGS`
+    token-for-token, so every condition recorded before this existed is
+    re-runnable from the same runner with no argument at all -- that
+    byte-identity is the whole point of adding the knobs here rather than
+    forking the runner.
+    """
+    flags = list(BASE_FLAGS)
+    flags[flags.index("-ub") + 1] = str(ub)
+    flags[flags.index("-b") + 1] = str(batch)
+    if not cont_batching:
+        # BOTH, deliberately. Continuous batching DEFAULTS to on in this build,
+        # so dropping `--cont-batching` alone would not switch it off; and
+        # leaving `--cont-batching` in front of `--no-cont-batching` would rest
+        # the condition on last-wins argument parsing. Removing the positive
+        # and adding the negation makes the recorded argv say what it did.
+        flags.remove("--cont-batching")
+        flags.append("--no-cont-batching")
+    return flags
+
 QUESTION = "What is the record identifier stated in this document?"
 
 #: Neutral filler with no entity bindings other than the one identifier each
@@ -234,6 +258,14 @@ class TimedLeaf:
     limits: httpx.Limits | None = None
     markers: tuple[str, ...] = field(default_factory=tuple)
     prefix_tokens: int | None = None
+    #: R14 hypothesis 5 (2026-08-14). False = the shipped pattern: break out of
+    #: the SSE loop on the final event and let the context manager close the
+    #: connection, which aborts the response mid-body. True = read the stream to
+    #: its natural end so the SERVER closes it. `rlm/dispatcher.py` uses the
+    #: break-on-stop pattern too, so this switch tests production, not just this
+    #: runner. `tail_ms` grows under drain by construction -- it now contains the
+    #: server's own teardown -- so wall-clock is not comparable across the switch.
+    drain_stream: bool = False
     _client: httpx.AsyncClient | None = None
 
     def client(self) -> httpx.AsyncClient:
@@ -333,12 +365,17 @@ class TimedLeaf:
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
+                payload = line[len("data: "):]
+                if payload.strip() == "[DONE]":
+                    continue
                 if t_first_byte is None:
                     t_first_byte = time.perf_counter()
-                ev = json.loads(line[len("data: "):])
+                ev = json.loads(payload)
                 if ev.get("stop"):
                     final = ev
-                    break
+                    if not self.drain_stream:
+                        break
+                    continue
                 if ev.get("content"):
                     parts.append(ev["content"])
         t_end = time.perf_counter()
@@ -403,9 +440,10 @@ def buckets(rec: dict[str, Any]) -> dict[str, float]:
 
 
 def launch_argv(model: str, exe: str, port: int, ctx: int, np: int,
-                extra: list[str]) -> list[str]:
+                extra: list[str], *, cont_batching: bool = True,
+                ub: int = 512, batch: int = 2048) -> list[str]:
     argv = [exe, "-m", model, "--port", str(port), "-c", str(ctx), "-np", str(np)]
-    argv.extend(BASE_FLAGS)
+    argv.extend(base_flags(cont_batching=cont_batching, ub=ub, batch=batch))
     argv.extend(extra)
     return argv
 
@@ -472,17 +510,25 @@ async def run_condition(args: argparse.Namespace) -> dict[str, Any]:
         base_url=f"http://127.0.0.1:{args.port}",
         system_prefix=prefix,
         max_predict=args.n_predict,
-        temperature=cfg.scaffold.sampling.leaf.temperature,
-        top_p=cfg.scaffold.sampling.leaf.top_p,
+        # `--temperature`/`--top-p` default to None, i.e. to config, so an
+        # unqualified run is the shipped sampling. R14 hypothesis 4 (is the
+        # degeneracy a sampling pathology?) is the only caller that overrides.
+        temperature=(cfg.scaffold.sampling.leaf.temperature
+                     if args.temperature is None else args.temperature),
+        top_p=(cfg.scaffold.sampling.leaf.top_p
+               if args.top_p is None else args.top_p),
         seed=cfg.scaffold.sampling.leaf.seed,
         enable_thinking=cfg.scaffold.leaf.enable_thinking,
         limits=httpx.Limits(max_connections=args.max_connections,
                             max_keepalive_connections=args.max_keepalive),
+        drain_stream=args.drain_stream,
     )
 
     proc: subprocess.Popen | None = None
     argv = launch_argv(str(leaf_cfg.model), exe, args.port, args.ctx, args.np,
-                       args.extra.split() if args.extra else [])
+                       args.extra.split() if args.extra else [],
+                       cont_batching=args.cont_batching, ub=args.ub,
+                       batch=args.batch)
     try:
         if not args.no_launch:
             print(f"[{args.condition}] launching: {' '.join(argv)}", flush=True)
@@ -540,6 +586,9 @@ async def run_condition(args: argparse.Namespace) -> dict[str, Any]:
             "chunk_tokens": probe_tokens, "rendered_tokens": rendered_tokens,
             "prefix_tokens": leaf.prefix_tokens, "extra": args.extra or "",
             "n_predict": args.n_predict,
+            "cont_batching": args.cont_batching, "ub": args.ub,
+            "batch": args.batch, "temperature": leaf.temperature,
+            "top_p": leaf.top_p, "drain_stream": args.drain_stream,
             "ts": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -739,6 +788,22 @@ def main() -> None:
     ap.add_argument("--requery", type=int, default=0,
                     help="after the fill, re-ask the first N documents on "
                          "their own slots (§7 #3 (d) warm-reuse check)")
+    # --- R14 knobs (2026-08-14). Every default reproduces the pre-R14 runner. #
+    ap.add_argument("--no-cont-batching", dest="cont_batching",
+                    action="store_false", default=True,
+                    help="drop --cont-batching and pass --no-cont-batching "
+                         "(R14 hypothesis 1: batched decode)")
+    ap.add_argument("--ub", type=int, default=512,
+                    help="server -ub (R14 hypothesis 3)")
+    ap.add_argument("--batch", type=int, default=2048,
+                    help="server -b (R14 hypothesis 3)")
+    ap.add_argument("--drain-stream", action="store_true", default=False,
+                    help="read the SSE stream to its natural end instead of "
+                         "breaking on the final event (R14 hypothesis 5)")
+    ap.add_argument("--temperature", type=float, default=None,
+                    help="override leaf sampling temperature (R14 hypothesis 4)")
+    ap.add_argument("--top-p", type=float, default=None,
+                    help="override leaf sampling top_p (R14 hypothesis 4)")
     ap.add_argument("--concurrency", type=int, default=1)
     ap.add_argument("--max-connections", type=int, default=100)
     ap.add_argument("--max-keepalive", type=int, default=20)
