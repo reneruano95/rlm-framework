@@ -159,13 +159,20 @@ outright one rung later. Two consequences worth carrying forward:
 * A contaminated measurement is not conservatively wrong. It can mask a failure
   as easily as manufacture one, so "the leak would only have hurt us" is not
   available as a defence of any past number.
-* `virgin` (one slot per *fixture*, both questions on it) is **not** clean enough
-  for this measurement. Under it the model answered the ABSENT question with the
-  key it had just emitted for the LITERAL question on that slot in 6 of 8 cases.
-  R13-mitigations §4.3 calls same-document reuse legal, and for *leakage* it is —
-  0 foreign keys — but the previous **question** still carries. Production asks
-  multiple questions per window on one slot, so this is a live effect, not a
-  probe artefact. It deserves its own measurement.
+* ~~`virgin` (one slot per *fixture*) is not clean enough: the model answered the
+  ABSENT question with the key it had just emitted for the LITERAL question on
+  that slot in 6 of 8 cases, so the previous **question** carries.~~
+  **WITHDRAWN — measured and does not reproduce (`s2/CARRYOVER.md`).** That
+  reading was a confound of this probe's own making: its priming question asked
+  about `present[0]`, which is also the leaf's preferred misattribution target
+  (baseline picks it 4 times in 5), so "repeated the previous answer" and "chose
+  its usual wrong answer" were the same string. Priming on `present[2]` instead,
+  at production geometry with the warm path genuinely engaged (850 tokens
+  reused): **40/40 byte-identical answers across solo / warm-reuse / reuse-
+  without-prefix at the shipped 640 window**, and an identical failure rate in
+  all three arms at 1,024. R13-mitigations §4.3 is right as written, and §5's
+  slot discipline stands. `isolated` remains the correct policy for *measuring*
+  the model, but not because same-document reuse corrupts anything.
 
 ## 5. What this settles, and what it does not
 
@@ -217,8 +224,11 @@ evidence that the effect is general instruction-following decay rather than
 anything specific to Gated DeltaNet — and the geometric mitigation is measured to
 work regardless.
 
-**Next, in order:** (1) measure the same-slot previous-question carryover in §4,
-since production depends on multi-question windows; (2) assert returned `id_slot`
-in C4; (3) verify `Qwen3.8-27B`'s attention layout — still R7 checklist item 2
-and the S5 swap target — and if it is uniform full-attention, run this ladder
-against it as the clean discriminating arm.
+**Next, in order:** ~~(1) measure the same-slot previous-question carryover~~
+**done, `s2/CARRYOVER.md` — no effect at the shipped window;** (2) assert
+returned `id_slot` in C4; (3) verify `Qwen3.8-27B`'s attention layout — still R7
+checklist item 2 and the S5 swap target — and if it is uniform full-attention,
+run this ladder against it as the clean discriminating arm; (4) the carry-over
+probe primes with a **single** question, so a window asked five or ten questions
+in sequence is still uncovered, and that accumulation case is what production
+hits at high `max_subcalls`.
