@@ -1,0 +1,345 @@
+# VARIANT OF config.yaml -- IDENTICAL except scaffold.root.enable_thinking.
+# Exists so the S1 re-run can A/B the root's thinking with NO code change
+# and no edit to the shipped config. s2/ROOT-THINKING.md measured thinking
+# ON as worth +3/8 answers single-turn but as destroying multi-turn prefix
+# reuse (85% -> 4.7%); this arm decides it on a whole episode, where both
+# effects are in scope at once.
+# Prompt sha256 pins are copied verbatim, so both configs validate against
+# the same prompt files -- the ONLY difference between the arms is the flag.
+# rlm-halo runtime config (spec ARCHITECTURE.md §5, Appendix A).
+# Validated by rlm.config.Config (pydantic, extra="forbid"). config_snapshot()
+# is the canonical JSON dump of the validated model (stable field order).
+#
+# Prompt files under prompts/ (Task 14) are pinned by sha256 below — see
+# rlm/config.py's PromptRegistry and Config.pinned_prompt_hashes() docstrings.
+# A drifted or deleted file fails load_config() loudly (Config's
+# cross-field validator hashes the file on every load).
+
+servers:
+  root:
+    # S5 ROOT SWAP, 2026-08-15 (§9 S5, "target: Qwen3.8-27B ... this slice may
+    # activate early"). Day-one checklist, all nine items:
+    #  (1) dense, not MoE (no expert_count key).
+    #  (2) attention layout: `arch = qwen35`, ssm.inner_size 6144 /
+    #      state_size 128 / conv_kernel 4 -- IDENTICAL to the incumbent, so R7's
+    #      "different architecture" hazard did not materialise (s2/ARCH-LADDER.md).
+    #  (3) MTP head PRESENT (`nextn_predict_layers = 1`, block_count 65 vs 64);
+    #      the incumbent's Q4_K_M had none, which is why §7 #4 was unmeasurable
+    #      before this swap. Measured below.
+    #  (4) chat template DIFFERS (8,057 -> 8,952 chars). The rendered head moves,
+    #      so the root prefix hash changes -- R3's detector re-pins it on the
+    #      first call (v0.3.7). enable_thinking=false still accepted.
+    #  (5) tokenizer IDENTICAL: gpt2/qwen35 pre, bos 248044, eos 248046, vocab
+    #      and merges hashes equal. So the 3.7727 chars/token calibration, C2's
+    #      chunk geometry and every token count carry over unchanged. Only
+    #      padding_token_id differs (248055 -> 248044), unused here.
+    #  (6) licence: per the model card, same family terms as the incumbent.
+    #  (7) GGUF AGE IS A LIVE RISK: released 2026-08-14, so this community quant
+    #      is ONE DAY old against §9 S5's own "community quants stabilize over
+    #      ~2 weeks". sha256 recorded so a silent re-upload is detectable:
+    #      e00082f779fa385cee8c68a3ec8833a75778cc87272240b942f74e0b8243e520
+    #      (incumbent was 5ed60d0af4650a854b1755bd392f9aef4872643dc25a254bc68043fa638392a0)
+    #  (8) mmproj present on disk and deliberately NOT loaded (text-only root).
+    #  (9) not RLM-post-trained; scaffold prologue unchanged.
+    # Q4_K_M is 15.66 GB, byte-for-byte the same size as the incumbent quant, so
+    # dual residency is unchanged and §4's headroom arithmetic still holds.
+    model: 'D:\AI\models\lmstudio-community\Qwen3.8-27B-GGUF\Qwen3.8-27B-Q4_K_M.gguf'
+    # §7 #4 MEASURED 2026-08-15 on this box (`s2/mtp_bench.py`, `s2/MTP.md`),
+    # median decode over 8 runs at temperature 0, 256 tokens, root-shaped
+    # prompts: no speculation 12.87 t/s; `draft-mtp` n-max 2 -> 27.17 t/s
+    # (2.11x); n-max 6 -> 26.33 t/s (2.05x, a wash); adding `ngram-mod` ->
+    # 18.04 t/s (1.40x), i.e. ngram COSTS a third of the gain on this workload
+    # because the root writes fresh code rather than re-emitting a long shared
+    # context. §7 #4's target is >=1.4x; n-max 2 clears it by 1.5x.
+    # OWED, and not satisfiable yet: R4 requires "unchanged benchmark success",
+    # which is an S4 measurement. Byte-identity cannot substitute -- this stack
+    # does not reproduce itself at temperature 0 (baseline self-identity 0/4),
+    # exactly as §8 warns. So MTP is on for speed, and its quality claim is
+    # explicitly unverified until S4 runs.
+    mtp: true
+    port: 8080
+    backend: vulkan
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
+    log_path: traces/logs/root-server.log
+    ctx: 32768
+    parallel: 1
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    # `-lm none` IS §4's `--no-mmap`: b10375 deprecates `--mmap/-mmp` in favour
+    # of `--load-mode` (R11 flag drift). These are the flags the S1 gate
+    # actually launched with, recorded here so config_snapshot describes the
+    # servers that ran rather than the ones the spec was written against.
+    # `-lv 4` is a launch-contract requirement, not an extra flag: D27's
+    # cache-type assertion parses the log it produces.
+    # The MTP flags live HERE and not in launch_argv on purpose: serverproc
+    # refuses to invent flags in code, because a flag invented in code is one
+    # config_snapshot cannot record (R11). `servers.root.mtp` above is the
+    # declaration; a cross-field validator keeps the two from disagreeing.
+    # `--spec-draft-n-max 2` is §7 #4's pre-registered bound AND the measured
+    # optimum (2.11x vs 2.05x at 6, within noise of each other -- the bound
+    # costs nothing, so it is kept).
+    extra_flags: ["-lm none", "--no-context-shift",
+                  "--spec-type draft-mtp", "--spec-draft-n-max 2"]
+  leaf:
+    model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
+    port: 8081
+    backend: rocm
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
+    log_path: traces/logs/leaf-server.log
+    ctx: 327680
+    # MEASURED AND PINNED 2026-08-13 (`s2/R13-slotcount.md`). `-np 128
+    # -c 327680` = 2,560 tok/slot, 128 windows per leaf process, 2 rotations
+    # per 200K-token corpus. The two memory axes separate cleanly: KV is priced
+    # by the TOKEN budget (3,400 MiB at every `-np`, 10.625 KiB/token at q8_0)
+    # and recurrent state by SLOT COUNT (62.8125 MiB/slot = S 60.000 + conv R
+    # 2.8125, context-independent from 40,960 down to 1,280 tok/slot). At 128
+    # that is 8,040 MiB of recurrent state, 32.244 GiB leaf residency and
+    # 51.53 GiB dual-resident of the 64 GiB carve -- 19.5% free, above the
+    # stated 15% floor -- for -1.37% prefill / +0.12% decode.
+    # 128 is the LARGEST pool that fits, on two independent grounds: `-np 192`
+    # lands at 13.4% margin (under the floor) and gives 1,706 tok/slot against
+    # the ~1,900 the 1024/768 geometry needs. `-np 64` is the named fallback
+    # and is strictly worse here (4 rotations, plus a reproducible +629 MiB of
+    # unaccounted allocation at that size).
+    parallel: 128
+    # R13 (§10, §5 C4). The only measured-clean policy, and the only supported
+    # value: one never-reused slot per window, both questions about a window on
+    # that window's slot, a server restart when the pool is exhausted.
+    slot_policy: never_reuse
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    # `--cache-ram 0` ADDED 2026-08-14, for two independent measured reasons.
+    # (1) LATENCY (`s2/OCCUPANCY.md`): `--cache-idle-slots` is on by default and
+    #     saves every idle slot to a host-RAM prompt cache on each new task,
+    #     against a `--cache-ram` default of 8,192 MiB while ONE slot of this
+    #     config is 202.80 MiB -- 41 entries for a 128-slot pool. Past that the
+    #     evictions per request equal the occupancy EXACTLY (0 up to 40, 1 at
+    #     41, then N) at 37.5 ms each: 7,268 evictions, 272 s of a 543 s run,
+    #     per-call wall 2.18 -> 6.69 s with `timings.prompt_ms` flat. This flag
+    #     takes it to a flat 2.05-2.16 s at every occupancy 0-127.
+    # (2) MEASUREMENT CORRECTNESS (`s2/CACHE-INSTRUMENT.md`): the same host
+    #     cache restores an idle slot's state onto a DIFFERENT slot, so under
+    #     the default `timings.cache_n` is not a function of the prompts and
+    #     not reproducible run to run (the same call reported 0 or 958). With
+    #     the flag, reuse is the exact closed form §7 #3 now asserts --
+    #     239/239 calls, 0 tokens of error, at two `-ub` values.
+    # It is measured to cost the intra-window re-query NOTHING (warm prefill
+    # 50 ms and `cache_n` identical element-for-element with and without it):
+    # `--no-kv-unified` keeps the state in the slot, and the host copy was
+    # never the thing being reused. Under R13's never-reuse policy a saved
+    # entry can never be hit at all, so the 8.2 GiB it costs buys zero.
+    # `--no-cache-idle-slots` is the equivalent alternative; both measured.
+    extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching", "--cache-ram 0"]
+  fallback_leaf: null
+
+scaffold:
+  dispatcher: real
+  # §7 #2 (v0.3.0, 2026-08-14): WINDOW 640 / STRIDE 480 (25% overlap).
+  # 1,024/768 SUPERSEDED, on quality, and the reason is one measured horizon.
+  # Retrieval falls off a cliff at absolute needle-to-question DISTANCE (38/39
+  # correct within ~1,000 tokens, 0/39 beyond; bracket [967 pass, 1022 fail]),
+  # and INSTRUCTIONS decay over the same distance: instruction-to-generation
+  # distance is (window + question), so 1,024 puts the system prefix ~47 tokens
+  # PAST the measured fail point and the leaf stops obeying its own prefix --
+  # 30/30 false positives at 1,024 against 0/45 with 45/45 literal recall at
+  # 640 (`s2/DISTANCE.md`; reproduced by accident in `s2/OCCUPANCY.md` §8,
+  # 122/128 correct at 1,024 vs 128/128 twice at 640). The stride still puts
+  # every token within `stride` tokens of the end of some window containing it.
+  #
+  # THE PRICE, MEASURED, not assumed (the "free in prefill" claim was half
+  # right). Over a 200,000-token corpus, run through THIS chunker on real
+  # fixture prose, snap on:
+  #   chunk tokens prefilled   276,826 (640/480) vs 282,475 (1024/768)  -2.0%
+  #   windows                      424            vs     268            +58%
+  #   served prompt tokens     646,130            vs 515,903            +25%
+  # -- because the 311-token rendered head and the 516-token (`ub`+4) re-query
+  # rollback are WINDOW-INDEPENDENT, so 58% more windows pay 58% more of them.
+  # Leaf wall at serial dispatch with `--cache-ram 0`: ~1,180 s vs ~884 s,
+  # +33%. Landed anyway: at 1,024 the leaf answers a question it cannot see the
+  # instructions for, so the cheaper geometry buys answers R5 says are no
+  # evidence of anything. Occupancy does NOT discriminate (`s2/OCCUPANCY.md`
+  # §6: both geometries drain the same 128-slot pool to the same ceiling, and
+  # at peak the 640 call is the CHEAPER one, 6.35 s vs 6.87 s).
+  #
+  # overhead_tokens RE-DERIVED 1536 -> 1920 so that window + overhead stays
+  # 2,560, R13's measured dense-slot budget (`-np 128 -c 327680`, 128 x 2,560 =
+  # servers.leaf.ctx exactly). It covers the rendered leaf prefix (311 tokens,
+  # measured stable across 6 server launches and 373 calls), the question, the
+  # chat template's markup, max_predict.leaf (512) and the +10% snap slack on
+  # the window -- ~950 of the 1,920, so the slot is over-provisioned by design.
+  # The smaller window makes `-np 192` (1,706 tok/slot) GEOMETRICALLY feasible
+  # for the first time; it stays refused on the measured memory floor (13.4%
+  # margin against the stated 15%, `s2/R13-slotcount.md`). `-np 128` stands.
+  chunk: { size_tokens: 640, stride_tokens: 480, overhead_tokens: 1920, snap_to_boundary: true, snap_tolerance: 0.10 }
+  truncation_cap_chars: 2000
+  budgets:
+    max_depth: 1
+    # RAISED 522 -> 926 for window 640 / stride 480 (§7 #2, v0.3.0), and the
+    # DERIVATION IS NOT THE FORMULA -- the formula was measured wrong.
+    #     ceil((200,000 - 640) / 480) + 1 = 417 windows  -> 834 subcalls
+    # is what the geometry costs if every window end lands exactly one stride
+    # after the last. It does not: C2's `_snap_back` moves an end BACKWARD to
+    # the nearest boundary within the +-10% tolerance, so a gap can be as short
+    # as int(480 x 0.9) = 432 tokens and the window count RISES. Run through
+    # the real chunker on 200,000 tokens of fixture prose it is 424 windows =
+    # 848 subcalls (the shipped 1,024/768 measured 268 windows = 536 subcalls
+    # against its own formula's 261/522, so `max_subcalls: 522` was ALREADY
+    # short by 14 calls and would have truncated coverage silently -- exactly
+    # the failure mode it was raised to prevent).
+    # The bound that cannot be beaten by any corpus, and the value pinned here:
+    #     windows <= ceil(200,000 / (480 x 0.9)) = 463  -> 926 subcalls
+    # The other two budgets, checked against the measured 424-window pass:
+    #   max_total_tokens 1.5M   HOLDS. Settled actuals ~886K (848 calls x
+    #                           ~995 prompt + ~50 output); ~0.97M at the 926
+    #                           ceiling; admission adds only the in-flight
+    #                           reservations, which at serial dispatch is one.
+    #   max_wall_clock_s 900    BREACHED, ~1,180 s of leaf work before root
+    #                           turns -- and it was already breached at
+    #                           1,024/768 (~884 s), so it does NOT discriminate
+    #                           between the geometries. DELIBERATELY NOT
+    #                           RE-DERIVED: it is a §9/§8 per-task-size-class
+    #                           derivation, and `s2/OCCUPANCY.md` §7 blocks it
+    #                           on a live defect -- concurrent leaf dispatch
+    #                           corrupts the answer (31/32 correct serial,
+    #                           7/32 at 2 in flight), so the only measured-
+    #                           clean dispatch concurrency is 1 and every wall
+    #                           number here is a serial one.
+    # HEADROOM AGAINST §8's DECLARED TASK SIZES, re-checked at this geometry:
+    # 1M chars = 265,060 tokens (3.7727 chars/token, measured) = 552 windows by
+    # formula, <= 614 by the snap bound = 1,104-1,228 subcalls. max_subcalls
+    # BREAKS FIRST AGAIN, at ~75% coverage, and the wall-clock breach grows
+    # from ~955 s to ~1,560 s. §8's "full coverage of a 1M-char corpus is not
+    # affordable" therefore STANDS, with a worse margin. Not raised further:
+    # 1,228 subcalls would only move the breach to the wall clock.
+    max_subcalls: 926
+    max_wall_clock_s: 900
+    max_total_tokens: 1500000
+    # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
+    # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.
+    # The leaf distribution (n=9: 1,1,7,7,7,7,7,31,35) is NOT usable: every
+    # one of those calls came from the untemplated leaf path (finding F3), so
+    # lowering leaf max_predict on it would bake a defect into config. Stays
+    # 512; re-derive at S2 once leaf calls carry a chat template.
+    max_predict: { root: 1024, leaf: 512 }
+  retries: { max_attempts: 3, backoff_s: [1, 4], per_call_timeout_s: 240 }
+  root_window_kill_fraction: 0.90
+  sampling:
+    root: { temperature: 0.7, top_p: 0.8, seed: 1 }
+    leaf: { temperature: 0.3, top_p: 0.9, seed: 1 }
+  prompts:
+    # S1 R1 A/B DECIDED 2026-08-13 (s1/RESULTS.md): root.v1 (tips-only) vs
+    # root.v2 (tips + two worked exemplars), 3 attempts each on both S1
+    # fixtures. Result 6/6 vs 6/6 -- a tie at ceiling, no discrimination. The
+    # pre-registered tie-break keeps the SIMPLER prompt: v2 buys +1,203 root
+    # prompt tokens per episode (1,664 -> 2,867 measured on turn 1) for zero
+    # measured benefit, and a tie is not evidence for the exemplars. The A/B is
+    # CLOSED at two variants (§9 S1 hard cap) and neither arm was ever edited.
+    #
+    # PINNED PROMPT IS root.v3 SINCE 2026-08-13 (§7 #2, "the layout fix is inert
+    # in production"). v3 IS the A/B winner: it is root.v1.md byte-for-byte
+    # except that its three API lines teach `llm_query(question, chunk=...)`,
+    # the kwarg C4 uses to compose [prefix][chunk][question] itself (chunk-first
+    # re-query cache_n=546 vs question-first 0). v1 stayed pinned through S1 and
+    # taught the hand-composed single string, so the running root emitted
+    # chunk=None on every call and §7 #3's gate (b) would have scored a root
+    # never taught the API it is graded on. v1/v2 remain on disk, unmodified and
+    # unpinned, as the recorded S1 arms; s1/run_s1.py re-pins them itself.
+    root: { path: prompts/root.v3.md, sha256: 3fb653e3eacafa50b53d12c08cc70982fe4a6ad19bf01cffbf7966771917b6b6 }
+    # LEAF PREFIX: v1 REMAINS PINNED pending the S2 refusal A/B
+    # (`s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
+    # refusal-strengthened arm; v1 is the control behind every leaf measurement
+    # recorded so far -- including the 95% false-positive rate the A/B exists to
+    # attack -- and is never edited. Whichever arm wins is pinned HERE, once,
+    # with the measurement cited.
+    leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76 }
+    # The envelope's format block, appended to whichever prefix is pinned. Its
+    # own file and its own hash so the 2x2 (prefix x envelope) varies on two
+    # independent axes and neither prefix carries the format. Declared and
+    # hash-pinned even while `scaffold.leaf_envelope.enabled` is false, so a
+    # drifted or deleted block is refused at config load rather than at the
+    # moment someone flips the switch.
+    leaf_envelope: { path: prompts/leaf-envelope.v2.md, sha256: 58d813fa36766e4ea9800b9004577d31b6d71fcbb26d38f4b0ef83d911d12867 }
+    strategy_templates:
+      needle: { path: prompts/strat-needle.v1.md, sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d }
+      # PINNED v2 SINCE 2026-08-13. v1 was authored against a PARTITIONING
+      # chunker; §7 #2's window 1,024 / stride 768 makes `chunks` overlapping
+      # windows, so ~25% of the corpus sits in two of them and v1's reduction
+      # step ("deduplicate across chunks, then count") double-counts, while its
+      # boundary-stitching tip manufactures a phantom copy of every item the
+      # overlap already covers. §8 requires this category to force coverage and
+      # punish sampling, so the counting guidance has to match the geometry the
+      # chunker actually ships. v1 stays on disk, unmodified and unpinned, as
+      # the recorded text of every run made before this date.
+      aggregation: { path: prompts/strat-aggregation.v2.md, sha256: 4baeea34d2dda4a5b1022ed5fa2366c6a6d78161238482526820eb8d34bb35fa }
+      synthesis: { path: prompts/strat-synthesis.v1.md, sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c }
+      code_qa: { path: prompts/strat-codeqa.v1.md, sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e }
+      default: { path: prompts/strat-default.v1.md, sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415 }
+  # DECIDED BY THE S2 A/B (`s2/REFUSAL-AB.md`), not by taste. `enabled` appends
+  # the format block to the leaf prefix and makes C4 parse/validate the reply
+  # scaffold-side; `grammar` is the SEPARATE server-side enforcement flag and is
+  # never trusted even when on -- llama.cpp has documented silent fail-open on
+  # schema-parse failure (§13), so scaffold-side validation runs identically
+  # either way.
+  leaf_envelope: { enabled: false, grammar: false }
+  sandbox:
+    # MUST be the real base interpreter, never the venv's Scripts\python.exe
+    # trampoline (262 KB stub that re-execs the real interpreter as a CHILD
+    # with a DIFFERENT pid -- measured on this box, Popen.pid != child's own
+    # os.getpid()). Recording the trampoline's pid as episodes.sandbox_pid
+    # would be wrong, would race job.assign against the trampoline's own
+    # re-exec (Cross-check Conflict 1/7), and would make TerminateJobObject
+    # target the wrong process. Absolute path, pinned, never sys.executable.
+    interpreter: 'C:\Users\Rene\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\python.exe'
+    bootstrap_dir: 'D:\PROJECTS\rlm-halo-framework\sandbox_bootstrap'
+    network_isolation: appcontainer
+    appcontainer_per_episode: true
+    deny_ctypes: false
+    memory_limit_mb: 4096
+    active_process_limit: 1
+  root:
+    enable_thinking: true   # S1 RE-RUN ARM ONLY -- see s2/ROOT-THINKING.md
+    window_tokens: 32768
+  leaf:
+    # S1 F3: every leaf reply in the gate was an empty `<think></think>` block
+    # (the untemplated leaf path). At chunk scale the reasoning trace is decode
+    # cost the root never reads, and the hand-run probe with thinking ON never
+    # reached an answer inside 512 tokens. Off, like the root's.
+    enable_thinking: false
+  # NOT `servers.leaf.parallel`, and no longer required to equal it (v0.2.6).
+  # Under never-reuse the two measure different things: `--parallel` is the
+  # POOL -- how many windows one leaf process can serve before it is rotated,
+  # sized by the measured 62.8125 MiB/slot memory bill -- while this is how
+  # many leaf calls may be in flight at once, sized by S0's finding that
+  # aggregate prefill is FLAT across slots (946.7 t/s at 8 ≈ 943.4 at 1).
+  # Tying them would put 128 calls on the wire because the memory allowed 128
+  # slots. 8 was S0's measured value; it may not exceed the pool, since every
+  # in-flight call holds a slot.
+  #
+  # LIVE BLOCKER, 2026-08-14 (`s2/OCCUPANCY.md` §7): THIS VALUE IS NOT SAFE.
+  # Concurrent leaf dispatch destroys the ANSWER, not merely the latency:
+  # 31/32 correct serial, 7/32 at 2 in flight, 3/32 at 3, 2/32 at 4, 7/128 at
+  # 8 -- degenerate text ('###/remainile'), not wrong answers. Reproduced with
+  # two independent OS processes sharing one server, so it is the server and
+  # not the async client, and R13's detector CANNOT see it (degenerate output
+  # carries no identifier to be foreign). The break is at TWO.
+  # NOT CHANGED HERE, deliberately: this is a defect of the same class as R13
+  # and gets the same treatment -- minimal reproducer, mechanism, upstream
+  # issue -- before a config edit picks a number. Every wall-clock figure in
+  # this file and in §7 #2 is a SERIAL one for exactly this reason, and
+  # `max_wall_clock_s` may not be re-derived until it is characterised.
+  dispatch_concurrency: 1   # R14 (spec v0.3.1): serial only. 2 in flight = 9/32 correct vs 31/32 serial;
+                            # fan-out buys 13% wall and costs 68% of answers. Raise ONLY if the
+                            # --no-cont-batching lead is fixed upstream, and re-measure on
+                            # correct-answers-per-second, never on wall-clock alone.
+
+trace:
+  db_path: traces/rlm.duckdb
+  blob_root: traces/blobs
+  export_every_episode: true
+
+benchmark: { version: null, seeds: [1, 2, 3] }
+power_sampling: { enabled: false }

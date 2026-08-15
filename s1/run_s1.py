@@ -268,7 +268,15 @@ async def rlm_attempt(raw_cfg: dict, meta: dict, variant: str, seed: int,
              if episode_id else {})
     return append_run({
         "phase": "ab", "arm": "b", "fixture": meta["task_id"], "variant": variant,
-        "root_prompt": VARIANTS[variant], "seed": seed,
+        # `variant_config` already accepts None to mean "leave the SHIPPED root
+        # prompt alone"; only this record line assumed a variant, so an episode
+        # against the pinned prompt died on KeyError(None). Recording the config
+        # path matters more than the variant name here: after the §9 S1 A/B was
+        # closed and root.v3 pinned, a re-run should exercise what ships, not
+        # re-open a decided comparison.
+        "root_prompt": (VARIANTS[variant] if variant is not None
+                        else str(cfg.scaffold.prompts.root.path)),
+        "seed": seed,
         "episode_id": episode_id, "outcome": outcome, "outcome_reason": reason,
         "passed": outcome == "success",
         "final_answer": (str(final_answer)[:2000] if final_answer is not None else None),
@@ -290,8 +298,24 @@ async def leaf_probe(cfg: Config, meta: dict) -> dict:
     into any arm."""
     text = Path(meta["context_path"]).read_text(encoding="utf-8")
     offset = meta["needle_char_offset"]
-    # The half of the document the needle is in, capped well under one slot.
-    chunk = text[max(0, offset - 60_000):offset + 60_000]
+    # A PRODUCTION-SIZED window around the needle, not a 120,000-char slab.
+    #
+    # This line used to take text[offset-60_000 : offset+60_000] and call it
+    # "capped well under one slot". That was true when the leaf ran at `-np 8`
+    # (327,680 / 8 = 40,960 tokens per slot). R13's mitigation moved the leaf to
+    # `-np 128` -- 2,560 tokens per slot -- and the comment silently became
+    # false: ~31,800 tokens against a 2,560-token slot, which C4's pre-flight
+    # rejects before any call is made (status=rejected in 0.1 s, measured
+    # 2026-08-15). It went unnoticed because the leaf path was broken for other
+    # reasons (F3, no chat template), so the probe never got far enough to hit
+    # the cap.
+    #
+    # The window is now sized from config -- `scaffold.chunk.size_tokens` at the
+    # measured 3.7727 chars/token (§8) -- so the probe sends what production
+    # actually sends a leaf, which is what "does one direct leaf call work"
+    # should have meant all along.
+    half = int(cfg.scaffold.chunk.size_tokens * 3.7727 / 2)
+    chunk = text[max(0, offset - half):offset + half]
     question = f"{meta['text']}\nIf the document does not state it, reply NONE."
     dispatcher = LLMDispatcher.from_config(cfg)
     t0 = time.perf_counter()
