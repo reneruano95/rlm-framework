@@ -399,7 +399,19 @@ def render_report(runs: list[dict]) -> str:
     # Winner: total passes across both S1 fixtures; ties break to the SIMPLER
     # prompt (v1, tips-only) because a tie is not evidence for the exemplars.
     winner = max(VARIANTS, key=lambda v: (totals[v][0], v == "v1"))
-    win_needle = ab_scores[(winner, "s1-needle")]
+
+    # Arm (b) is scored on the PINNED prompt when episodes against it exist.
+    # The rule below says "the variant that WINS the R1 A/B and is therefore
+    # the one pinned into config.yaml" -- those were the same thing while the
+    # A/B was open. It closed, root.v3 was pinned, and they stopped being the
+    # same thing: episodes against the shipped prompt carry `variant: None`,
+    # which the v1/v2 lookup scored as 0/0 and reported as a gate FAIL while
+    # every episode had in fact passed. Scoring the pinned prompt is what the
+    # rule asks for; falling back to the A/B winner keeps the historical
+    # records (which have no pinned-prompt rows) scoring exactly as before.
+    pinned_needle = _score(ab, variant=None, fixture="s1-needle")[:2]
+    scored_on_pinned = pinned_needle[1] > 0
+    win_needle = pinned_needle if scored_on_pinned else ab_scores[(winner, "s1-needle")]
     gate_a = needle_control_n > 0 and needle_control_pass == 0
     gate_b = win_needle[1] > 0 and win_needle[0] >= 2
     verdict = "PASS" if (gate_a and gate_b) else "FAIL"
@@ -422,9 +434,14 @@ def render_report(runs: list[dict]) -> str:
         f"- arm (a) control, root alone on the <=28K-token truncation: "
         f"**{needle_control_pass}/{needle_control_n}** "
         f"({'PASS — 0/3 as required' if gate_a else 'GATE VIOLATION'})",
-        f"- arm (b) RLM, full scaffold, winner `{winner}` "
-        f"(`{VARIANTS[winner]}`): **{win_needle[0]}/{win_needle[1]}** "
-        f"({'PASS' if gate_b else 'FAIL'})",
+        (f"- arm (b) RLM, full scaffold, **pinned prompt** "
+         f"(`{'?' if not ab else next((r.get('root_prompt') for r in ab if r.get('variant') is None), '?')}`): "
+         f"**{win_needle[0]}/{win_needle[1]}** "
+         f"({'PASS' if gate_b else 'FAIL'})"
+         if scored_on_pinned else
+         f"- arm (b) RLM, full scaffold, winner `{winner}` "
+         f"(`{VARIANTS[winner]}`): **{win_needle[0]}/{win_needle[1]}** "
+         f"({'PASS' if gate_b else 'FAIL'})"),
         "",
     ]
 

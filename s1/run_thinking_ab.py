@@ -85,10 +85,13 @@ async def main_async(args) -> int:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     def passed(r: dict) -> bool:
-        exp = fixtures[r["fixture"].removeprefix("s1-")]["answer"] \
-            if r.get("fixture", "").startswith("s1-") else None
-        ans = str(r.get("final_answer") or "")
-        return bool(exp) and exp.casefold() in ans.casefold()
+        """Use the RECORDED outcome, not a re-derived substring test.
+
+        `rlm_attempt` already stores `passed = outcome == "success"`, and that
+        outcome comes from `Task.check` -- the checker the gate is defined
+        against, with its own normalisation. Re-implementing it here would let
+        this driver score an episode differently from the gate it is feeding."""
+        return bool(r.get("passed"))
 
     print(f"\n=== S1 re-run on the swapped root: thinking A/B ===")
     print(f"  {'arm':<11} {'passed':>8} {'med wall':>9} {'med turns':>10} "
