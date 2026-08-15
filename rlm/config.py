@@ -374,6 +374,29 @@ class Config(_Strict):
                 f"(got {root.parallel})"
             )
 
+        # `mtp` is a DECLARATION; the flags that actually turn MTP on live in
+        # extra_flags, because `serverproc.launch_argv` refuses to invent flags
+        # in code ("a flag invented in code is a flag config_snapshot cannot
+        # record"). That split is only safe if the two cannot disagree: a
+        # `mtp: true` that emitted nothing would be a silent lie in every
+        # snapshot, and spec flags with `mtp: false` would make §7 #4's
+        # optimization invisible to the scoring query.
+        spec = " ".join(root.extra_flags)
+        declares = "draft-mtp" in spec
+        if root.mtp and not declares:
+            raise ValueError(
+                "servers.root.mtp=true but no '--spec-type ... draft-mtp' in "
+                "servers.root.extra_flags -- nothing would actually enable MTP "
+                "at launch, and config_snapshot would record a run that did "
+                "not happen"
+            )
+        if declares and not root.mtp:
+            raise ValueError(
+                "servers.root.extra_flags asks for '--spec-type draft-mtp' but "
+                "servers.root.mtp is false -- set it true so §7 #4's "
+                "optimization is visible to the trace and to scoring"
+            )
+
         if s.truncation_cap_chars < MIN_MARKER_CAP:
             raise ValueError(
                 f"scaffold.truncation_cap_chars ({s.truncation_cap_chars}) must be "

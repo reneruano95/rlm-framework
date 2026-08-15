@@ -9,8 +9,46 @@
 
 servers:
   root:
-    model: 'D:\AI\models\unsloth\Qwen3.6-27B-GGUF\Qwen3.6-27B-Q4_K_M.gguf'
-    mtp: false
+    # S5 ROOT SWAP, 2026-08-15 (§9 S5, "target: Qwen3.8-27B ... this slice may
+    # activate early"). Day-one checklist, all nine items:
+    #  (1) dense, not MoE (no expert_count key).
+    #  (2) attention layout: `arch = qwen35`, ssm.inner_size 6144 /
+    #      state_size 128 / conv_kernel 4 -- IDENTICAL to the incumbent, so R7's
+    #      "different architecture" hazard did not materialise (s2/ARCH-LADDER.md).
+    #  (3) MTP head PRESENT (`nextn_predict_layers = 1`, block_count 65 vs 64);
+    #      the incumbent's Q4_K_M had none, which is why §7 #4 was unmeasurable
+    #      before this swap. Measured below.
+    #  (4) chat template DIFFERS (8,057 -> 8,952 chars). The rendered head moves,
+    #      so the root prefix hash changes -- R3's detector re-pins it on the
+    #      first call (v0.3.7). enable_thinking=false still accepted.
+    #  (5) tokenizer IDENTICAL: gpt2/qwen35 pre, bos 248044, eos 248046, vocab
+    #      and merges hashes equal. So the 3.7727 chars/token calibration, C2's
+    #      chunk geometry and every token count carry over unchanged. Only
+    #      padding_token_id differs (248055 -> 248044), unused here.
+    #  (6) licence: per the model card, same family terms as the incumbent.
+    #  (7) GGUF AGE IS A LIVE RISK: released 2026-08-14, so this community quant
+    #      is ONE DAY old against §9 S5's own "community quants stabilize over
+    #      ~2 weeks". sha256 recorded so a silent re-upload is detectable:
+    #      e00082f779fa385cee8c68a3ec8833a75778cc87272240b942f74e0b8243e520
+    #      (incumbent was 5ed60d0af4650a854b1755bd392f9aef4872643dc25a254bc68043fa638392a0)
+    #  (8) mmproj present on disk and deliberately NOT loaded (text-only root).
+    #  (9) not RLM-post-trained; scaffold prologue unchanged.
+    # Q4_K_M is 15.66 GB, byte-for-byte the same size as the incumbent quant, so
+    # dual residency is unchanged and §4's headroom arithmetic still holds.
+    model: 'D:\AI\models\lmstudio-community\Qwen3.8-27B-GGUF\Qwen3.8-27B-Q4_K_M.gguf'
+    # §7 #4 MEASURED 2026-08-15 on this box (`s2/mtp_bench.py`, `s2/MTP.md`),
+    # median decode over 8 runs at temperature 0, 256 tokens, root-shaped
+    # prompts: no speculation 12.87 t/s; `draft-mtp` n-max 2 -> 27.17 t/s
+    # (2.11x); n-max 6 -> 26.33 t/s (2.05x, a wash); adding `ngram-mod` ->
+    # 18.04 t/s (1.40x), i.e. ngram COSTS a third of the gain on this workload
+    # because the root writes fresh code rather than re-emitting a long shared
+    # context. §7 #4's target is >=1.4x; n-max 2 clears it by 1.5x.
+    # OWED, and not satisfiable yet: R4 requires "unchanged benchmark success",
+    # which is an S4 measurement. Byte-identity cannot substitute -- this stack
+    # does not reproduce itself at temperature 0 (baseline self-identity 0/4),
+    # exactly as §8 warns. So MTP is on for speed, and its quality claim is
+    # explicitly unverified until S4 runs.
+    mtp: true
     port: 8080
     backend: vulkan
     backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
@@ -27,7 +65,15 @@ servers:
     # servers that ran rather than the ones the spec was written against.
     # `-lv 4` is a launch-contract requirement, not an extra flag: D27's
     # cache-type assertion parses the log it produces.
-    extra_flags: ["-lm none", "--no-context-shift"]
+    # The MTP flags live HERE and not in launch_argv on purpose: serverproc
+    # refuses to invent flags in code, because a flag invented in code is one
+    # config_snapshot cannot record (R11). `servers.root.mtp` above is the
+    # declaration; a cross-field validator keeps the two from disagreeing.
+    # `--spec-draft-n-max 2` is §7 #4's pre-registered bound AND the measured
+    # optimum (2.11x vs 2.05x at 6, within noise of each other -- the bound
+    # costs nothing, so it is kept).
+    extra_flags: ["-lm none", "--no-context-shift",
+                  "--spec-type draft-mtp", "--spec-draft-n-max 2"]
   leaf:
     model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
     port: 8081

@@ -381,3 +381,52 @@ def test_max_subcalls_covers_a_full_200k_corpus(valid_cfg):
     so `max_subcalls: 522` was already 14 calls short of its own geometry.)"""
     assert valid_cfg.scaffold.budgets.max_subcalls == 926
     assert 926 == 2 * -(-200_000 // int(480 * 0.9))
+
+
+# --------------------------------------------------------------------------- #
+# S5/§7 #4: `servers.root.mtp` is a DECLARATION; the flags that actually turn
+# MTP on live in extra_flags, because serverproc refuses to invent flags in
+# code. The two must not be able to disagree.
+
+
+def test_mtp_declared_without_the_flag_is_refused(minimal_cfg_dict):
+    """A `mtp: true` that emitted nothing at launch would be a silent lie in
+    every config_snapshot -- §8's whole comparison rests on the snapshot
+    describing the run that actually happened (R11)."""
+    minimal_cfg_dict["servers"]["root"]["mtp"] = True
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 1
+    minimal_cfg_dict["servers"]["root"]["extra_flags"] = ["-lm none"]
+    with pytest.raises(ConfigError, match="draft-mtp"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_the_flag_without_the_declaration_is_refused(minimal_cfg_dict):
+    """The other direction matters too: MTP running while `mtp: false` would
+    make §7 #4's optimization invisible to the trace and to scoring."""
+    minimal_cfg_dict["servers"]["root"]["mtp"] = False
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 1
+    minimal_cfg_dict["servers"]["root"]["extra_flags"] = [
+        "-lm none", "--spec-type draft-mtp", "--spec-draft-n-max 2"]
+    with pytest.raises(ConfigError, match="mtp"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_mtp_declared_with_the_flag_validates(minimal_cfg_dict):
+    minimal_cfg_dict["servers"]["root"]["mtp"] = True
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 1
+    minimal_cfg_dict["servers"]["root"]["extra_flags"] = [
+        "-lm none", "--spec-type draft-mtp", "--spec-draft-n-max 2"]
+    cfg = Config.model_validate(minimal_cfg_dict)
+    assert cfg.servers.root.mtp is True
+
+
+def test_the_shipped_config_declares_mtp_and_emits_it(valid_cfg):
+    """The shipped root runs Qwen3.8-27B, whose base quant carries the MTP head
+    (`nextn_predict_layers = 1`) the incumbent's Q4_K_M did not. Measured
+    2.11x root decode at `--spec-draft-n-max 2` (s2/MTP.md). This is a tripwire:
+    dropping either half silently gives back a 2x on the serial, decode-bound
+    part of every episode."""
+    root = valid_cfg.servers.root
+    assert root.mtp is True
+    assert any("draft-mtp" in f for f in root.extra_flags)
+    assert root.parallel == 1, "MTP is single-slot on this build"
