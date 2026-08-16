@@ -29,6 +29,13 @@ ISOLATED = [
     # "programmatically verifiable".
     "checkers.py",
     "stats.py",
+    # §8's baseline arms. They make model calls, but through an INJECTED
+    # dispatcher: `rlm/episode.py` is the only module permitted to import both
+    # C4 and the isolated components, and widening that to a second module is
+    # the drift its docstring forbids. Keeping arms on this side is also what
+    # lets the scoring/replay path import an arm's helpers (the truncation
+    # policy, the outcome mapping) with no server reachable.
+    "arms.py",
     # The Windows RAPL power sampler + one-shot pkg-temp reader (S0 item 8).
     # It shells out to `powershell`/`Get-Counter`, never to a model server, so
     # it stays importable by the trace/analysis side without an HTTP client.

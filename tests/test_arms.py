@@ -1,0 +1,524 @@
+"""§8's baseline arms (`rlm/arms.py`): shared plumbing + B1 single-shot.
+
+Every test here runs the REAL arm code against a canned dispatcher -- no
+servers. The dispatcher double subclasses `conftest.CannedDispatcher` so the
+steps the arm logs are the ones C4 actually records (leak columns included),
+rather than a second, prettier implementation of them.
+"""
+from __future__ import annotations
+
+import asyncio
+import copy
+import hashlib
+from pathlib import Path
+
+import duckdb
+import pytest
+from conftest import CannedDispatcher, _decode_episode_row, _rows
+
+from rlm import episode as episodemod
+from rlm.arms import (
+    ARM_ERROR,
+    CHECKER_FAILED,
+    NO_ANSWER,
+    SERVER_UNREACHABLE,
+    ArmEpisode,
+    ArmResult,
+    bench_slot_capacity,
+    outcome_for_error,
+    run_b1,
+    truncate_head_tail,
+)
+from rlm.config import Config
+from rlm.episode import Task
+from rlm.errors import ConfigError, DispatchError, Outcome
+from rlm.trace import TraceLogger
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+# --------------------------------------------------------------------------- #
+# wiring
+# --------------------------------------------------------------------------- #
+
+
+class _ScriptedDispatcher(CannedDispatcher):
+    """A `CannedDispatcher` that answers every prompt with one fixed reply.
+
+    The arm assembles its own prompt (head + truncated corpus + question), so
+    a test cannot key a fixture by hash up front; this seeds the fixture for
+    whatever prompt actually arrives and keeps every other piece of
+    `MockDispatcher` -- the step record, the leak columns, the semaphore -- real.
+    """
+
+    def __init__(self, reply: str = "ANSWER", *, delay: float = 0.0,
+                 fail: bool = False, count_penalty: int = 0,
+                 penalise=None) -> None:
+        super().__init__()
+        self.reply = reply
+        self.delay = delay
+        self.fail = fail
+        self.count_penalty = count_penalty
+        self._penalise = penalise
+        self.prompts: list[str] = []
+        self.counted: list[str] = []
+        self.slot_ids: list[int | None] = []
+
+    async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
+        self.counted.append(text)
+        base = await super().count_tokens(text, role=role)
+        if self.count_penalty and self._penalise is not None and self._penalise(text):
+            # A real /tokenize counts the chat template's markup, which a raw
+            # text count cannot see -- so the assembled prompt is bigger than
+            # the sum of its parts. That is the case the fit verify loop exists
+            # for, and this is how it is provoked deterministically.
+            return base + self.count_penalty
+        return base
+
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None) -> str:
+        from rlm.dispatcher import compose_leaf_user
+
+        self.prompts.append(prompt)
+        composed = compose_leaf_user(prompt, chunk)
+        key = f"{role}:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
+        if self.fail:
+            self._inner._fixtures.pop(key, None)
+        else:
+            self._inner._fixtures[key] = self.reply
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return await self._inner.query(prompt, role=role, call_id=call_id,
+                                        chunk=chunk)
+
+
+class _SlotAwareDispatcher(_ScriptedDispatcher):
+    """A dispatcher whose `query` DECLARES `slot_id` -- the Task-10 bench
+    profile's shape. The arm must pass the pin through to it."""
+
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None, slot_id: int | None = None) -> str:
+        self.slot_ids.append(slot_id)
+        return await super().query(prompt, role=role, call_id=call_id, chunk=chunk)
+
+
+@pytest.fixture
+def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
+    """Factory for a bench-profile Config on a tmp trace store.
+
+    Prompt paths are absolutized (as `_episode_cfg_dict` does) so the
+    registry's sha256 pins resolve regardless of the working directory.
+    """
+
+    def build(*, bench_ctx: int | None = None, bench_parallel: int | None = None,
+              drop_bench_leaf: bool = False, max_wall_clock_s: int | None = None) -> Config:
+        raw = copy.deepcopy(minimal_cfg_dict)
+        prompts = raw["scaffold"]["prompts"]
+        prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
+        prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+        if prompts.get("leaf_envelope"):
+            prompts["leaf_envelope"]["path"] = str(
+                REPO_ROOT / prompts["leaf_envelope"]["path"])
+        for ref in prompts["strategy_templates"].values():
+            ref["path"] = str(REPO_ROOT / ref["path"])
+        for ref in (prompts.get("baselines") or {}).values():
+            ref["path"] = str(REPO_ROOT / ref["path"])
+        raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
+        raw["trace"]["blob_root"] = str(tmp_path / "blobs")
+        raw["scaffold"]["dispatcher"] = "mock"
+        if drop_bench_leaf:
+            raw["servers"].pop("bench_leaf", None)
+        else:
+            if bench_ctx is not None:
+                raw["servers"]["bench_leaf"]["ctx"] = bench_ctx
+            if bench_parallel is not None:
+                raw["servers"]["bench_leaf"]["parallel"] = bench_parallel
+        if max_wall_clock_s is not None:
+            raw["scaffold"]["budgets"]["max_wall_clock_s"] = max_wall_clock_s
+        return Config.model_validate(raw)
+
+    return build
+
+
+class _ArmEnv:
+    """Runs one arm against a real TraceLogger and reads the rows back."""
+
+    def __init__(self, cfg: Config) -> None:
+        self.cfg = cfg
+        self.episode: dict | None = None
+        self.steps: list[dict] = []
+
+    async def run(self, factory):
+        tl = TraceLogger(self.cfg.trace.db_path, self.cfg.trace.blob_root)
+        await tl.start()
+        try:
+            result = await factory(tl)
+        finally:
+            await tl.drain()
+            await tl.aclose()
+        self._load()
+        return result
+
+    def _load(self) -> None:
+        con = duckdb.connect(str(self.cfg.trace.db_path), read_only=True)
+        try:
+            eps = _rows(con, "SELECT * FROM episodes ORDER BY started_at")
+            self.episode = _decode_episode_row(eps[-1]) if eps else None
+            self.steps = _rows(con, "SELECT * FROM steps ORDER BY step_idx")
+        finally:
+            con.close()
+
+    def blob(self, rel: str) -> bytes:
+        return (Path(self.cfg.trace.blob_root) / rel).read_bytes()
+
+
+BENCH_EXTRA = {"run_id": "r-1", "seed": 1, "block": 0}
+
+
+def _task(**over) -> Task:
+    kw = {"task_id": "b1-t1", "text": "What is the key?",
+          "context": "the key is ANSWER", "answer": "ANSWER", "checker": "exact"}
+    kw.update(over)
+    return Task(**kw)
+
+
+async def _run_b1(cfg: Config, task: Task, dispatcher, **kw):
+    env = _ArmEnv(cfg)
+    result = await env.run(
+        lambda tl: run_b1(task, cfg, dispatcher=dispatcher, trace=tl,
+                           registry=cfg.prompt_registry(), bench_extra=BENCH_EXTRA,
+                           **kw))
+    return result, env
+
+
+# --------------------------------------------------------------------------- #
+# truncate_head_tail
+# --------------------------------------------------------------------------- #
+
+
+def test_truncate_head_tail_is_5050_and_recorded():
+    corpus = "A" * 1000 + "B" * 1000
+    text, rec = truncate_head_tail(corpus, corpus_tokens=500, fit_tokens=250)
+    assert rec["truncated"] is True
+    assert abs(rec["kept_head_tokens"] - rec["kept_tail_tokens"]) <= 1
+    assert rec["kept_head_tokens"] + rec["kept_tail_tokens"] == 250
+    assert rec["corpus_tokens"] == 500
+    assert text.startswith("A") and text.endswith("B")
+    # char-proportional: 2000 chars / 500 tokens = 4 chars per token
+    assert text.count("A") == 500 and text.count("B") == 500
+
+    t2, rec2 = truncate_head_tail(corpus, corpus_tokens=200, fit_tokens=250)
+    assert t2 == corpus and rec2["truncated"] is False
+    assert rec2["kept_head_tokens"] == 200 and rec2["kept_tail_tokens"] == 0
+
+
+def test_truncate_head_tail_is_deterministic():
+    corpus = "".join(chr(97 + i % 26) for i in range(4000))
+    a = truncate_head_tail(corpus, corpus_tokens=1000, fit_tokens=333)
+    b = truncate_head_tail(corpus, corpus_tokens=1000, fit_tokens=333)
+    assert a == b
+
+
+def test_truncate_head_tail_never_duplicates_or_overruns():
+    """Rounding must not let head+tail overlap -- a duplicated span would put
+    text in the prompt twice and make the kept-token record a lie."""
+    corpus = "x" * 101
+    text, rec = truncate_head_tail(corpus, corpus_tokens=25, fit_tokens=24)
+    assert len(text) <= len(corpus)
+    assert rec["truncated"] is True
+
+
+def test_truncate_head_tail_handles_a_zero_or_negative_fit():
+    corpus = "A" * 100
+    text, rec = truncate_head_tail(corpus, corpus_tokens=25, fit_tokens=0)
+    assert text == "" and rec["truncated"] is True
+    assert rec["kept_head_tokens"] == 0 and rec["kept_tail_tokens"] == 0
+    text, rec = truncate_head_tail(corpus, corpus_tokens=25, fit_tokens=-10)
+    assert text == "" and rec["truncated"] is True
+
+
+def test_truncate_head_tail_tolerates_an_empty_corpus():
+    text, rec = truncate_head_tail("", corpus_tokens=0, fit_tokens=-1)
+    assert text == "" and rec["corpus_tokens"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# outcome mapping (shared by B1/B2/B3)
+# --------------------------------------------------------------------------- #
+
+
+def test_reason_constants_match_the_episode_runner():
+    """§6's outcome_reason vocabulary is one vocabulary. `arms` cannot import
+    `episode` (it would drag C4 in), so the strings are pinned here instead."""
+    assert CHECKER_FAILED == episodemod.CHECKER_FAILED
+    assert SERVER_UNREACHABLE == episodemod.SERVER_UNREACHABLE
+
+
+def test_outcome_for_error_maps_the_three_failure_classes():
+    from rlm.errors import BudgetBreach
+
+    assert outcome_for_error(BudgetBreach(Outcome.BUDGET_KILL, "wall_clock")) == (
+        Outcome.BUDGET_KILL, "wall_clock")
+    assert outcome_for_error(DispatchError("leaf is gone")) == (
+        Outcome.ERROR, SERVER_UNREACHABLE)
+    assert outcome_for_error(RuntimeError("bug")) == (Outcome.ERROR, ARM_ERROR)
+
+
+def test_arm_snapshot_keys_do_not_shadow_config_fields(bench_cfg):
+    """`config_snapshot` merges `extra` over the config dump, so a key that
+    collides silently replaces a whole config section."""
+    from rlm.arms import SNAPSHOT_KEYS
+
+    cfg = bench_cfg()
+    assert not (set(SNAPSHOT_KEYS) & set(type(cfg).model_fields))
+
+
+# --------------------------------------------------------------------------- #
+# B1
+# --------------------------------------------------------------------------- #
+
+
+async def test_b1_success_logs_episode_and_step(bench_cfg):
+    cfg = bench_cfg()
+    task = _task()
+    disp = _ScriptedDispatcher("ANSWER")
+    res, env = await _run_b1(cfg, task, disp)
+
+    assert isinstance(res, ArmResult)
+    assert res.outcome == Outcome.SUCCESS and res.reason is None
+    assert res.answer == "ANSWER"
+
+    row = env.episode
+    assert row is not None
+    assert row["episode_id"] == res.episode_id
+    assert row["outcome"] == "success"
+    assert row["task_id"] == "b1-t1" and row["task_hash"] == task.task_hash
+    assert row["dry_run"] is True          # scaffold.dispatcher == "mock"
+    assert row["sandbox_pid"] is None      # a baseline arm runs no sandbox
+    assert row["benchmark_version"] == cfg.benchmark.version
+
+    snap = row["config_snapshot"]
+    assert snap["bench"]["arm"] == "b1"
+    assert snap["bench"]["run_id"] == "r-1" and snap["bench"]["seed"] == 1
+    assert snap["bench"]["block"] == 0
+    assert snap["bench"]["slot_id"] == 0
+    assert snap["bench"]["b1_truncation"]["truncated"] is False
+    # the pinned bytes each arm actually ran (§8's no-overfit audit)
+    assert "baselines.b1_single_shot.file" in snap["prompt_hashes"]
+    assert snap["task"]["text"] == task.text
+    assert snap["servers"]["bench_leaf"]["ctx"] == 524288   # the config is there too
+
+    assert len(env.steps) == 1
+    step = env.steps[0]
+    assert step["actor"] == "leaf" and step["action_type"] == "llm_call"
+    assert step["status"] == "ok" and step["depth"] == 1
+    assert step["step_idx"] == 0 and step["episode_id"] == res.episode_id
+    assert step["call_id"] is not None
+
+    # the prompt is head + truncated corpus + question, in that order
+    prompt = disp.prompts[0]
+    head = cfg.prompt_registry().render_baseline("b1_single_shot")
+    assert prompt == f"{head}\n\n{task.context}\n\n{task.text}"
+    assert step["action_payload"] == prompt
+
+    # the answer is stored, and the episode's final_answer_ref names that blob
+    assert env.blob(step["observation_full_ref"]) == b"ANSWER"
+    assert row["final_answer_ref"] == step["observation_full_ref"]
+
+
+async def test_b1_records_tokenized_task_len(bench_cfg):
+    cfg = bench_cfg()
+    task = _task(context="x" * 400)
+    res, env = await _run_b1(cfg, task, _ScriptedDispatcher())
+    assert env.episode["tokenized_task_len"] == 100   # (400 + 3) // 4
+
+
+async def test_b1_checker_fail_is_fail_checker_failed(bench_cfg):
+    cfg = bench_cfg()
+    res, env = await _run_b1(cfg, _task(), _ScriptedDispatcher("NOT THE ANSWER"))
+    assert res.outcome == Outcome.FAIL and res.reason == CHECKER_FAILED
+    assert res.answer == "NOT THE ANSWER"
+    assert env.episode["outcome"] == "fail"
+    assert env.episode["outcome_reason"] == "checker_failed"
+    assert len(env.steps) == 1 and env.steps[0]["status"] == "ok"
+
+
+async def test_b1_wall_clock_breach_is_budget_kill(bench_cfg):
+    cfg = bench_cfg(max_wall_clock_s=1)
+    disp = _ScriptedDispatcher("ANSWER", delay=1.2)
+    res, env = await _run_b1(cfg, _task(), disp)
+    assert res.outcome == Outcome.BUDGET_KILL and res.reason == "wall_clock"
+    assert env.episode["outcome"] == "budget_kill"
+    assert env.episode["outcome_reason"] == "wall_clock"
+    # the call that overran is still ON the trace: the kill granularity is one
+    # model call, not a watchdog tick, so the call completes and is recorded.
+    assert len(env.steps) == 1 and env.steps[0]["status"] == "ok"
+
+
+async def test_b1_dispatcher_failure_is_error_server_unreachable(bench_cfg):
+    cfg = bench_cfg()
+    res, env = await _run_b1(cfg, _task(), _ScriptedDispatcher(fail=True))
+    assert res.outcome == Outcome.ERROR and res.reason == SERVER_UNREACHABLE
+    assert res.answer is None
+    assert env.episode["outcome"] == "error"
+    # C4's failed attempt is logged, and the episode carries no answer blob
+    assert len(env.steps) == 1 and env.steps[0]["status"] == "error"
+    assert env.steps[0]["observation_full_ref"] is None
+    assert env.episode["final_answer_ref"] is None
+
+
+async def test_b1_truncates_an_over_window_corpus_and_records_it(bench_cfg):
+    # capacity = 4096 // 2 = 2048 tokens per slot; the corpus alone is 2000.
+    cfg = bench_cfg(bench_ctx=4096, bench_parallel=2)
+    corpus = "A" * 4000 + "B" * 4000
+    task = _task(context=corpus, answer="ANSWER")
+    res, env = await _run_b1(cfg, task, _ScriptedDispatcher("ANSWER"))
+
+    assert res.outcome == Outcome.SUCCESS
+    rec = env.episode["config_snapshot"]["bench"]["b1_truncation"]
+    assert rec["truncated"] is True
+    assert rec["corpus_tokens"] == 2000
+    assert abs(rec["kept_head_tokens"] - rec["kept_tail_tokens"]) <= 1
+    assert rec["kept_head_tokens"] + rec["kept_tail_tokens"] == rec["fit_tokens"]
+    assert rec["slot_capacity_tokens"] == 2048
+    # the head and the tail both survived, and nothing in between did
+    body = env.steps[0]["action_payload"]
+    assert "A" in body and "B" in body
+    assert body.count("A") + body.count("B") < 8000
+    assert rec["prompt_tokens"] <= 2048 - cfg.scaffold.budgets.max_predict.leaf
+
+
+async def test_b1_verify_loop_shrinks_a_prompt_the_raw_count_understated(bench_cfg):
+    cfg = bench_cfg(bench_ctx=4096, bench_parallel=2)
+    corpus = "A" * 4000 + "B" * 4000
+    task = _task(context=corpus, answer="ANSWER")
+    head = cfg.prompt_registry().render_baseline("b1_single_shot")
+    disp = _ScriptedDispatcher(
+        "ANSWER", count_penalty=200,
+        # only the ASSEMBLED prompt is penalised: it alone starts with the
+        # baseline head AND carries corpus text.
+        penalise=lambda t: t.startswith(head) and "AAAAAAAAAA" in t)
+    res, env = await _run_b1(cfg, task, disp)
+
+    assert res.outcome == Outcome.SUCCESS
+    rec = env.episode["config_snapshot"]["bench"]["b1_truncation"]
+    assert rec["verify_rounds"] >= 1
+    assert rec["prompt_tokens"] <= 2048 - cfg.scaffold.budgets.max_predict.leaf
+
+
+async def test_b1_refuses_a_config_with_no_bench_leaf_profile(bench_cfg):
+    cfg = bench_cfg(drop_bench_leaf=True)
+    tl = TraceLogger(cfg.trace.db_path, cfg.trace.blob_root)
+    await tl.start()
+    try:
+        with pytest.raises(ConfigError, match="bench_leaf"):
+            await run_b1(_task(), cfg, dispatcher=_ScriptedDispatcher(), trace=tl,
+                          registry=cfg.prompt_registry(), bench_extra=BENCH_EXTRA)
+    finally:
+        await tl.aclose()
+
+
+async def test_b1_opens_no_episode_when_the_prompt_cannot_be_built(bench_cfg):
+    """Preparation runs BEFORE `open_episode`, so a refusal never leaves a
+    NULL-outcome row for crash recovery to tombstone."""
+    cfg = bench_cfg(drop_bench_leaf=True)
+    env = _ArmEnv(cfg)
+    with pytest.raises(ConfigError):
+        await env.run(lambda tl: run_b1(
+            _task(), cfg, dispatcher=_ScriptedDispatcher(), trace=tl,
+            registry=cfg.prompt_registry(), bench_extra=BENCH_EXTRA))
+    assert env.episode is None
+
+
+async def test_b1_passes_the_slot_pin_through_when_the_dispatcher_takes_it(bench_cfg):
+    cfg = bench_cfg()
+    disp = _SlotAwareDispatcher("ANSWER")
+    res, env = await _run_b1(cfg, _task(), disp, slot_id=0)
+    assert res.outcome == Outcome.SUCCESS
+    assert disp.slot_ids == [0]
+
+
+async def test_b1_leaves_slot_id_to_c4_when_the_dispatcher_cannot_pin(bench_cfg):
+    """The requested slot is NOT stamped into `steps.slot_id`: that column is
+    the slot the server actually served on (an out-of-range request is
+    silently reassigned, which is why `SlotMismatch` exists). The pre-registered
+    assignment is recorded in the snapshot instead."""
+    cfg = bench_cfg()
+    res, env = await _run_b1(cfg, _task(), _ScriptedDispatcher(), slot_id=7)
+    assert env.steps[0]["slot_id"] is None
+    assert env.episode["config_snapshot"]["bench"]["slot_id"] == 7
+
+
+async def test_bench_slot_capacity_is_ctx_over_parallel(bench_cfg):
+    cfg = bench_cfg()
+    assert bench_slot_capacity(cfg) == 524288 // 2
+    with pytest.raises(ConfigError, match="bench_leaf"):
+        bench_slot_capacity(bench_cfg(drop_bench_leaf=True))
+
+
+# --------------------------------------------------------------------------- #
+# ArmEpisode -- the plumbing B2/B3 reuse
+# --------------------------------------------------------------------------- #
+
+
+async def test_arm_episode_ids_are_real_uuids(bench_cfg):
+    """The DuckDB column is UUID-typed and the writer loop swallows conversion
+    failures, so a malformed id silently loses every write for that episode."""
+    import uuid
+
+    cfg = bench_cfg()
+    ep = ArmEpisode(_task(), cfg, dispatcher=_ScriptedDispatcher(), trace=None,
+                     registry=cfg.prompt_registry(), arm="b1", bench_extra={})
+    assert uuid.UUID(ep.episode_id).version == 4
+
+
+async def test_arm_episode_outcome_for_answer(bench_cfg):
+    cfg = bench_cfg()
+    ep = ArmEpisode(_task(), cfg, dispatcher=None, trace=None,
+                     registry=cfg.prompt_registry(), arm="b1", bench_extra={})
+    assert ep.outcome_for_answer("ANSWER") == (Outcome.SUCCESS, None)
+    assert ep.outcome_for_answer("nope") == (Outcome.FAIL, CHECKER_FAILED)
+    assert ep.outcome_for_answer(None) == (Outcome.FAIL, NO_ANSWER)
+
+
+async def test_arm_episode_step_helper_is_idempotent_and_allocates_in_order(bench_cfg):
+    """`log_call` is called on both the success and the failure path, so it
+    must never double-write an attempt (C4's contract, `episode.py:720-757`)."""
+    cfg = bench_cfg()
+    disp = _ScriptedDispatcher("ANSWER")
+    env = _ArmEnv(cfg)
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=disp, trace=tl,
+                         registry=cfg.prompt_registry(), arm="b1",
+                         bench_extra=BENCH_EXTRA)
+        ep.start_clock()
+        ep.open_episode()
+        answer = await ep.call_leaf("q1")
+        ep.log_call(disp.steps[-1]["call_id"], "q1", answer=answer)   # replay
+        answer2 = await ep.call_leaf("q2")
+        return ep.close(*ep.outcome_for_answer(answer2), answer=answer2)
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.SUCCESS
+    assert [s["step_idx"] for s in env.steps] == [0, 1]
+    assert [s["action_payload"] for s in env.steps] == ["q1", "q2"]
+    assert all(s["actor"] == "leaf" and s["action_type"] == "llm_call"
+               for s in env.steps)
+
+
+async def test_arm_episode_close_is_idempotent(bench_cfg):
+    cfg = bench_cfg()
+    env = _ArmEnv(cfg)
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=_ScriptedDispatcher(), trace=tl,
+                         registry=cfg.prompt_registry(), arm="b1", bench_extra={})
+        ep.open_episode()
+        first = ep.close(Outcome.FAIL, CHECKER_FAILED)
+        second = ep.close(Outcome.SUCCESS, None)
+        return first, second
+
+    first, second = await env.run(factory)
+    assert first is second
+    assert env.episode["outcome"] == "fail"
