@@ -191,6 +191,13 @@ async def _run_b1(cfg: Config, task: Task, dispatcher, **kw):
     return result, env
 
 
+#: A UUID that appears in the corpus and nowhere in the question -- R13's
+#: detector only fires on identifier-SHAPED tokens (uuids, ENT codes, hex runs,
+#: long mixed alphanumerics), so a corpus of ordinary prose is checked-and-clean
+#: by construction and cannot exercise a hit.
+LEAKED_KEY = "7311d8a3-c2ce-4f44-bed4-d57b1e2feb89"
+
+
 # --------------------------------------------------------------------------- #
 # truncate_head_tail
 # --------------------------------------------------------------------------- #
@@ -302,6 +309,7 @@ async def test_b1_success_logs_episode_and_step(bench_cfg):
     assert snap["bench"]["run_id"] == "r-1" and snap["bench"]["seed"] == 1
     assert snap["bench"]["block"] == 0
     assert snap["bench"]["slot_id"] == 0
+    assert snap["bench"]["slot_id_applied"] is False   # MockDispatcher cannot pin
     assert snap["bench"]["b1_truncation"]["truncated"] is False
     # the pinned bytes each arm actually ran (§8's no-overfit audit)
     assert "baselines.b1_single_shot.file" in snap["prompt_hashes"]
@@ -324,6 +332,47 @@ async def test_b1_success_logs_episode_and_step(bench_cfg):
     # the answer is stored, and the episode's final_answer_ref names that blob
     assert env.blob(step["observation_full_ref"]) == b"ANSWER"
     assert row["final_answer_ref"] == step["observation_full_ref"]
+
+
+async def test_b1_records_the_scaffold_provenance_columns(bench_cfg):
+    """§6's provenance columns. `rlm run` fills both for the RLM arm
+    (`cli.py:529`); a baseline row carrying '' would make the bench grid's two
+    halves unattributable to the same process and tree."""
+    cfg = bench_cfg()
+    res, env = await _run_b1(cfg, _task(), _ScriptedDispatcher(),
+                              scaffold_instance_id="4242",
+                              scaffold_git_sha="deadbeef")
+    assert env.episode["scaffold_instance_id"] == "4242"
+    assert env.episode["scaffold_git_sha"] == "deadbeef"
+
+
+async def test_b1_runs_r13s_detector_on_the_leaf_call(bench_cfg):
+    """§8 (v0.2.6): "R13's foreign-string detector runs on every leaf call
+    during S4 and its hit count is reported per arm in the verdict." The column
+    is TRI-STATE -- NULL means NOT CHECKED, and a NULL column has no
+    denominator, so the verdict could not be written from it at all."""
+    cfg = bench_cfg()
+    res, env = await _run_b1(cfg, _task(), _ScriptedDispatcher("ANSWER"))
+    assert res.outcome == Outcome.SUCCESS
+    step = env.steps[0]
+    assert step["leak_detected"] is False      # checked, and clean -- not NULL
+    assert step["leak_detail"] is None
+
+
+async def test_b1_detects_an_answer_from_the_truncated_away_middle(bench_cfg):
+    """The index is built from the FULL corpus while the TRUNCATED document is
+    what gets sent, so an identifier the model produced from the dropped middle
+    is a hit -- text it was never shown. Indexing the truncated text instead
+    would make the check vacuous (every indexed token would also be in `sent`)."""
+    cfg = bench_cfg(bench_ctx=4096, bench_parallel=2)
+    corpus = "A" * 4000 + f" {LEAKED_KEY} " + "B" * 4000
+    task = _task(context=corpus, answer=LEAKED_KEY, checker="uuid_exact")
+    res, env = await _run_b1(cfg, task, _ScriptedDispatcher(LEAKED_KEY))
+
+    prompt = env.steps[0]["action_payload"]
+    assert LEAKED_KEY not in prompt            # the middle really was dropped
+    assert env.steps[0]["leak_detected"] is True
+    assert LEAKED_KEY in env.steps[0]["leak_detail"]
 
 
 async def test_b1_records_tokenized_task_len(bench_cfg):
@@ -436,17 +485,22 @@ async def test_b1_passes_the_slot_pin_through_when_the_dispatcher_takes_it(bench
     res, env = await _run_b1(cfg, _task(), disp, slot_id=0)
     assert res.outcome == Outcome.SUCCESS
     assert disp.slot_ids == [0]
+    assert env.episode["config_snapshot"]["bench"]["slot_id_applied"] is True
 
 
-async def test_b1_leaves_slot_id_to_c4_when_the_dispatcher_cannot_pin(bench_cfg):
-    """The requested slot is NOT stamped into `steps.slot_id`: that column is
-    the slot the server actually served on (an out-of-range request is
-    silently reassigned, which is why `SlotMismatch` exists). The pre-registered
-    assignment is recorded in the snapshot instead."""
+async def test_b1_records_the_slot_pin_as_UNAPPLIED_when_it_is_dropped(bench_cfg):
+    """A pin the dispatcher cannot take is a NO-OP, and recording it as if it
+    had been applied would silently void §8's v0.2.6 obligation that B1 and B3
+    each take their own slot. Two facts, both recorded.
+
+    `steps.slot_id` is left to C4 either way: that column means the slot the
+    server actually served on (an out-of-range request is silently reassigned
+    with HTTP 200, which is why `SlotMismatch` exists)."""
     cfg = bench_cfg()
     res, env = await _run_b1(cfg, _task(), _ScriptedDispatcher(), slot_id=7)
     assert env.steps[0]["slot_id"] is None
-    assert env.episode["config_snapshot"]["bench"]["slot_id"] == 7
+    bench = env.episode["config_snapshot"]["bench"]
+    assert bench["slot_id"] == 7 and bench["slot_id_applied"] is False
 
 
 async def test_bench_slot_capacity_is_ctx_over_parallel(bench_cfg):

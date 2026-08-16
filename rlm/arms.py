@@ -285,7 +285,9 @@ class ArmEpisode:
 
     def __init__(self, task: "Task", cfg: Config, *, dispatcher: Any,
                  trace: Any, registry: PromptRegistry, arm: str,
-                 bench_extra: dict[str, Any] | None) -> None:
+                 bench_extra: dict[str, Any] | None,
+                 scaffold_instance_id: str = "",
+                 scaffold_git_sha: str = "") -> None:
         self.task = task
         self.cfg = cfg
         self.dispatcher = dispatcher
@@ -293,6 +295,14 @@ class ArmEpisode:
         self.registry = registry
         self.arm = arm
         self.bench_extra = dict(bench_extra or {})
+        # §6's provenance columns, PASSED IN rather than computed here: `rlm
+        # run` already owns both answers (`cli.py:529` -- the pid of the process
+        # that ran the episode, and the sha of the tree it ran from), and a
+        # second derivation inside an arm could disagree with the RLM arm's for
+        # the same block. An empty string is what the schema defaults to and is
+        # what an ad-hoc call gets; a bench run supplies both.
+        self.scaffold_instance_id = scaffold_instance_id
+        self.scaffold_git_sha = scaffold_git_sha
         # REAL uuid4: the DuckDB column is UUID-typed and the writer loop
         # swallows conversion failures, so a malformed id loses every write for
         # this episode in silence.
@@ -326,6 +336,25 @@ class ArmEpisode:
 
     def check_wall_clock(self) -> None:
         self.enforcer.check_wall_clock()
+
+    # -- R13 ----------------------------------------------------------------- #
+
+    def set_corpus(self, chunks: Any) -> None:
+        """Hand C4 the corpus its foreign-string detector indexes against.
+
+        MANDATORY FOR EVERY ARM, not an optimisation. §8 (v0.2.6) makes it
+        binding — "R13's foreign-string detector runs on every leaf call during
+        S4 and its hit count is reported per arm in the verdict" — and the
+        column is tri-state: without this call C4 records NULL (*not checked*)
+        rather than False, so the per-arm hit count would have no denominator
+        and the verdict could not be written at all.
+
+        Same entry point the RLM arm uses (`rlm/episode.py:817`), and
+        deliberately unguarded: a dispatcher without `set_corpus` is not a
+        dispatcher this benchmark may run on, and degrading to NULL silently is
+        precisely the failure this call exists to prevent.
+        """
+        self.dispatcher.set_corpus(chunks)
 
     # -- C6 ------------------------------------------------------------------ #
 
@@ -369,6 +398,8 @@ class ArmEpisode:
             "dry_run": self.cfg.scaffold.dispatcher == "mock",
             "sandbox_pid": None,
             "config_snapshot": self.snapshot(arm_snapshot),
+            "scaffold_instance_id": self.scaffold_instance_id,
+            "scaffold_git_sha": self.scaffold_git_sha,
             "benchmark_version": self.cfg.benchmark.version,
         })
         return self.episode_id
@@ -430,6 +461,19 @@ class ArmEpisode:
 
     # -- the model call ------------------------------------------------------ #
 
+    def can_pin_slot(self) -> bool:
+        """Whether this dispatcher can actually honour a slot pin.
+
+        Resolved (and cached) here so an arm can RECORD the answer next to the
+        pin it asked for. A snapshot that says `slot_id: 0` while the keyword
+        was dropped on the floor is worse than no record: §8's v0.2.6 correction
+        obliges B1 and B3 to take their OWN slot, and that obligation has to be
+        checkable from the trace rather than assumed from the config.
+        """
+        if self._slot_kwarg is None:
+            self._slot_kwarg = _accepts_slot_id(self.dispatcher.query)
+        return self._slot_kwarg
+
     async def call_leaf(self, prompt: str, *, chunk: str | None = None,
                          slot_id: int | None = None,
                          parent: int | None = None) -> str:
@@ -443,11 +487,9 @@ class ArmEpisode:
         """
         self.check_wall_clock()
         call_id = str(uuid.uuid4())
-        if self._slot_kwarg is None:
-            self._slot_kwarg = _accepts_slot_id(self.dispatcher.query)
         kwargs: dict[str, Any] = {"role": "leaf", "call_id": call_id,
                                   "chunk": chunk}
-        if slot_id is not None and self._slot_kwarg:
+        if slot_id is not None and self.can_pin_slot():
             kwargs["slot_id"] = slot_id
         try:
             raw = await self.dispatcher.query(prompt, **kwargs)
@@ -489,7 +531,7 @@ class ArmEpisode:
 
 
 async def _b1_prompt(task: "Task", cfg: Config, *, dispatcher: Any,
-                      registry: PromptRegistry) -> tuple[str, dict, int]:
+                      registry: PromptRegistry) -> tuple[str, dict, int, str]:
     """Assemble B1's one prompt and the truncation record that describes it.
 
     Runs BEFORE the episode row is opened — deliberately. Everything here can
@@ -524,12 +566,13 @@ async def _b1_prompt(task: "Task", cfg: Config, *, dispatcher: Any,
         rounds += 1
     record.update(fit_tokens=fit, prompt_tokens=total,
                    slot_capacity_tokens=capacity, verify_rounds=rounds)
-    return prompt, record, corpus_tokens
+    return prompt, record, corpus_tokens, corpus
 
 
 async def run_b1(task: "Task", cfg: Config, *, dispatcher: Any, trace: Any,
                   registry: PromptRegistry, bench_extra: dict[str, Any],
-                  slot_id: int = 0) -> ArmResult:
+                  slot_id: int = 0, scaffold_instance_id: str = "",
+                  scaffold_git_sha: str = "") -> ArmResult:
     """§8's B1: the leaf model, one shot, its full native window.
 
     `slot_id` is the pre-registered pin (B1 = slot 0, B3 = slot 1). §8's v0.2.6
@@ -537,17 +580,30 @@ async def run_b1(task: "Task", cfg: Config, *, dispatcher: Any, trace: Any,
     smallest reproducing case verbatim — two documents, one slot — in the
     configuration measured at 4/18 leaked, and it would have contaminated
     precisely the two arms that are supposed to be spared. It is passed to the
-    dispatcher when the dispatcher can pin, and recorded in the snapshot either
-    way; `steps.slot_id` stays C4's, because that column means the slot the
-    server actually served on.
+    dispatcher when the dispatcher can pin, and the snapshot records BOTH the
+    requested slot and whether it was applied — an unapplied pin recorded as if
+    it had been is how that correction would get lost. `steps.slot_id` stays
+    C4's, because that column means the slot the server actually served on.
     """
     ep = ArmEpisode(task, cfg, dispatcher=dispatcher, trace=trace,
-                     registry=registry, arm="b1", bench_extra=bench_extra)
+                     registry=registry, arm="b1", bench_extra=bench_extra,
+                     scaffold_instance_id=scaffold_instance_id,
+                     scaffold_git_sha=scaffold_git_sha)
     ep.start_clock()
     try:
-        prompt, truncation, corpus_tokens = await _b1_prompt(
+        prompt, truncation, corpus_tokens, corpus = await _b1_prompt(
             task, cfg, dispatcher=dispatcher, registry=registry)
+        # R13's detector, indexed against the FULL corpus while the (possibly
+        # truncated) document is what gets sent. Indexing the truncated text
+        # instead would make the check vacuous by construction -- every token in
+        # the index would also be in `sent`, so no answer could ever score a hit
+        # and the column would be a row of trivially-False values, which
+        # `schema.sql` warns must never be read as "leak-free". Indexed this
+        # way, an identifier the model produced from the DROPPED middle is a
+        # hit: text it was not shown, in the arm §8 relies on being spared.
+        ep.set_corpus([corpus])
         ep.open_episode(arm_snapshot={"slot_id": slot_id,
+                                       "slot_id_applied": ep.can_pin_slot(),
                                        "b1_truncation": truncation},
                          tokenized_task_len=corpus_tokens)
         try:
