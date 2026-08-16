@@ -271,6 +271,10 @@ def load_grid(db_path: str | pathlib.Path, run_id: str, *,
         # refusal. With no base seeds to subtract, every observed seed is one.
         if not required:
             required = observed_seeds
+    # A seed cannot be both a base seed and an escalation seed: an explicit
+    # `seeds=` that names one takes it out of the escalation set rather than
+    # making every cell fail the completeness check below.
+    esc -= set(required)
 
     missing = [(t, a, s) for t in task_ids for a in grid_arms
                for s in required if (t, s, a) not in by_cell]
@@ -280,6 +284,29 @@ def load_grid(db_path: str | pathlib.Path, run_id: str, *,
             f"{len(missing)} missing cell(s) in run {run_id!r}: {shown}"
             f"{' ...' if len(missing) > 8 else ''}. §8's grid is the primary "
             f"artifact; a hole in it is not a zero")
+
+    # §8:343 re-decides an escalated task on >=3/5. A cell holding SOME of the
+    # escalation seeds would be scored at a denominator §8 never registered --
+    # `stats.task_passes` reads a 4-long cell as a 5-seed one and demands 3 --
+    # so a half-written escalation is refused on the same grounds as a hole in
+    # the base grid: refusal, not repair.
+    partial: list[tuple[str, str, list[int]]] = []
+    seen: set[tuple[str, str]] = set()
+    for (task_id, seed, arm) in sorted(by_cell):
+        if seed not in esc or (task_id, arm) in seen:
+            continue
+        seen.add((task_id, arm))
+        absent = [s for s in sorted(esc) if (task_id, s, arm) not in by_cell]
+        if absent:
+            partial.append((task_id, arm, absent))
+    if partial:
+        shown = ", ".join(f"{t}/{a} (missing seed(s) {ab})" for t, a, ab in partial[:8])
+        raise VerdictError(
+            f"{len(partial)} half-escalated cell(s) in run {run_id!r}: {shown}"
+            f"{' ...' if len(partial) > 8 else ''}. §8 runs seeds "
+            f"{sorted(esc)} together and re-decides at >=3/5; a cell holding "
+            f"only some of them would be scored at a denominator §8 never "
+            f"pre-registered")
 
     cells: dict[tuple[str, str], tuple[bool, ...]] = {}
     cell_seeds: dict[tuple[str, str], tuple[int, ...]] = {}
@@ -453,7 +480,12 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
             p=sign_test_p(len(wins), len(losses)), ci=_ci(deltas),
             mean_delta=(statistics.fmean(deltas) if deltas else None),
             escalates=escalates, beats=margin >= MARGIN_GATE)
-        if escalates and discordant:
+        # §8 escalates ONCE ("the sign test and bootstrap are recomputed once
+        # on the final grid ... No other recomputation is permitted"), so a
+        # grid that already carries seeds {4,5} plans nothing, however its
+        # recomputed margin lands. `escalates` still records the band, because
+        # that is a fact about the margin and is reported as one.
+        if escalates and discordant and not grid.escalated_tasks:
             plan[baseline] = discordant
         if margin <= 0:
             kind = {"b2": "pivot_to_b2", "b3": "pivot_to_rag"}.get(baseline)
@@ -829,6 +861,36 @@ def _fmt_mult(v: float | None) -> str:
     return "n/a" if v is None else f"{v:.2f}x"
 
 
+def _final(verdict: Verdict, escalated: Verdict | None) -> Verdict:
+    """Which verdict decides — and the provenance check that makes the answer
+    safe to trust.
+
+    An `escalated` verdict is the DECISION (§8 recomputes once on the final
+    grid), while the report's title, run id and pre-escalation figures come
+    from `verdict`. So a mismatched pair would render one run's gate under
+    another run's name, and a pre-escalation grid passed as `escalated` would
+    report a recomputation that never happened. Both are refused rather than
+    rendered: this is the one place in the module where two independently
+    computed verdicts meet, and nothing downstream could detect the swap.
+    """
+    if escalated is None:
+        return verdict
+    if escalated.run_id != verdict.run_id:
+        raise VerdictError(
+            f"escalated verdict is for run {escalated.run_id!r} but the report "
+            f"is for run {verdict.run_id!r}: §8's escalation re-runs seeds "
+            f"{list(ESCALATION_SEEDS)} inside the SAME run, and rendering one "
+            f"run's gate under another run's name is not a reporting error, it "
+            f"is a different result")
+    if not escalated.escalated:
+        raise VerdictError(
+            f"the verdict passed as `escalated` for run {verdict.run_id!r} was "
+            f"computed on a grid carrying no escalation seeds; it is a second "
+            f"pre-escalation verdict, and reporting it as the post-escalation "
+            f"recomputation would claim §8's de-noising step ran when it did not")
+    return escalated
+
+
 def _cost_clause(scorecard: Scorecard | None, baseline: str) -> str:
     """The cost multiple §8 requires beside every win claim."""
     if scorecard is None:
@@ -861,9 +923,10 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
     findings all come from the escalated grid, and the pre-escalation figures
     appear (in full) under Escalation. Rendering the pre-escalation gate as the
     headline would let the two be chosen between, which is the thing §8's
-    "recomputed once" forbids.
+    "recomputed once" forbids. `_final` refuses an `escalated` verdict that is
+    not this run's, or that was not computed on an escalated grid.
     """
-    final = escalated if escalated is not None else verdict
+    final = _final(verdict, escalated)
     arms = [a for a in ARMS if a in final.arms] + \
            [a for a in final.arms if a not in ARMS]
     L: list[str] = []
@@ -927,10 +990,20 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
         pair = final.pairs.get(b)
         if pair is None or not pair.present or pair.margin is None:
             continue
-        if pair.margin > 0:
+        if pair.beats:
             L.append(f"RLM beats {b.upper()} by {_fmt_margin(pair.margin)} tasks "
                      f"({_fmt_p(pair.p)}, {_fmt_ci(pair.ci)}) at "
                      f"{_cost_clause(scorecard, b)} vs {b.upper()}.")
+        elif pair.margin > 0:
+            # §8 DEFINES "beats" as a margin of +3 at N=30. A smaller positive
+            # margin is a lead and nothing more -- calling it a win in prose
+            # while the gate calls it a failure is how a report ends up
+            # arguing with its own verdict.
+            L.append(f"RLM leads {b.upper()} by {_fmt_margin(pair.margin)} tasks "
+                     f"({_fmt_p(pair.p)}, {_fmt_ci(pair.ci)}) — **below the "
+                     f"+{MARGIN_GATE} threshold, so it does not beat "
+                     f"{b.upper()}** — at {_cost_clause(scorecard, b)} vs "
+                     f"{b.upper()}.")
         elif pair.margin == 0:
             L.append(f"RLM ties {b.upper()} ({_fmt_margin(pair.margin)}, "
                      f"{_fmt_p(pair.p)}, {_fmt_ci(pair.ci)}) — a tie fails the "
@@ -1055,6 +1128,10 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
         L += ["", f"Cost: {sum(len(t) for t in verdict.escalation_plan.values())} "
                   f"task(s) × {len(ESCALATION_SEEDS)} seed(s) × the arms of each "
                   f"pair.", ""]
+    elif final.escalated:
+        L += ["This grid already carries seeds {4, 5}: §8 escalates **once** "
+              "and permits no second recomputation, whatever the recomputed "
+              "margins above land on.", ""]
     else:
         L += ["No pair's margin lands in the {+1, +2, +3} band; no escalation "
               "is owed and none may be run.", ""]
@@ -1095,7 +1172,7 @@ def write_report(report_path: str | pathlib.Path, verdict: Verdict,
     body = render_report(verdict, scorecard, leaks, escalated=escalated,
                          report_path=path)
     _svg_path(path).write_text(
-        pareto_svg(escalated or verdict, scorecard) + "\n",
+        pareto_svg(_final(verdict, escalated), scorecard) + "\n",
         encoding="utf-8", newline="\n")
     path.write_text(regenerate(path, body), encoding="utf-8", newline="\n")
     return path

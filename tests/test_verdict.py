@@ -173,6 +173,40 @@ def clean_pass_spec() -> dict:
 SIX_CATEGORIES = {"t1": "needle", "t2": "needle", "t3": "needle",
                   "t4": "aggregation", "t5": "aggregation", "t6": "aggregation"}
 
+
+async def escalated_run(tmp_path) -> tuple:
+    """§8:343 end to end, in ONE store under ONE run_id — the production
+    sequence Task 12 executes.
+
+    Base grid (seeds 1–3): RLM passes t1–t5 (t2 and t5 at 2/3), every baseline
+    passes t1–t2 → margin +3, inside the {+1,+2,+3} band, discordant t3/t4/t5.
+    Escalation then runs seeds {4, 5} on those three tasks: RLM takes t3 and t4
+    (5/5) and MISSES t5 (2/5, which is below ≥3/5), so t5 flips from a pass to
+    a failure and the margin drops +3 → +2. `t2` is the control: the identical
+    2/3 base pattern, never escalated, and it still passes at thirds.
+
+    Returns `(db, pre, post)`.
+    """
+    spec: dict[str, dict[str, str]] = {}
+    for i in range(1, 7):
+        tid = f"t{i}"
+        rlm = {"t2": "TTF", "t5": "TTF", "t6": "FFF"}.get(tid, "TTT")
+        base = "TTT" if i <= 2 else "FFF"
+        spec[tid] = {"rlm": rlm, "b1": base, "b2": base, "b3": base}
+    db = await build_store(tmp_path, spec, wall_s=1.0)
+    pre = decide(load_grid(db, "run-1"), manifest_for(SIX_CATEGORIES))
+
+    b = await StoreBuilder(tmp_path).start()          # same db, same run_id
+    for tid in ("t3", "t4", "t5"):
+        for arm in ALL_ARMS:
+            for seed in (4, 5):
+                won = arm == "rlm" and tid != "t5"
+                b.episode(tid, arm, seed,
+                          Outcome.SUCCESS if won else Outcome.FAIL, wall_s=1.0)
+    await b.close()
+    post = decide(load_grid(db, "run-1"), manifest_for(SIX_CATEGORIES))
+    return db, pre, post
+
 NINE_CATEGORIES = {**{f"t{i}": "needle" for i in (1, 2, 3)},
                    **{f"t{i}": "aggregation" for i in range(4, 10)}}
 
@@ -303,6 +337,32 @@ async def test_escalation_seeds_may_cover_a_subset_of_tasks(tmp_path):
     assert grid.cell("t1", "rlm") == [True] * 5
     assert grid.cell("t2", "rlm") == [True] * 3
     assert grid.escalated_tasks == ("t1",)
+
+
+async def test_a_half_written_escalation_is_refused(tmp_path):
+    """§8:343 runs seeds {4,5} together and re-decides at ≥3/5. A cell holding
+    only seed 4 would be a 4-long cell, which `stats.task_passes` reads as a
+    5-seed one and scores at a denominator §8 never pre-registered."""
+    b = await StoreBuilder(tmp_path).start()
+    for tid in ("t1", "t2"):
+        for arm in ("rlm", "b1"):
+            for seed in (1, 2, 3):
+                b.episode(tid, arm, seed, Outcome.SUCCESS)
+    for arm in ("rlm", "b1"):
+        b.episode("t1", arm, 4, Outcome.SUCCESS)       # seed 5 never ran
+    db = await b.close()
+    with pytest.raises(VerdictError) as exc:
+        load_grid(db, "run-1")
+    assert "half-escalated" in str(exc.value)
+    assert "t1/rlm" in str(exc.value) and "[5]" in str(exc.value)
+
+
+async def test_a_seed_named_as_a_base_seed_is_never_read_as_an_escalation_one(
+        tmp_path):
+    """The completeness check must not fire on a run that legitimately uses 4
+    as a base seed — `seeds=` takes it out of the escalation set."""
+    db = await build_store(tmp_path, {"t1": {"rlm": "TTT"}}, seeds=(1, 2, 4))
+    assert load_grid(db, "run-1", seeds=(1, 2, 4)).cell("t1", "rlm") == [True] * 3
 
 
 async def test_a_run_of_escalation_seeds_alone_still_checks_for_holes(tmp_path):
@@ -755,6 +815,21 @@ async def test_every_win_claim_states_its_cost_multiple(rendered):
         assert "x " in claim[0]
 
 
+async def test_a_margin_below_the_threshold_leads_but_never_beats(tmp_path):
+    """§8 DEFINES "beats" as a margin of +3 at N=30. Prose that calls +2 a win
+    while the gate calls it a failure is a report arguing with its verdict."""
+    spec = clean_pass_spec()
+    spec["t6"]["rlm"] = "FFF"
+    spec["t3"]["b1"] = "TTT"                          # +2 vs B1, +3 vs B2/B3
+    v = await _verdict(tmp_path, spec)
+    assert v.pairs["b1"].margin == 2 and v.pairs["b1"].beats is False
+    text = render_report(v, None, {})
+    assert "RLM leads B1 by +2 tasks" in text
+    assert "RLM beats B1" not in text
+    assert f"below the +{MARGIN_GATE} threshold" in text
+    assert "RLM beats B2 by +3 tasks" in text         # +3 still beats
+
+
 async def test_the_r13_table_shows_all_three_buckets_and_never_claims_clean(rendered):
     text = render_report(*rendered)
     assert "not_checked" in text and "checked_clean" in text and "hits" in text
@@ -821,13 +896,61 @@ async def test_the_report_names_the_escalation_plan_when_one_is_owed(tmp_path):
 
 async def test_the_report_carries_pre_and_post_escalation_inference(tmp_path):
     """§8:343: recompute ONCE on the final grid, and report BOTH."""
-    spec = clean_pass_spec()
-    spec["t6"]["rlm"] = "FFF"
-    pre = await _verdict(tmp_path, spec)
-    post = await _verdict(tmp_path / "post", clean_pass_spec())
+    _db, pre, post = await escalated_run(tmp_path)
+    assert pre.pairs["b1"].margin == 3 and post.pairs["b1"].margin == 2
     text = render_report(pre, None, {}, escalated=post)
     assert "pre-escalation" in text.lower() and "post-escalation" in text.lower()
-    assert "+3" in text and "+4" in text
+    assert "+3" in text and "+2" in text
+
+
+async def test_an_escalated_verdict_from_another_run_is_refused(tmp_path):
+    """The title and the pre-escalation figures come from one verdict and the
+    GATE from the other; nothing downstream could detect the swap."""
+    _db, pre, post = await escalated_run(tmp_path)
+    stranger = await _verdict(tmp_path / "elsewhere", clean_pass_spec(),
+                              run_id="run-2")
+    with pytest.raises(VerdictError, match="run-2"):
+        render_report(pre, None, {}, escalated=stranger)
+    render_report(pre, None, {}, escalated=post)          # the same run is fine
+
+
+async def test_a_pre_escalation_grid_may_not_pose_as_the_recomputation(tmp_path):
+    """Passing a second pre-escalation verdict as `escalated` would claim §8's
+    de-noising step ran when it did not."""
+    spec = clean_pass_spec()
+    spec["t6"]["rlm"] = "FFF"
+    v = await _verdict(tmp_path, spec)
+    assert v.escalated is False
+    with pytest.raises(VerdictError, match="no escalation seeds"):
+        render_report(v, None, {}, escalated=v)
+
+
+async def test_escalated_and_unescalated_tasks_score_at_their_own_denominators(
+        tmp_path):
+    """§8:343's composition, in ONE `decide`: an escalated task is re-decided
+    at ≥3/5 while an untouched one stays at ≥2/3 — and both feed the same
+    bootstrap. `t2` and `t5` carry the IDENTICAL base pattern (2/3) and end
+    with opposite verdicts, which is the whole point of the rule."""
+    db, _pre, post = await escalated_run(tmp_path)
+    grid = load_grid(db, "run-1")
+
+    assert grid.cell("t2", "rlm") == [True, True, False]              # 2/3
+    assert grid.cell("t5", "rlm") == [True, True, False, False, False]  # 2/5
+    assert grid.escalated_tasks == ("t3", "t4", "t5")
+
+    assert "t2" in post.passes["rlm"]        # 2/3 passes
+    assert "t5" not in post.passes["rlm"]    # the same 2 successes, now 2/5
+    assert post.scores[("rlm", "t2")] == pytest.approx(2 / 3)
+    assert post.scores[("rlm", "t5")] == pytest.approx(2 / 5)
+
+    pair = post.pairs["b1"]
+    assert pair.margin == 2 and pair.discordant == ("t3", "t4")
+    lo, hi = pair.ci                         # one bootstrap over mixed fractions
+    assert lo <= pair.mean_delta <= hi
+    assert post.escalation_plan == {}        # §8 escalates once, never twice
+    assert pair.escalates is True            # ...though the margin IS in the band
+    text = render_report(post, None, {})
+    assert "escalates **once**" in text and "PROVISIONAL" not in text
 
 
 async def test_a_pre_escalation_gate_is_labelled_provisional(tmp_path):
@@ -842,19 +965,16 @@ async def test_a_pre_escalation_gate_is_labelled_provisional(tmp_path):
 
 
 async def test_the_escalated_grid_is_the_gate_not_the_pre_escalation_one(tmp_path):
-    """§8 recomputes ONCE on the final grid and reports both. If the headline
-    came from the pre-escalation verdict the two could be chosen between, which
-    is exactly what "recomputed once" forbids."""
-    spec = clean_pass_spec()
-    for tid in spec:                                  # pre: B2 ties -> FAIL
-        spec[tid]["b2"] = spec[tid]["rlm"]
-    pre = await _verdict(tmp_path, spec)
-    post = await _verdict(tmp_path / "post", clean_pass_spec())
-    assert pre.gate_pass is False and post.gate_pass is True
+    """§8 recomputes ONCE on the final grid and reports both. Here escalation
+    REVERSES the gate: +3 (a pass) before, +2 (a failure) after. If the
+    headline came from the pre-escalation verdict the two could be chosen
+    between, which is exactly what "recomputed once" forbids."""
+    _db, pre, post = await escalated_run(tmp_path)
+    assert pre.gate_pass is True and post.gate_pass is False
     text = render_report(pre, None, {}, escalated=post)
-    assert "## S4 GATE: PASS" in text
+    assert "## S4 GATE: FAIL" in text
     assert "PROVISIONAL" not in text
-    assert "Post-escalation gate: PASS" in text
+    assert "Post-escalation gate: FAIL" in text
 
 
 async def test_the_findings_section_names_every_finding(tmp_path):
