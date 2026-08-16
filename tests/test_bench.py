@@ -467,7 +467,8 @@ async def test_the_ledger_records_one_row_per_episode(tmp_path, bench_cfg_dict):
     rows = ledger.read()
     assert len(rows) == 2
     assert set(rows[0]) == {"run_id", "block", "task_id", "seed", "arm", "episode_id",
-                            "outcome", "reason", "wall_s", "superseded_by", "ts"}
+                            "outcome", "reason", "wall_s", "relaunch_s",
+                            "superseded_by", "ts"}
     assert [r["arm"] for r in rows] == ["rlm", "b2"]
     assert rows[0]["run_id"] == "run-1" and rows[0]["task_id"] == "t1"
     assert rows[0]["outcome"] == "success" and rows[0]["superseded_by"] is None
@@ -1490,3 +1491,38 @@ async def test_orchestra_wired_into_run_block_keeps_relaunch_out_of_wall_s(
     # ...and the swap genuinely happened (real FakeProcess start/stop), not
     # merely a no-op hook that would make this assertion vacuous.
     assert ("stop", 8081, 128) in world.log and ("start", 8081, 2) in world.log
+    # The relaunch is EXCLUDED from wall_s and RECORDED beside it: the cost is
+    # real and §8 wants it attributable, it just is not that task's wall-clock.
+    assert records[0]["relaunch_s"] == 0.0          # rlm: already resident
+    # b1 swapped, so its row carries whatever the orchestra measured (a fake
+    # process relaunches in ~0 s; the identity is the contract, not the value).
+    assert records[1]["relaunch_s"] == orch.last_relaunch_s
+
+
+async def test_the_ledger_records_the_relaunch_each_cell_paid_for(
+        tmp_path, bench_cfg_dict):
+    """`swap_servers_fn` returns the stopped-to-healthy wall time
+    (`ServerOrchestra.swap_to` -> `last_relaunch_s`), and the cell that paid
+    for it is the one that records it. Cells that did not swap record 0.0 --
+    never the previous cell's number, which would attribute one arm's relaunch
+    to the next arm's row."""
+    class _CostingHooks(Hooks):
+        async def swap(self, profile: str) -> float:      # type: ignore[override]
+            await super().swap(profile)
+            return 7.25
+
+    hooks = _CostingHooks()
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), hooks=hooks)
+    records = await run_block(build_blocks(ctx.manifest, [1])[0],
+                              list(ARM_ORDER), ctx)
+    assert [r["arm"] for r in records] == ["rlm", "b2", "b1", "b3"]
+    assert [r["relaunch_s"] for r in records] == [0.0, 0.0, 7.25, 0.0]
+
+
+async def test_a_hook_that_returns_nothing_still_ledgers_a_number(
+        tmp_path, bench_cfg_dict):
+    """`BenchCtx.swap_servers_fn` is a hook, not an API with a return contract:
+    a swap that reports no cost ledgers 0.0 rather than None or a TypeError."""
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), hooks=Hooks())
+    records = await run_block(build_blocks(ctx.manifest, [1])[0], ["rlm", "b1"], ctx)
+    assert [r["relaunch_s"] for r in records] == [0.0, 0.0]

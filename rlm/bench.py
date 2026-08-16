@@ -90,8 +90,16 @@ TERMINAL_OUTCOMES = frozenset(str(o) for o in Outcome)
 #: crash-resilient MIRROR of the store, not a second source of truth (I4) —
 #: it exists because a run that dies mid-block must be resumable without
 #: opening the DuckDB file, which on Windows a second process cannot do at all.
+#:
+#: `relaunch_s` is the ONE column the store cannot hold: §8 excludes relaunch
+#: time from per-task wall-clock (`wall_s` starts after `_prepare` returns), so
+#: without a column of its own the ~10 s a leaf swap costs would be spent
+#: `2N-1` times over N blocks (179 on the full 30x3 grid) and recorded nowhere.
+#: It is per CELL, not per block: the cell whose `_prepare` paid for the swap is
+#: the one that carries it, and every other cell in the block records 0.0.
 LEDGER_FIELDS = ("run_id", "block", "task_id", "seed", "arm", "episode_id",
-                 "outcome", "reason", "wall_s", "superseded_by", "ts")
+                 "outcome", "reason", "wall_s", "relaunch_s", "superseded_by",
+                 "ts")
 
 LEDGER_PATH = REPO_ROOT / "s4" / "results" / "ledger.jsonl"
 
@@ -457,6 +465,12 @@ class BenchCtx:
     #: bench run launches into) and is only ever changed through
     #: `swap_servers_fn`, so the count of swaps is the count of relaunches.
     current_profile: str = RESIDENT_PROFILE
+    #: What THIS cell's `_prepare` spent relaunching the leaf, as reported by
+    #: `swap_servers_fn` (`ServerOrchestra.swap_to` returns its own
+    #: `last_relaunch_s`). Read straight off the hook's return value rather
+    #: than off the orchestra: this module may not import the thing that owns
+    #: the process, and a hook that reports nothing is a hook that cost 0.0.
+    last_relaunch_s: float = 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -484,11 +498,21 @@ async def _prepare(ctx: BenchCtx, arm: str) -> None:
     `/props` re-assertion. All three are OUTSIDE the timed bracket: §8 excludes
     relaunch time from per-task wall-clock, and a mismatch found here refuses
     the run rather than scoring a task.
+
+    Excluded from `wall_s` is not the same as unrecorded: what the swap cost is
+    stashed on `ctx.last_relaunch_s` and ledgered in its own column, so the
+    ~10 s a relaunch takes stays attributable to the cell that paid it.
     """
     profile = ARM_PROFILE[arm]
+    ctx.last_relaunch_s = 0.0
     if profile != ctx.current_profile:
-        await ctx.swap_servers_fn(profile)
+        cost = await ctx.swap_servers_fn(profile)
         ctx.current_profile = profile
+        # A hook is allowed to report nothing (the default `_no_hook` returns
+        # None, and so does any double that does not model the cost); "no
+        # number" is 0.0 here rather than a TypeError inside the scheduler.
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            ctx.last_relaunch_s = float(cost)
     await ctx.quiesce_fn(profile)
     await ctx.handshake_fn(profile)
 
@@ -545,7 +569,8 @@ def _refusal(ctx: BenchCtx, block: Block, arm: str, exc: Exception,
         "run_id": ctx.run_id, "block": block.idx,
         "task_id": block.task_entry.task_id, "seed": block.seed, "arm": arm,
         "episode_id": None, "outcome": str(Outcome.ERROR), "reason": CONFIG_REFUSED,
-        "wall_s": round(wall_s, 3), "superseded_by": None, "ts": None})
+        "wall_s": round(wall_s, 3), "relaunch_s": round(ctx.last_relaunch_s, 3),
+        "superseded_by": None, "ts": None})
 
 
 async def _run_cell(ctx: BenchCtx, block: Block, arm: str, task: "Task",
@@ -580,6 +605,7 @@ async def _run_cell(ctx: BenchCtx, block: Block, arm: str, task: "Task",
         "task_id": block.task_entry.task_id, "seed": block.seed, "arm": arm,
         "episode_id": str(result.episode_id), "outcome": str(result.outcome),
         "reason": result.reason, "wall_s": round(wall_s, 3),
+        "relaunch_s": round(ctx.last_relaunch_s, 3),
         "superseded_by": None, "ts": None})
 
 
@@ -622,7 +648,9 @@ async def run_block(block: Block, arms: list[str] | tuple[str, ...], ctx: BenchC
     cfg = seeded_config(ctx.raw_cfg, block.seed)
     # The task file, by contrast, is this block's own: read ONCE, before any
     # relaunch, because an unreadable task refuses every arm in the cell and
-    # there is no point relaunching a server for it.
+    # there is no point relaunching a server for it. No swap has happened yet,
+    # so the refusal rows below must not inherit the PREVIOUS cell's relaunch.
+    ctx.last_relaunch_s = 0.0
     try:
         task = ctx.load_task_fn(ctx.repo_root / entry.task_file)
     except ConfigError as exc:

@@ -1,12 +1,16 @@
-"""The operator surface (spec §5). THREE verbs, and they are the whole thing:
+"""The operator surface (spec §5). FIVE verbs, and they are the whole thing:
 
     rlm validate                     config schema + /props probe + D7 + D27
     rlm run <task-file>              one episode; prints episode_id + outcome
     rlm replay <episode-id> [--online]   §6 replay check + transcript render
+    rlm bench [--smoke]              §8's benchmark run: grid, verdict, report
+    rlm export <run-id|episode-id>   the parquet+blob bundle a foreign reader gets
 
-`bench` and `export` are later slices (S4). **Non-goals stay non-goals: no
-daemon, no REST API, no web UI, no interactive chat mode.** If a future change
-adds a fourth verb, it belongs to a slice that argued for it.
+THREE BECAME FIVE, AND THAT IS THE WHOLE RENEGOTIATION. This docstring said
+"`bench` and `export` are later slices (S4)" from the day it was written, and
+S4 is that slice: the two verbs it named are the two that landed. **Non-goals
+stay non-goals: no daemon, no REST API, no web UI, no interactive chat mode.**
+A SIXTH verb still belongs to a slice that argued for it.
 
 WHAT REPLAY VERIFIES, AND WHAT IT CANNOT. Replay verifies PROMPT ASSEMBLY, not
 decoding. Greedy decoding is not reproducible on this box: three identical
@@ -38,6 +42,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -46,8 +51,27 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import duckdb
+import yaml
 
-from rlm.bench import BENCH_PROFILE, RESIDENT_PROFILE
+from rlm.arms import run_b1, run_b2, run_b3
+from rlm.bench import (
+    ARM_ORDER,
+    BENCH_PROFILE,
+    LEDGER_PATH,
+    RESIDENT_PROFILE,
+    BenchCtx,
+    BenchLedger,
+    Block,
+    assert_manifest_pinned,
+    build_blocks,
+    run_bench,
+    seeded_config,
+)
+# The two hook defaults `assert_bench_wiring` has to be able to RECOGNISE. They
+# are private to `rlm/bench.py` because nothing else should install them; this
+# module is the composition root that must detect them still installed.
+from rlm.bench import _no_hook as _BENCH_NO_HOOK
+from rlm.bench import _no_task_loader as _BENCH_NO_TASK_LOADER
 from rlm.config import Config, PromptRegistry, load_config
 from rlm.dispatcher import LLMDispatcher, MockDispatcher, ServerClient
 from rlm.episode import (
@@ -60,11 +84,24 @@ from rlm.episode import (
 )
 from rlm.errors import ActionType, ConfigError, RlmError, ServerRotationError, StepStatus
 from rlm.lifecycle import Lifecycle
+from rlm.power import PowerSampler, read_pkg_temp_c
 from rlm.rootclient import assistant_prefix, extract_cell
 from rlm.serverproc import LlamaServerProcess
 from rlm.sandbox import winproc
 from rlm.sandbox.manager import SandboxManager, install_bootstrap
 from rlm.trace import TraceLogger, recover_orphans, unpack_blob
+from rlm.verdict import (
+    BASELINES,
+    RLM_ARM,
+    VerdictError,
+    cost_scorecard,
+    decide,
+    leak_report,
+    load_grid,
+    write_report,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 EXIT_OK = 0
 EXIT_REFUSED = 2       # config/handshake/invariant refusal
@@ -788,7 +825,12 @@ def _render_transcript(cfg: Config, steps: list[dict], out) -> None:
             if view:
                 print("  -> " + "\n     ".join(view.splitlines()[:12]), file=out)
         elif kind == ActionType.LLM_CALL:
-            print(f"[{step['step_idx']}] leaf llm_call ({step['status']}, "
+            # The ACTOR, not a literal "leaf": B2's reduce step is an
+            # `llm_call` with `actor='root'` (`rlm/arms.py`), and a transcript
+            # that labels it "leaf" says the call happened on a server it never
+            # touched — the one fact a reader most needs this line for.
+            actor = step.get("actor") or "leaf"
+            print(f"[{step['step_idx']}] {actor} llm_call ({step['status']}, "
                   f"parent {step['parent_step_idx']}, retry {step['retry_idx']}, "
                   f"tokens {step['tokens_in']}/{step['tokens_out']})", file=out)
         else:
@@ -1076,6 +1118,27 @@ def _looks_like_llama_props(body: Any) -> bool:
             and isinstance(body.get("default_generation_settings"), dict))
 
 
+def bench_leaf_raw(raw_cfg: dict) -> dict:
+    """The RAW config dict with `servers.leaf` REPLACED by
+    `servers.bench_leaf`'s fields.
+
+    Raw rather than validated because it has a second caller: §8's B1/B3 arms
+    need this swap AND `rlm.bench.seeded_config`'s per-seed patch applied to
+    the same dict, and composing two raw patches then validating ONCE is the
+    only order in which every cross-field rule sees the config the arm will
+    actually run under. Validating here first and re-patching afterwards would
+    check a topology no episode uses.
+    """
+    raw = copy.deepcopy(raw_cfg)
+    bench = (raw.get("servers") or {}).get("bench_leaf")
+    if bench is None:
+        raise ConfigError(
+            "servers.bench_leaf is not configured; §8's B1/B3 dispatcher "
+            "cannot be built without it (ARCHITECTURE.md §8)")
+    raw["servers"]["leaf"] = copy.deepcopy(bench)
+    return raw
+
+
 def bench_leaf_config(raw_cfg: dict) -> Config:
     """The `Config` §8's B1/B3 dispatcher is built against: `servers.leaf`
     REPLACED by `servers.bench_leaf`'s fields, so `LLMDispatcher.from_config`
@@ -1088,14 +1151,7 @@ def bench_leaf_config(raw_cfg: dict) -> Config:
     vs parallel) runs again against the swapped-in values rather than being
     assumed to still hold.
     """
-    raw = copy.deepcopy(raw_cfg)
-    bench = (raw.get("servers") or {}).get("bench_leaf")
-    if bench is None:
-        raise ConfigError(
-            "servers.bench_leaf is not configured; §8's B1/B3 dispatcher "
-            "cannot be built without it (ARCHITECTURE.md §8)")
-    raw["servers"]["leaf"] = copy.deepcopy(bench)
-    return Config.model_validate(raw)
+    return Config.model_validate(bench_leaf_raw(raw_cfg))
 
 
 def bench_dispatcher(raw_cfg: dict, *,
@@ -1433,6 +1489,823 @@ class ServerOrchestra:
         return HandshakingProcessManager(self, "leaf", self.cfg.servers.leaf)
 
 
+# =========================================================================== #
+# verb: bench (S4 Task 12) -- §8's benchmark run, end to end
+# =========================================================================== #
+#
+# WHAT THIS SECTION IS. Three modules do the work and none of them may do it
+# alone: `rlm/bench.py` schedules the grid but may not reach a model server,
+# `rlm/arms.py` runs the baselines but may not construct one, `rlm/verdict.py`
+# scores the record but may not open a live store. This is where they meet.
+# Every seam those modules declare as INJECTED is bound here, once.
+#
+# AND THE BINDING IS ASSERTED, NOT ASSUMED (`assert_bench_wiring`). `BenchCtx`'s
+# hook defaults are deliberate no-ops -- that module is exercised with no
+# servers at all -- so a forgotten `quiesce_fn` would not crash a 39-hour run,
+# it would complete one with no quiesce point, no §4 re-assertion and no leaf
+# relaunch: every B1/B3 cell measured against the RLM topology, and nothing in
+# the record to say so. The startup assertion is the only place that can catch
+# it, because by construction nothing downstream can.
+#
+# PHASES ARE SEPARABLE, and each ends with the store CLOSED:
+#
+#   1. the grid          -> TraceLogger open, `run_bench`, TraceLogger closed
+#   2. the verdict       -> `load_grid` + `decide` on the closed file
+#   3. escalation (§8:343, only when a margin lands in {+1,+2,+3})
+#                        -> a SECOND TraceLogger, then closed again
+#   4. the recomputation -> `decide` once more; `render_report(escalated=)`
+#
+# The close between 1 and 2 is not tidiness: on Windows DuckDB excludes every
+# other connection from a file its writer holds open, so a verdict simply
+# cannot be computed while the writer lives. A new `TraceLogger` per phase (not
+# `start()` twice) because `aclose()` shuts its writer thread pool down for good.
+
+#: §8's freeze, as an artifact path rather than a CLI flag: a scoring run an
+#: operator can point at a different manifest is a scoring run they can point at
+#: a friendlier one. Moving it buys no bypass either way -- whatever it names is
+#: checked against `benchmark.manifest_sha256` (`assert_manifest_pinned`).
+BENCH_MANIFEST_PATH = REPO_ROOT / "bench" / "manifest.json"
+
+#: Where the generated half of the S4 report lands. `write_report` preserves
+#: everything below `verdict.NARRATIVE_MARKER`, so re-running a bench run
+#: regenerates the tables and never destroys the findings.
+DEFAULT_REPORT_PATH = REPO_ROOT / "s4" / "RESULTS.md"
+
+# ---- the projection constants a --smoke run calibrates against -------------- #
+#
+# Copied from `s2/aggregation_options.py:19-38` rather than imported: `s2/` is
+# an analysis directory, not part of the shipped wheel (`pyproject.toml`
+# packages = ["rlm"]), and `rlm/` importing it would break `rlm` on install for
+# the sake of four floats. They are PROJECTIONS from measured inputs, never
+# measurements -- which is exactly why the smoke run prints them beside the
+# numbers it just measured instead of trusting them.
+PROJ_S_PER_WINDOW = 2.78          # §8, serial, both sub-calls per window
+PROJ_CHEAP_ARM_S = 60.0           # a single-shot arm: one big call + scoring
+PROJ_NON_AGG_EXPENSIVE_S = 450.0  # needle/synthesis/codeQA on a chunked arm
+PROJ_ROOT_OVERHEAD_FRAC = 0.30    # share of an agg episode NOT in leaf windows
+PROJ_S4_BUDGET_H = 60             # §8's pre-registered wall budget for S4
+#: §8: "two chunked-and-exposed (RLM, B2) versus two single-shot-and-spared".
+CHUNKED_ARMS = ("rlm", "b2")
+
+
+def _raw_config(path: Path) -> dict:
+    """`load_config`'s input, kept.
+
+    `rlm.bench.seeded_config` patches the RAW dict and re-validates for every
+    seed (never mutating a built `Config`), so a bench run needs both halves
+    and `load_config` returns only one.
+    """
+    try:
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ConfigError(f"cannot read config {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"cannot parse config {path} as YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError(f"config {path} did not parse to a mapping")
+    return raw
+
+
+def load_benchmark_manifest():
+    """The frozen manifest -- imported LAZILY, and that is load-bearing.
+
+    `bench/` is the benchmark artifact, not part of the shipped wheel, and
+    nothing under `rlm/` may import it at module scope: `import rlm.cli` would
+    then fail outright on an installed wheel, for the four verbs that have
+    nothing to do with §8. So the import happens inside the one verb that needs
+    it, and its absence is a refusal with a sentence rather than a traceback.
+    """
+    try:
+        from bench.manifest import BenchmarkManifest
+    except ImportError as exc:                  # pragma: no cover - wheel only
+        raise ConfigError(
+            f"the benchmark package `bench/` is not importable ({exc}). It is "
+            f"the benchmark ARTIFACT and is deliberately not shipped in the "
+            f"wheel; `rlm bench` runs from a checkout of the repository") from exc
+    path = Path(BENCH_MANIFEST_PATH)
+    try:
+        return BenchmarkManifest.load(path)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ConfigError(
+            f"cannot read the benchmark manifest at {path}: {exc}") from exc
+
+
+def smoke_task_ids(manifest) -> list[str]:
+    """The default `--smoke` task set: the first NON-ADVERSARIAL task of each
+    category, in manifest order.
+
+    Non-adversarial is the whole point. §8 flags a small number of tasks as
+    adversarial-context, and those are the tasks most likely to behave unlike
+    their category -- while a smoke run exists to produce ONE seconds-per-
+    episode number per (arm, category) to project 39 hours from. Calibrating
+    on the outlier is how a projection ends up wrong in the direction nobody
+    checks. Derived, never hardcoded: the manifest is the freeze.
+    """
+    seen: set[str] = set()
+    ids: list[str] = []
+    for entry in manifest.tasks:
+        if entry.adversarial or entry.category in seen:
+            continue
+        seen.add(entry.category)
+        ids.append(entry.task_id)
+    return ids
+
+
+def blocks_for(manifest, task_ids, seeds: list[int], *, offset: int = 0) -> list[Block]:
+    """§8's blocked schedule, restricted to `task_ids`.
+
+    `build_blocks` is the one place the task-major/seed-minor order lives, so
+    this filters ITS output rather than re-deriving the order: a subset run and
+    a full run then visit the same cells in the same relative order, and each
+    block keeps the index it has in the canonical grid.
+
+    `offset` keeps a later phase's block numbers disjoint from the main grid's
+    -- the escalation phase runs cells the base grid never had, and two rows
+    sharing a block number would make the ledger ambiguous about which pass
+    wrote them.
+    """
+    wanted = set(task_ids)
+    return [Block(task_entry=b.task_entry, seed=b.seed, idx=b.idx + offset)
+            for b in build_blocks(manifest, seeds)
+            if b.task_entry.task_id in wanted]
+
+
+def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
+                      rlm_dispatcher, leaf_dispatcher, root_client,
+                      scaffold_instance_id: str, scaffold_git_sha: str,
+                      benchmark_version: str | None) -> dict[str, Any]:
+    """§8's four arms, each closed over everything `rlm/bench.py` may not
+    import. This IS `BenchCtx.arm_runners`.
+
+    THE FOUR ARE NOT SYMMETRIC, and every asymmetry below is a ruling:
+
+      * `rlm` is `run_episode`, whose bench identity travels in
+        `snapshot_extra={"bench": ...}` -- it has no arm concept of its own, so
+        `bench_extra` carries `arm="rlm"` for it and for nobody else
+        (`ArmEpisode.snapshot` writes its own).
+      * `b2` gets the RESIDENT dispatcher (it is a chunked arm on the RLM
+        topology) plus a root client for its reduce step, plus the
+        HANDSHAKING process manager -- it cannot re-handshake itself after a
+        rotation the way `run_episode` can.
+      * `b1`/`b3` get the BENCH-profile dispatcher AND a bench-profile
+        `Config`. Handing them the resident config would be a silent
+        measurement error rather than a crash: `bench_slot_capacity` and B1's
+        head+tail overflow policy read `servers.leaf`, so the arm would size
+        its prompt against a 128-slot/4096-per-slot topology while running on
+        the 2-slot/262144-per-slot one. Their slot pins (0 and 1) are §8's
+        v0.2.6 correction and are `run_b1`/`run_b3`'s own defaults.
+
+    The bench-profile config is derived per SEED, from the same
+    `seeded_config` the scheduler uses, so B1/B3 vary with §8's seeds exactly
+    as the other two arms do -- and it is cached because that derivation
+    re-validates the whole config, which is not free 360 times.
+    """
+    bench_cfgs: dict[int, Config] = {}
+
+    def _bench_cfg(seed: int) -> Config:
+        """`seeded_config` composed with `bench_leaf_raw`, validated once.
+
+        Built LAZILY: a run that asks only for `--arm rlm,b2` must not be
+        refused for want of a `servers.bench_leaf` block it never uses, and a
+        run that does ask for B1/B3 without one gets `run_b1`'s own per-cell
+        refusal (a `config_refused` ledger row), which is what
+        `rlm.bench._run_cell` is written to contain.
+        """
+        cfg = bench_cfgs.get(seed)
+        if cfg is None:
+            cfg = bench_cfgs[seed] = seeded_config(bench_leaf_raw(raw_cfg), seed)
+        return cfg
+
+    async def rlm_arm(task, cfg, *, bench_extra):
+        return await run_episode(
+            task, cfg, dispatcher=rlm_dispatcher, trace=trace, lifecycle=lifecycle,
+            snapshot_extra={"bench": bench_extra},
+            process_manager=orchestra.episode_process_manager(),
+            scaffold_instance_id=scaffold_instance_id,
+            scaffold_git_sha=scaffold_git_sha,
+            benchmark_version=benchmark_version)
+
+    async def b2_arm(task, cfg, *, bench_extra):
+        return await run_b2(
+            task, cfg, dispatcher=rlm_dispatcher, root_client=root_client,
+            trace=trace, registry=registry, bench_extra=bench_extra,
+            scaffold_instance_id=scaffold_instance_id,
+            scaffold_git_sha=scaffold_git_sha,
+            process_manager=orchestra.b2_process_manager())
+
+    async def b1_arm(task, _cfg, *, bench_extra):
+        return await run_b1(
+            task, _bench_cfg(bench_extra["seed"]), dispatcher=leaf_dispatcher,
+            trace=trace, registry=registry, bench_extra=bench_extra,
+            scaffold_instance_id=scaffold_instance_id,
+            scaffold_git_sha=scaffold_git_sha)
+
+    async def b3_arm(task, _cfg, *, bench_extra):
+        return await run_b3(
+            task, _bench_cfg(bench_extra["seed"]), dispatcher=leaf_dispatcher,
+            trace=trace, registry=registry, bench_extra=bench_extra,
+            scaffold_instance_id=scaffold_instance_id,
+            scaffold_git_sha=scaffold_git_sha)
+
+    return {"rlm": rlm_arm, "b2": b2_arm, "b1": b1_arm, "b3": b3_arm}
+
+
+def assert_bench_wiring(ctx: BenchCtx, arms) -> None:
+    """Refuse a bench run whose `BenchCtx` still carries a default.
+
+    `rlm/bench.py` chose no-op hook defaults on purpose (that module is
+    dry-run with no servers), and named THIS file as where a missing one is a
+    startup bug. This is that check. It is not defensive programming: an
+    unbound `swap_servers_fn` produces a complete, plausible, fully-recorded
+    39-hour grid in which B1 and B3 ran on the RLM leaf -- a result, not an
+    error, and one nothing downstream can detect.
+
+    `temp_fn` and `sampler` are deliberately NOT required. Both are optional by
+    design (`power_sampling.enabled` is a config switch, and `read_pkg_temp_c`
+    returns None on hosts without the ACPI class), and both are recorded as
+    honest NULLs when absent rather than silently changing what ran.
+    """
+    missing: list[str] = []
+    for arm in arms:
+        if not ctx.arm_runners.get(arm):
+            missing.append(f"arm_runners[{arm!r}]")
+    for name, default in (("quiesce_fn", _BENCH_NO_HOOK),
+                          ("handshake_fn", _BENCH_NO_HOOK),
+                          ("swap_servers_fn", _BENCH_NO_HOOK),
+                          ("load_task_fn", _BENCH_NO_TASK_LOADER)):
+        value = getattr(ctx, name, None)
+        if value is None or value is default:
+            missing.append(name)
+    if ctx.trace is None:
+        missing.append("trace")
+    if missing:
+        raise ConfigError(
+            f"refusing to start a benchmark run with unbound wiring: "
+            f"{', '.join(missing)}. `BenchCtx`'s defaults are no-ops, so a run "
+            f"started like this would not fail -- it would produce a complete "
+            f"grid measured without the §4 handshake, the §5 quiesce point or "
+            f"the B1/B3 leaf relaunch, and no column would record that")
+
+
+def bench_exit_code(verdict, escalated=None) -> int:
+    """0 on gate PASS, 1 on FAIL -- from the POST-escalation verdict when there
+    is one.
+
+    §8 makes the recomputation the decision and the pre-escalation figures a
+    reporting obligation, "not because either may be chosen". An exit code
+    taken from the pre-escalation verdict would choose.
+    """
+    final = escalated if escalated is not None else verdict
+    return EXIT_OK if final.gate_pass else EXIT_FAILED
+
+
+# --------------------------------------------------------------------------- #
+# escalation execution (§8:343)
+# --------------------------------------------------------------------------- #
+
+
+async def run_escalation(ctx: BenchCtx, verdict, *, seeds: list[int],
+                          offset: int = 0, out=None) -> list[dict]:
+    """Run §8's escalation draws: seeds {4, 5} on each banded pair's discordant
+    tasks, for BOTH arms of that pair.
+
+    BOTH ARMS is the part worth stating. The escalation re-decides a task at
+    >=3/5, and a task is decided for a COMPARISON: re-drawing RLM alone would
+    change one side of the margin and leave the other at thirds, which is not a
+    de-noised comparison, it is a different one.
+
+    ONE `run_bench` CALL PER PAIR, not one over the union. Pairs share
+    discordant tasks (three baselines flagging the same RLM win is the common
+    case), and `run_bench` reads its resume state once per call -- so the
+    second pair's call sees the first pair's rows already decided and skips
+    RLM's cells instead of drawing them twice. Two draws of one cell would be
+    a duplicate row `load_grid` refuses outright, after the episodes were
+    spent.
+
+    Nothing here verifies completeness, deliberately: `verdict.load_grid`
+    refuses a half-escalated cell (some of {4,5} but not all) on its own, so a
+    partial run is caught at scoring by the module that owns the rule rather
+    than by a second implementation of it here.
+    """
+    records: list[dict] = []
+    for baseline in BASELINES:
+        tasks = verdict.escalation_plan.get(baseline) or ()
+        if not tasks:
+            continue
+        blocks = blocks_for(ctx.manifest, tasks, list(seeds), offset=offset)
+        offset += len(blocks)
+        if out is not None:
+            print(f"escalation: RLM vs {baseline.upper()} — seeds "
+                  f"{list(seeds)} on {len(tasks)} discordant task(s) "
+                  f"({', '.join(tasks)}), both arms", file=out)
+        records += await run_bench(ctx, arms=(RLM_ARM, baseline), seeds=list(seeds),
+                                    blocks=blocks)
+    return records
+
+
+# --------------------------------------------------------------------------- #
+# --smoke: the calibration table
+# --------------------------------------------------------------------------- #
+
+
+def projected_episode_s(entry, arm: str, *, wall_cap: float) -> float:
+    """What `s2/aggregation_options.py` predicts one (task, arm) episode costs.
+
+    Aggregation on a chunked arm is the only size-dependent case: its windows
+    are stated in the manifest (§8 requires it, so "the affordability claim is
+    checkable rather than assumed"), and the root's share is added back the
+    way `s2.episode_seconds` does before the per-episode wall cap applies.
+    """
+    if arm not in CHUNKED_ARMS:
+        return PROJ_CHEAP_ARM_S
+    if entry.category == "aggregation" and entry.windows:
+        leaf_s = entry.windows * PROJ_S_PER_WINDOW
+        return min(leaf_s / (1.0 - PROJ_ROOT_OVERHEAD_FRAC), float(wall_cap))
+    return PROJ_NON_AGG_EXPENSIVE_S
+
+
+def projected_grid_hours(manifest, *, seeds, arms, wall_cap: float,
+                          measured: dict | None = None) -> float:
+    """The full frozen grid in hours, per (arm, CATEGORY) seconds.
+
+    `measured` (keyed `(arm, category)`) overrides the projection wherever the
+    smoke run actually timed something; everything it did not reach falls back
+    to the pre-registered constant. Per category rather than per task because
+    that is the granularity a 4-episode smoke run can support: one measured
+    needle episode says something about the other seven needle tasks and
+    nothing at all about aggregation.
+    """
+    total = 0.0
+    for entry in manifest.tasks:
+        for arm in arms:
+            per = (measured or {}).get((arm, entry.category))
+            if per is None:
+                per = projected_episode_s(entry, arm, wall_cap=wall_cap)
+            total += per * len(seeds)
+    return total / 3600.0
+
+
+def _median(values) -> float | None:
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    return vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def print_calibration(records, manifest, cfg, *, arms, run_id, out) -> None:
+    """§8's affordability claim, measured against its own projection.
+
+    Prints one row per measured cell and then the projected full-grid hours
+    twice: once from the pre-registered constants (what the plan was costed
+    with) and once with the measurements substituted in. Both, because a
+    single number would hide which of the two moved.
+    """
+    by_id = {t.task_id: t for t in manifest.tasks}
+    wall_cap = float(cfg.scaffold.budgets.max_wall_clock_s)
+    print(f"\n--- smoke calibration (run_id {run_id}; NOT scored, no report "
+          f"written) ---", file=out)
+    print(f"projection constants (s2/aggregation_options.py): "
+          f"{PROJ_NON_AGG_EXPENSIVE_S:.0f} s chunked-arm non-aggregation, "
+          f"{PROJ_CHEAP_ARM_S:.0f} s single-shot, {PROJ_S_PER_WINDOW} s/window "
+          f"aggregation (+{PROJ_ROOT_OVERHEAD_FRAC:.0%} root overhead)",
+          file=out)
+    print(f"{'arm':<5} {'task':<12} {'category':<12} {'measured s':>11} "
+          f"{'projected s':>12} {'ratio':>7}  outcome", file=out)
+    for record in records:
+        entry = by_id.get(record["task_id"])
+        if entry is None:
+            continue
+        want = projected_episode_s(entry, record["arm"], wall_cap=wall_cap)
+        got = record.get("wall_s")
+        # A cell that refused never opened an episode, so it has no measured
+        # seconds. Printing 0.0 for it would read as "instant" -- a
+        # measurement -- on the one table whose job is to be believed.
+        measured_s = "n/a" if got is None else f"{got:.1f}"
+        ratio = f"{got / want:.2f}x" if got and want else "n/a"
+        print(f"{record['arm']:<5} {record['task_id']:<12} {entry.category:<12} "
+              f"{measured_s:>11} {want:>12.1f} "
+              f"{ratio:>7}  {record['outcome']}"
+              + (f" ({record['reason']})" if record.get("reason") else ""),
+              file=out)
+
+    measured: dict[tuple[str, str], float] = {}
+    for arm in arms:
+        for category in {t.category for t in manifest.tasks}:
+            walls = [r["wall_s"] for r in records
+                     if r["arm"] == arm and by_id.get(r["task_id"]) is not None
+                     and by_id[r["task_id"]].category == category]
+            median = _median(walls)
+            if median is not None:
+                measured[(arm, category)] = median
+
+    full_seeds = list(cfg.benchmark.seeds)
+    from_constants = projected_grid_hours(manifest, seeds=full_seeds,
+                                           arms=ARM_ORDER, wall_cap=wall_cap)
+    from_measured = projected_grid_hours(manifest, seeds=full_seeds,
+                                          arms=ARM_ORDER, wall_cap=wall_cap,
+                                          measured=measured)
+    agg_ep = max((projected_episode_s(t, "rlm", wall_cap=wall_cap)
+                  for t in manifest.tasks if t.category == "aggregation"),
+                 default=0.0)
+    escalation_h = 32 * agg_ep * 0.5 / 3600.0     # §8: "typically 8-32 extra episodes"
+    total = from_measured + escalation_h
+    print(f"\nfull grid = {len(manifest.tasks)} tasks x {len(full_seeds)} seeds "
+          f"x {len(ARM_ORDER)} arms, plus §8's escalation allowance "
+          f"({escalation_h:.1f} h, up to 32 extra episodes)", file=out)
+    print(f"  from the pre-registered constants:  {from_constants:>6.1f} h grid "
+          f"+ {escalation_h:.1f} h = {from_constants + escalation_h:>6.1f} h",
+          file=out)
+    print(f"  with these measurements substituted:{from_measured:>6.1f} h grid "
+          f"+ {escalation_h:.1f} h = {total:>6.1f} h", file=out)
+    print(f"  the measured figure is the one to judge: {total:.1f} h against "
+          f"§8's {PROJ_S4_BUDGET_H} h budget — "
+          f"{'WITHIN' if total <= PROJ_S4_BUDGET_H else 'OVER'}", file=out)
+    if total > PROJ_S4_BUDGET_H:
+        print(f"  ** the projection breaches the pre-registered "
+              f"{PROJ_S4_BUDGET_H} h budget: that is a decision for a human, "
+              f"not a number to proceed past **", file=out)
+
+
+# --------------------------------------------------------------------------- #
+# the verdict block printed to stdout
+# --------------------------------------------------------------------------- #
+
+
+def print_verdict_block(verdict, escalated, *, run_id: str, report_path, out) -> None:
+    """The operator's four lines. The REPORT is the artifact; this is the part
+    that has to be true at a glance from a terminal, so it states the gate, the
+    margins with their inference (§8 forbids a bare margin anywhere), and every
+    named finding."""
+    final = escalated if escalated is not None else verdict
+    # `render_report` says this in the report; the terminal must not be the one
+    # surface where a gate decided on a grid that still owes seeds {4,5} reads
+    # as final. `cmd_bench` always runs a plan it produced, so this only fires
+    # for a caller that did not -- which is exactly when it matters.
+    provisional = ("" if escalated is not None or not final.escalation_plan
+                   else " · PROVISIONAL: escalation owed")
+    print(f"\n## S4 GATE: {'PASS' if final.gate_pass else 'FAIL'}", file=out)
+    print(f"run_id {run_id} · {final.n_tasks}/{final.n_manifest_tasks} tasks "
+          f"scored · "
+          f"{'post-escalation' if final.escalated else 'pre-escalation'} grid · "
+          f"{'clean pass' if final.clean_pass else ('NOT a clean pass' if final.gate_pass else 'gate failed')}"
+          f"{provisional}", file=out)
+    for baseline in BASELINES:
+        pair = final.pairs.get(baseline)
+        if pair is None:
+            continue
+        margin = "n/a" if pair.margin is None else f"{pair.margin:+d}"
+        p = "p=n/a" if pair.p is None else f"p={pair.p:.4f}"
+        ci = ("CI=n/a" if pair.ci is None
+              else f"CI=[{pair.ci[0]:+.3f}, {pair.ci[1]:+.3f}]")
+        print(f"  margin {margin} vs {baseline.upper()} — {p}, {ci}"
+              + ("" if pair.present else "  (arm absent from this grid)"), file=out)
+    for finding in final.findings:
+        print(f"  [{finding.kind}] {finding.text}", file=out)
+    print(f"report: {report_path}", file=out)
+
+
+# --------------------------------------------------------------------------- #
+# cmd_bench
+# --------------------------------------------------------------------------- #
+
+
+def _csv(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+async def _open_trace(cfg: Config, lifecycle) -> TraceLogger:
+    trace = TraceLogger(cfg.trace.db_path, cfg.trace.blob_root, lifecycle=lifecycle)
+    await trace.start()
+    return trace
+
+
+async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
+                  out, err) -> int:
+    arms = tuple(_csv(args.arm) or ARM_ORDER)
+    unknown_arms = [a for a in arms if a not in ARM_ORDER]
+    if unknown_arms:
+        raise ConfigError(f"unknown arm(s) {unknown_arms}; §8's arms are "
+                          f"{list(ARM_ORDER)}")
+    seeds = [int(s) for s in (_csv(args.seeds) or cfg.benchmark.seeds)]
+    task_ids = _csv(args.tasks)
+    if args.smoke:
+        # A throwaway identity, one seed, every arm: the calibration question
+        # is "what does one episode of each (arm, category) cost", and a second
+        # seed answers it no better while costing another full pass.
+        seeds = seeds[:1]
+        task_ids = task_ids or smoke_task_ids(manifest)
+    task_ids = task_ids or [t.task_id for t in manifest.tasks]
+    unknown_tasks = sorted(set(task_ids) - {t.task_id for t in manifest.tasks})
+    if unknown_tasks:
+        raise ConfigError(
+            f"task(s) {unknown_tasks} are not in benchmark manifest "
+            f"{manifest.benchmark_version!r}: they are outside the freeze, so "
+            f"§8 pre-registers nothing about them")
+
+    run_id = args.resume or str(uuid.uuid4())
+    blocks = blocks_for(manifest, task_ids, seeds)
+    ledger = BenchLedger(args.ledger)
+    report_path = Path(args.report)
+
+    # Everything with a lifetime longer than one episode, and every one of them
+    # torn down in the single `finally` below -- including on the refusal paths
+    # BELOW this line (an unbuildable `bench_leaf` dispatcher, an unloadable
+    # prompt registry), which is why the names are bound before the `try`.
+    sampler = orchestra = rlm_dispatcher = leaf_dispatcher = root_client = None
+    registry = None
+    git_sha = _scaffold_git_sha()
+    instance_id = str(os.getpid())
+
+    def _ctx(trace: TraceLogger) -> BenchCtx:
+        """A `BenchCtx` bound to THIS phase's TraceLogger.
+
+        Rebuilt per phase rather than mutated because the arm runners close
+        over the trace: after `aclose()` a `TraceLogger` is finished (its
+        writer pool is shut down), so phase 2 has a different object and every
+        runner has to be pointed at it.
+        """
+        return BenchCtx(
+            raw_cfg=raw_cfg, cfg=cfg, run_id=run_id, manifest=manifest,
+            ledger=ledger, trace=trace, lifecycle=lifecycle,
+            store=trace.monitor(), sampler=sampler,
+            arm_runners=bench_arm_runners(
+                raw_cfg, trace=trace, lifecycle=lifecycle, orchestra=orchestra,
+                registry=registry, rlm_dispatcher=rlm_dispatcher,
+                leaf_dispatcher=leaf_dispatcher, root_client=root_client,
+                scaffold_instance_id=instance_id, scaffold_git_sha=git_sha,
+                benchmark_version=cfg.benchmark.version),
+            load_task_fn=Task.from_file,
+            quiesce_fn=orchestra.quiesce,
+            handshake_fn=orchestra.handshake_profile,
+            swap_servers_fn=orchestra.swap_to,
+            temp_fn=read_pkg_temp_c,
+            repo_root=REPO_ROOT)
+
+    print(f"{'smoke run_id' if args.smoke else 'run_id'}: {run_id}"
+          + ("  (resumed)" if args.resume else ""), file=out)
+    print(f"grid: {len(task_ids)} task(s) x {len(seeds)} seed(s) x "
+          f"{len(arms)} arm(s) = {len(blocks) * len(arms)} cell(s)", file=out)
+
+    try:
+        if cfg.power_sampling.enabled:
+            # A child process, stopped in the same `finally` as everything
+            # else: one left running past a 39-hour grid is a PowerShell
+            # polling an energy counter forever.
+            sampler = PowerSampler()
+            sampler.start()
+        orchestra = ServerOrchestra(cfg, launch=not args.no_launch_servers,
+                                     lifecycle=lifecycle, out=out, err=err)
+        rlm_dispatcher = LLMDispatcher.from_config(cfg)
+        # Built only when an arm that needs it was asked for: a `--arm rlm,b2`
+        # run must not be refused for want of a `servers.bench_leaf` block it
+        # will never reach.
+        leaf_dispatcher = (bench_dispatcher(raw_cfg)
+                           if {"b1", "b3"} & set(arms) else None)
+        root_client = ServerClient(
+            f"http://127.0.0.1:{cfg.servers.root.port}",
+            timeout=cfg.scaffold.retries.per_call_timeout_s)
+        registry = cfg.prompt_registry().load()
+
+        await orchestra.start_resident()
+
+        # -- phase 1: the grid ------------------------------------------- #
+        trace = await _open_trace(cfg, lifecycle)
+        try:
+            ctx = _ctx(trace)
+            assert_bench_wiring(ctx, arms)
+            records = await run_bench(ctx, arms=arms, seeds=seeds, blocks=blocks)
+            await trace.drain()
+        finally:
+            await trace.aclose()
+
+        if args.smoke:
+            print_calibration(records, manifest, cfg, arms=arms,
+                               run_id=run_id, out=out)
+            return EXIT_OK
+
+        # -- phase 2: the verdict, on the CLOSED store ------------------- #
+        verdict = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds), manifest)
+
+        # -- phase 3: escalation, only where §8 owes it ------------------ #
+        escalated = None
+        if verdict.escalation_plan:
+            trace = await _open_trace(cfg, lifecycle)
+            try:
+                await run_escalation(_ctx(trace), verdict,
+                                      seeds=list(cfg.benchmark.escalation_seeds),
+                                      offset=len(blocks), out=out)
+                await trace.drain()
+            finally:
+                await trace.aclose()
+            # -- phase 4: ONE recomputation (§8: "no other recomputation is
+            # permitted"). `render_report` refuses a pair that is not this
+            # run's, or one computed on a grid carrying no escalation seeds.
+            escalated = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds),
+                                manifest)
+
+        scorecard = cost_scorecard(cfg.trace.db_path, run_id)
+        leaks = leak_report(cfg.trace.db_path, run_id)
+        write_report(report_path, verdict, scorecard, leaks, escalated=escalated)
+        print_verdict_block(verdict, escalated, run_id=run_id,
+                             report_path=report_path, out=out)
+        return bench_exit_code(verdict, escalated)
+    finally:
+        if orchestra is not None:
+            # Suppressed: teardown must not replace the run's own outcome (or
+            # its exception) with a "the leaf would not stop" error.
+            with contextlib.suppress(Exception):
+                await orchestra.stop_all()
+        for dispatcher in (rlm_dispatcher, leaf_dispatcher, root_client):
+            if dispatcher is not None:
+                await dispatcher.aclose()
+        if sampler is not None:
+            sampler.stop()
+
+
+def cmd_bench(args) -> int:
+    out, err = sys.stdout, sys.stderr
+    try:
+        config_path = Path(args.config)
+        cfg = load_config(config_path)
+        raw_cfg = _raw_config(config_path)
+        if cfg.scaffold.dispatcher != "real":
+            raise ConfigError(
+                f"scaffold.dispatcher is {cfg.scaffold.dispatcher!r}; §8 scores "
+                f"MODEL behaviour, and a mock-dispatcher grid would be fixture "
+                f"replays wearing the benchmark's name. `load_grid` refuses "
+                f"dry-run episodes at scoring time, so this refusal only moves "
+                f"the same answer 39 hours earlier")
+        manifest = load_benchmark_manifest()
+        # Checked here for a good error surface, and AGAIN inside `run_bench`
+        # where it cannot be bypassed by wiring.
+        assert_manifest_pinned(manifest, cfg)
+    except ConfigError as exc:
+        print(f"refused: {exc}", file=err)
+        return EXIT_REFUSED
+
+    lifecycle = Lifecycle(_lifecycle_path(cfg, args.lifecycle_log))
+    try:
+        tombstoned = recover(cfg, lifecycle)
+        if tombstoned:
+            print(f"recovery: tombstoned {len(tombstoned)} orphaned episode(s)",
+                  file=out)
+        try:
+            return asyncio.run(_bench(args, cfg, raw_cfg, manifest, lifecycle,
+                                       out=out, err=err))
+        except (ConfigError, VerdictError) as exc:
+            print(f"refused: {exc}", file=err)
+            return EXIT_REFUSED
+        except KeyboardInterrupt:
+            print("aborted by operator — resume this grid with "
+                  f"`rlm bench --resume <run_id>`", file=err)
+            return EXIT_FAILED
+    finally:
+        lifecycle.close()
+
+
+# =========================================================================== #
+# verb: export
+# =========================================================================== #
+
+
+def _export_filter(ident: str, *, by_run: bool) -> str:
+    """The SQL predicate, with `ident` interpolated -- which is safe ONLY
+    because every caller validated it as a UUID first.
+
+    `trace.export_bundle`'s own docstring flags this: DuckDB does not accept a
+    bound parameter in a COPY's FROM clause, so the filter is a string. A
+    canonical `str(uuid.UUID(...))` cannot carry a quote, a comment or a
+    semicolon, which is what makes the interpolation a non-issue rather than a
+    caveat to remember.
+    """
+    if by_run:
+        return f"json_extract_string(config_snapshot, '$.bench.run_id') = '{ident}'"
+    return f"episode_id = '{ident}'"
+
+
+async def _export(cfg: Config, ident: str, dest: Path, out, err) -> int:
+    trace = TraceLogger(cfg.trace.db_path, cfg.trace.blob_root)
+    try:
+        await trace.start()
+    except (duckdb.Error, OSError) as exc:
+        print(f"refused: cannot open the trace store at {cfg.trace.db_path} "
+              f"({exc}). `rlm export` reads a CLOSED store: on Windows DuckDB "
+              f"excludes every other connection from a file its writer holds "
+              f"open, so this means the run is still live. Let it finish and "
+              f"export then — a bundle taken from a half-written store is a "
+              f"bundle of a different run.", file=err)
+        return EXIT_REFUSED
+    try:
+        con = trace.monitor()
+        sql = ("SELECT CAST(episode_id AS VARCHAR), CAST(config_snapshot AS VARCHAR) "
+               "FROM episodes WHERE {} ORDER BY started_at, episode_id")
+        rows = con.execute(
+            sql.format("json_extract_string(config_snapshot, '$.bench.run_id') = ?"),
+            [ident]).fetchall()
+        by_run = bool(rows)
+        if not rows:
+            # An episode_id, then. Tried SECOND on purpose: a run_id is what an
+            # operator has after `rlm bench`, and the two id spaces are both
+            # UUIDs, so the order decides which one wins a (vanishingly
+            # unlikely) collision. The run is the more useful answer.
+            rows = con.execute(sql.format("CAST(episode_id AS VARCHAR) = ?"),
+                                [ident]).fetchall()
+        if not rows:
+            print(f"nothing to export: no episode and no bench run in "
+                  f"{cfg.trace.db_path} matches {ident}", file=err)
+            return EXIT_REFUSED
+
+        episode_ids = [str(r[0]) for r in rows]
+        dest.mkdir(parents=True, exist_ok=True)
+        where = _export_filter(ident, by_run=by_run)
+        cur = con.cursor()
+        try:
+            # The two row tables, filtered, ONCE. `export_bundle` is not reused
+            # here: its blob half globs exactly one episode directory, which
+            # cannot express "this run's 360 episodes", and globbing `*`
+            # instead would drag in every other run on disk.
+            cur.execute(
+                f"COPY (SELECT * FROM episodes WHERE {where}) "
+                f"TO '{(dest / 'episodes.parquet').as_posix()}' "
+                f"(FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 3)")
+            cur.execute(
+                f"COPY (SELECT s.* FROM steps s JOIN episodes e USING (episode_id) "
+                f"WHERE {where}) "
+                f"TO '{(dest / 'steps.parquet').as_posix()}' "
+                f"(FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 3)")
+        finally:
+            cur.close()
+
+        # The blobs, as DIRECTORIES rather than a parquet BLOB column: the
+        # `*_ref` values in steps.parquet are paths relative to `blob_root`, so
+        # copying each episode's directory under `<dest>/blobs/` keeps every
+        # reference resolvable with no join and no decoder. Per episode, so the
+        # cost is this run's blobs and not the whole store's.
+        blob_root = Path(cfg.trace.blob_root)
+        copied = 0
+        for episode_id in episode_ids:
+            source = blob_root / episode_id
+            if not source.is_dir():
+                continue
+            target = dest / "blobs" / episode_id
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(source, target)
+            copied += 1
+
+        digest = hashlib.sha256()
+        for _episode_id, snapshot in sorted((str(r[0]), r[1] or "") for r in rows):
+            digest.update(snapshot.encode("utf-8", "replace"))
+        (dest / "bundle-manifest.json").write_text(json.dumps({
+            "run_id": ident if by_run else None,
+            "resolved_by": "run_id" if by_run else "episode_id",
+            "episode_ids": episode_ids,
+            "n_episodes": len(episode_ids),
+            "blob_dirs": copied,
+            "config_snapshot_sha256": digest.hexdigest(),
+            "source_db": str(cfg.trace.db_path),
+            "exported_at": dt.datetime.now(dt.timezone.utc).isoformat(
+                timespec="seconds"),
+            "layout": ("episodes.parquet + steps.parquet (both filtered to this "
+                       "bundle) and blobs/<episode_id>/<file>, where every "
+                       "steps.*_ref value is a path relative to blobs/"),
+        }, indent=2) + "\n", encoding="utf-8", newline="\n")
+        print(f"exported {len(episode_ids)} episode(s) "
+              f"({'run ' + ident if by_run else 'episode ' + ident}) to {dest}",
+              file=out)
+        return EXIT_OK
+    finally:
+        await trace.aclose()
+
+
+def cmd_export(args) -> int:
+    out, err = sys.stdout, sys.stderr
+    try:
+        cfg = load_config(Path(args.config))
+    except ConfigError as exc:
+        print(f"refused: {exc}", file=err)
+        return EXIT_REFUSED
+    try:
+        ident = str(uuid.UUID(str(args.id)))
+    except (ValueError, AttributeError, TypeError):
+        print(f"refused: {args.id!r} is not a UUID. `rlm export` takes a bench "
+              f"run_id or an episode_id, both of which are UUIDs, and the id is "
+              f"INTERPOLATED into the export's SQL (DuckDB takes no bound "
+              f"parameter in a COPY's FROM clause) — so anything that is not a "
+              f"UUID is refused rather than quoted.", file=err)
+        return EXIT_REFUSED
+    db_path = Path(cfg.trace.db_path)
+    if not db_path.exists():
+        print(f"refused: no trace store at {db_path}; there is nothing to "
+              f"export", file=err)
+        return EXIT_REFUSED
+    dest = Path(args.dest) if args.dest else db_path.parent / "export" / ident
+    return asyncio.run(_export(cfg, ident, dest, out, err))
+
+
 # --------------------------------------------------------------------------- #
 # argv
 # --------------------------------------------------------------------------- #
@@ -1441,8 +2314,8 @@ class ServerOrchestra:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rlm",
-        description="Local Recursive Language Model runtime. Three verbs: "
-                    "validate, run, replay.")
+        description="Local Recursive Language Model runtime. Five verbs: "
+                    "validate, run, replay, bench, export.")
     sub = parser.add_subparsers(dest="verb", required=True)
 
     def common(p):
@@ -1474,6 +2347,44 @@ def build_parser() -> argparse.ArgumentParser:
                    help="additionally re-POST the re-derived messages to "
                         "/apply-template and compare byte for byte")
     p.set_defaults(func=cmd_replay)
+
+    b = common(sub.add_parser("bench", help="run §8's benchmark grid and score it"))
+    b.add_argument("--arm", default=None,
+                   help="comma-separated subset of rlm,b1,b2,b3 (default: all "
+                        "four, always in §8's pre-registered within-block order)")
+    b.add_argument("--seeds", default=None,
+                   help="comma-separated base seeds (default: benchmark.seeds)")
+    b.add_argument("--tasks", default=None,
+                   help="comma-separated task_ids from the frozen manifest "
+                        "(default: the whole benchmark; with --smoke, the first "
+                        "non-adversarial task of each category)")
+    b.add_argument("--resume", default=None, metavar="RUN_ID",
+                   help="continue an interrupted run: cells already decided are "
+                        "skipped, cells still owed §8's one rerun are re-run")
+    b.add_argument("--smoke", action="store_true",
+                   help="calibration pass: one seed, every arm, a THROWAWAY "
+                        "run_id. Prints measured vs projected seconds and the "
+                        "projected full-grid hours; never writes the report and "
+                        "never counts toward scoring")
+    b.add_argument("--report", default=str(DEFAULT_REPORT_PATH),
+                   help="where the S4 report is written (the hand-written half "
+                        "below the narrative marker is preserved)")
+    b.add_argument("--ledger", default=str(LEDGER_PATH),
+                   help="the crash-resilient JSONL mirror a --resume reads "
+                        "(default: §8's pre-registered path)")
+    b.add_argument("--no-launch-servers", action="store_true",
+                   help="assert against operator-managed servers instead of "
+                        "owning them. The full four-arm grid needs the B1/B3 "
+                        "leaf relaunch, which requires ownership, so this only "
+                        "supports a resident-profile subset (§5)")
+    b.set_defaults(func=cmd_bench)
+
+    e = sub.add_parser("export", help="export a run or episode as a bundle")
+    e.add_argument("--config", default="config.yaml", help="path to config.yaml")
+    e.add_argument("id", help="a bench run_id, or an episode_id (both UUIDs)")
+    e.add_argument("--dest", default=None,
+                   help="bundle directory (default: <trace dir>/export/<id>)")
+    e.set_defaults(func=cmd_export)
     return parser
 
 

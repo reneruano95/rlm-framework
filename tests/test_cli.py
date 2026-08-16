@@ -1,13 +1,22 @@
 # tests/test_cli.py
+import asyncio
 import io
+import json
 import sys
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
+import duckdb
 import pytest
+import yaml
 
+from rlm import cli
 from rlm.cli import main
 from rlm.config import load_config
+from rlm.errors import ActionType, Actor, Outcome, StepStatus
 from rlm.lifecycle import Lifecycle
+from rlm.trace import TraceLogger, utc_now
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 
@@ -350,10 +359,16 @@ def test_launch_log_parse_reads_the_build_line_b10375_ACTUALLY_prints(tmp_path):
     assert log_is_current(parsed, {"build_info": "b10375-ba360efe1"}) is True
 
 
-def test_the_cli_has_exactly_three_verbs():
+def test_the_cli_has_exactly_five_verbs():
     """Non-goals are written into the spec: no daemon, no REST API, no web UI,
-    no interactive chat mode. bench/export are later slices, so a fourth verb
-    appearing here means a slice shipped without arguing for it."""
+    no interactive chat mode.
+
+    THREE became FIVE, and that is the whole renegotiation. `rlm/cli.py:7` named
+    `bench` and `export` as "later slices (S4)" from the start, so S4 landing
+    them is the argued-for change this test was always going to record — a
+    SIXTH verb appearing here still means a slice shipped without arguing
+    for it.
+    """
     import argparse
 
     from rlm.cli import build_parser
@@ -361,7 +376,7 @@ def test_the_cli_has_exactly_three_verbs():
     sub = [a for a in build_parser()._actions
            if isinstance(a, argparse._SubParsersAction)]
     assert len(sub) == 1
-    assert set(sub[0].choices) == {"validate", "run", "replay"}
+    assert set(sub[0].choices) == {"validate", "run", "replay", "bench", "export"}
 
 
 # --------------------------------------------------------------------------- #
@@ -505,3 +520,656 @@ def test_run_takes_launch_leaf_and_defaults_to_off():
     args = build_parser().parse_args(["run", "t.json"])
     assert args.launch_leaf is False
     assert build_parser().parse_args(["run", "t.json", "--launch-leaf"]).launch_leaf
+
+
+# =========================================================================== #
+# S4 (Task 12): `rlm bench` and `rlm export`
+#
+# NO SERVERS AND NO ARMS. `cli.ServerOrchestra` and the four arm entry points
+# are replaced by recorders, so what is under test is the WIRING -- which hook
+# reaches which runner, which config each arm is handed, what the escalation
+# phase drives, which exit code the gate produces -- rather than a model. The
+# frozen manifest, the real task files, the real scheduler (`rlm.bench`) and
+# the real scorer (`rlm.verdict`) all run for real; only the two ends that
+# need a GPU are doubles.
+# =========================================================================== #
+
+
+class _FakeOrchestra:
+    """`ServerOrchestra`'s surface with no processes and no HTTP."""
+
+    def __init__(self, cfg, *, launch=True, lifecycle=None, out=None, err=None,
+                 **_kw):
+        self.cfg = cfg
+        self.launch = launch
+        self.events = []
+        self.current_profile = None
+        self.last_relaunch_s = 0.0
+
+    async def start_resident(self):
+        self.events.append(("start_resident", None))
+        self.current_profile = "resident"
+
+    async def quiesce(self, profile):
+        self.events.append(("quiesce", profile))
+        return {"root": True}
+
+    async def handshake_profile(self, profile):
+        self.events.append(("handshake", profile))
+        return {"root": {}}
+
+    async def swap_to(self, profile):
+        self.events.append(("swap", profile))
+        self.current_profile = profile
+        self.last_relaunch_s = 11.5
+        return 11.5
+
+    def episode_process_manager(self):
+        return "episode-process-manager"
+
+    def b2_process_manager(self):
+        return "b2-process-manager"
+
+    async def stop_all(self):
+        self.events.append(("stop_all", None))
+
+    def kinds(self, kind):
+        return [p for k, p in self.events if k == kind]
+
+
+@pytest.fixture
+def fake_orchestra(monkeypatch):
+    made = []
+
+    def factory(cfg, **kw):
+        orchestra = _FakeOrchestra(cfg, **kw)
+        made.append(orchestra)
+        return orchestra
+
+    monkeypatch.setattr(cli, "ServerOrchestra", factory)
+    return made
+
+
+class _ArmRecorder:
+    """Stands in for `run_episode` / `run_b1` / `run_b2` / `run_b3`.
+
+    Records everything the CLI handed each arm and, when `write=True`, opens
+    and closes a REAL episode row through the injected `TraceLogger` -- so the
+    scoring half of `rlm bench` runs against a store the arms actually wrote,
+    with the `config_snapshot.bench` identity the grid is keyed by.
+    """
+
+    def __init__(self, outcomes=None, *, write=False):
+        self.calls = []
+        self._outcomes = dict(outcomes or {})
+        self._write = write
+
+    def outcome_for(self, arm, task_id):
+        return self._outcomes.get((arm, task_id), Outcome.SUCCESS)
+
+    def entry(self, arm):
+        async def run(task, cfg, **kw):
+            extra = kw.get("bench_extra")
+            if extra is None:
+                extra = dict((kw.get("snapshot_extra") or {}).get("bench") or {})
+            self.calls.append({
+                "arm": arm, "task_id": task.task_id, "seed": extra.get("seed"),
+                "block": extra.get("block"), "run_id": extra.get("run_id"),
+                "root_seed": cfg.scaffold.sampling.root.seed,
+                "leaf_seed": cfg.scaffold.sampling.leaf.seed,
+                "leaf_parallel": cfg.servers.leaf.parallel,
+                "leaf_ctx": cfg.servers.leaf.ctx,
+                "kwargs": kw,
+            })
+            outcome = self.outcome_for(arm, task.task_id)
+            episode_id = str(uuid.uuid4())
+            trace = kw.get("trace")
+            if self._write and trace is not None:
+                trace.open_episode({
+                    "episode_id": episode_id, "task_id": task.task_id,
+                    "task_hash": "h", "started_at": utc_now(),
+                    "config_snapshot": {
+                        "scaffold": {"chunk": {"size_tokens":
+                                               cfg.scaffold.chunk.size_tokens}},
+                        "bench": {**extra, "arm": arm}}})
+                trace.close_episode(episode_id, outcome, None)
+                await trace.drain()
+            return SimpleNamespace(episode_id=episode_id, outcome=outcome,
+                                   reason=None, answer=None, final_answer=None)
+
+        return run
+
+    def patch(self, monkeypatch):
+        monkeypatch.setattr(cli, "run_episode", self.entry("rlm"))
+        monkeypatch.setattr(cli, "run_b1", self.entry("b1"))
+        monkeypatch.setattr(cli, "run_b2", self.entry("b2"))
+        monkeypatch.setattr(cli, "run_b3", self.entry("b3"))
+        return self
+
+    def order(self):
+        return [c["arm"] for c in self.calls]
+
+
+SMOKE_TASKS = "needle-02,agg-02"
+FOUR_TASKS = ("needle-02", "agg-02", "synth-01", "codeqa-01")
+
+
+def _bench_argv(config_file, tmp_path, *extra):
+    """Every path a bench run writes to, redirected into tmp: the ledger
+    (whose default is the pre-registered `s4/results/ledger.jsonl`) and the
+    report. A test that wrote either into the repo would be a test that
+    contaminated the artifact S4 is scored from."""
+    return ["bench", "--config", str(config_file),
+            "--ledger", str(tmp_path / "ledger.jsonl"),
+            "--report", str(tmp_path / "RESULTS.md"), *extra]
+
+
+# --------------------------------------------------------------------------- #
+# refusals: the things that must never start a 39-hour run
+# --------------------------------------------------------------------------- #
+
+
+def test_bench_refuses_a_mock_dispatcher(valid_config_file, tmp_path, capsys):
+    """§8 scores model behaviour. A `dispatcher: mock` grid would be 360
+    fixture replays wearing the benchmark's name, and `load_grid` would refuse
+    them at scoring time (`NOT dry_run`) -- after 39 hours instead of before."""
+    raw = yaml.safe_load(valid_config_file.read_text(encoding="utf-8"))
+    raw["scaffold"]["dispatcher"] = "mock"
+    mock_cfg = tmp_path / "mock.yaml"
+    mock_cfg.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    rc = main(_bench_argv(mock_cfg, tmp_path, "--smoke"))
+    assert rc == cli.EXIT_REFUSED
+    assert "dispatcher" in capsys.readouterr().err
+
+
+def test_bench_refuses_when_the_frozen_manifest_moved(valid_config_file, tmp_path,
+                                                      monkeypatch, capsys):
+    """The pin in `benchmark.manifest_sha256` becomes a precondition here for
+    the first time: a manifest that moved would score a different task set than
+    the report names."""
+    moved = json.loads(cli.BENCH_MANIFEST_PATH.read_text(encoding="utf-8"))
+    moved["tasks"][0]["corpus_sha256"] = "f" * 64
+    tampered = tmp_path / "manifest.json"
+    tampered.write_text(json.dumps(moved, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+    monkeypatch.setattr(cli, "BENCH_MANIFEST_PATH", tampered)
+
+    rc = main(_bench_argv(valid_config_file, tmp_path, "--smoke"))
+    assert rc == cli.EXIT_REFUSED
+    assert "manifest_sha256 mismatch" in capsys.readouterr().err
+
+
+def test_bench_refuses_an_unpinned_config(valid_config_file, tmp_path, capsys):
+    raw = yaml.safe_load(valid_config_file.read_text(encoding="utf-8"))
+    raw["benchmark"].pop("manifest_sha256")
+    unpinned = tmp_path / "unpinned.yaml"
+    unpinned.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    rc = main(_bench_argv(unpinned, tmp_path, "--smoke"))
+    assert rc == cli.EXIT_REFUSED
+    assert "manifest_sha256" in capsys.readouterr().err
+
+
+def test_bench_refuses_an_unknown_task_id(valid_config_file, tmp_path, capsys,
+                                          fake_orchestra, monkeypatch):
+    _ArmRecorder().patch(monkeypatch)
+    rc = main(_bench_argv(valid_config_file, tmp_path, "--smoke",
+                          "--tasks", "needle-02,not-a-task"))
+    assert rc == cli.EXIT_REFUSED
+    assert "not-a-task" in capsys.readouterr().err
+
+
+def test_bench_refuses_an_unbound_hook(valid_config_file, tmp_path):
+    """`BenchCtx`'s hook defaults are deliberate NO-OPS (`rlm/bench.py`: the
+    module is dry-run with no servers at all). That makes a forgotten binding
+    invisible: the run would not crash, it would complete 39 hours of episodes
+    with no quiesce, no §4 re-assertion and no leaf relaunch -- every B1/B3
+    cell measured against the RLM topology. So the composition root asserts
+    the wiring instead of assuming it."""
+    from rlm.bench import ARM_ORDER, BenchCtx, BenchLedger
+    from rlm.errors import ConfigError
+
+    cfg = load_config(valid_config_file)
+    raw = yaml.safe_load(valid_config_file.read_text(encoding="utf-8"))
+    bare = BenchCtx(raw_cfg=raw, cfg=cfg, run_id="r",
+                    manifest=cli.load_benchmark_manifest(),
+                    ledger=BenchLedger(tmp_path / "ledger.jsonl"))
+    with pytest.raises(ConfigError) as excinfo:
+        cli.assert_bench_wiring(bare, ARM_ORDER)
+    message = str(excinfo.value)
+    for unbound in ("quiesce_fn", "handshake_fn", "swap_servers_fn",
+                    "load_task_fn", "trace", "arm_runners['rlm']"):
+        assert unbound in message
+
+    async def _hook(_profile):
+        return None
+
+    async def _arm(_task, _cfg, *, bench_extra):
+        return None
+
+    wired = BenchCtx(raw_cfg=raw, cfg=cfg, run_id="r",
+                     manifest=bare.manifest, ledger=bare.ledger,
+                     trace=object(), quiesce_fn=_hook, handshake_fn=_hook,
+                     swap_servers_fn=_hook, load_task_fn=lambda p: None,
+                     arm_runners={a: _arm for a in ARM_ORDER})
+    cli.assert_bench_wiring(wired, ARM_ORDER)       # no raise
+
+
+# --------------------------------------------------------------------------- #
+# --smoke
+# --------------------------------------------------------------------------- #
+
+
+def test_the_smoke_default_task_set_is_one_non_adversarial_task_per_category():
+    """§8 flags two tasks as adversarial-context. A calibration run must not be
+    timed against them: they are the tasks most likely to behave unlike their
+    category, and the whole point of the smoke run is a per-category
+    seconds-per-episode number to project 39 hours from."""
+    manifest = cli.load_benchmark_manifest()
+    ids = cli.smoke_task_ids(manifest)
+    by_id = {t.task_id: t for t in manifest.tasks}
+    assert len(ids) == len({by_id[i].category for i in ids}) == 4
+    assert set(ids) == {"needle-02", "agg-02", "synth-01", "codeqa-01"}
+    assert not any(by_id[i].adversarial for i in ids)
+
+
+def test_smoke_runs_one_seed_of_every_arm_and_never_writes_a_report(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    arms = _ArmRecorder().patch(monkeypatch)
+    report = tmp_path / "RESULTS.md"
+
+    rc = main(_bench_argv(valid_config_file, tmp_path, "--smoke",
+                          "--tasks", SMOKE_TASKS))
+    out = capsys.readouterr().out
+
+    assert rc == cli.EXIT_OK
+    # 2 tasks x 1 seed x 4 arms, in §8's within-block order.
+    assert arms.order() == ["rlm", "b2", "b1", "b3"] * 2
+    assert {c["seed"] for c in arms.calls} == {1}
+    assert not report.exists(), "a smoke run must never write the S4 report"
+    assert "smoke" in out.lower() and "calibration" in out.lower()
+    # ...and the calibration is stated against the pre-registered projection
+    # constants, not against nothing.
+    assert "450" in out and "2.78" in out and "60" in out
+
+
+def test_a_smoke_run_id_is_its_own_and_never_scores(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """'Never counts toward scoring' is enforced by identity, not by a flag a
+    later reader has to remember: the grid is scoped to a run_id, and this one
+    is minted fresh and thrown away."""
+    arms = _ArmRecorder().patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "needle-02"))
+    first = {c["run_id"] for c in arms.calls}
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "needle-02"))
+    every = {c["run_id"] for c in arms.calls}
+    assert len(first) == 1 and len(every) == 2
+    assert "smoke run_id" in capsys.readouterr().out
+
+
+def test_smoke_projects_the_full_grid_in_hours(valid_config_file, tmp_path,
+                                               capsys, fake_orchestra, monkeypatch):
+    _ArmRecorder().patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "agg-02"))
+    out = capsys.readouterr().out
+    assert " h" in out and "full grid" in out.lower()
+    # The projection is over the WHOLE frozen grid, not the smoke subset.
+    assert "30 tasks" in out
+
+
+# --------------------------------------------------------------------------- #
+# the wiring itself: which config and which manager each arm is handed
+# --------------------------------------------------------------------------- #
+
+
+def test_each_arm_is_handed_its_own_profile_and_process_manager(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    """§8's two topologies. RLM and B2 run on the resident leaf; B1 and B3 on
+    the `bench_leaf` relaunch profile, and they must be BUILT against it --
+    `bench_slot_capacity` and B1's overflow policy read `servers.leaf`, so an
+    arm handed the resident config would truncate against the 128-slot
+    topology while running on the 2-slot one.
+
+    The process managers are two DIFFERENT objects on purpose (the ledgered
+    ruling): `run_episode` re-handshakes itself after a rotation, `run_b2`
+    cannot.
+    """
+    arms = _ArmRecorder().patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "needle-02"))
+
+    by_arm = {c["arm"]: c for c in arms.calls}
+    cfg = load_config(valid_config_file)
+    resident, bench_leaf = cfg.servers.leaf, cfg.servers.bench_leaf
+    assert resident.parallel != bench_leaf.parallel       # or this proves nothing
+    for arm in ("rlm", "b2"):
+        assert by_arm[arm]["leaf_parallel"] == resident.parallel
+        assert by_arm[arm]["leaf_ctx"] == resident.ctx
+    for arm in ("b1", "b3"):
+        assert by_arm[arm]["leaf_parallel"] == bench_leaf.parallel
+        assert by_arm[arm]["leaf_ctx"] == bench_leaf.ctx
+
+    assert by_arm["rlm"]["kwargs"]["process_manager"] == "episode-process-manager"
+    assert by_arm["b2"]["kwargs"]["process_manager"] == "b2-process-manager"
+    assert by_arm["b2"]["kwargs"]["root_client"] is not None
+    # §8's v0.2.6 slot pin: B1 on slot 0, B3 on slot 1 of the bench profile.
+    assert by_arm["b1"]["kwargs"].get("slot_id", 0) == 0
+    assert by_arm["b3"]["kwargs"].get("slot_id", 1) == 1
+    # The RLM arm's identity travels in `snapshot_extra`; a baseline's in
+    # `bench_extra` (`ArmEpisode.snapshot` adds its own `arm` key).
+    assert "bench" in by_arm["rlm"]["kwargs"]["snapshot_extra"]
+    assert by_arm["b1"]["kwargs"]["bench_extra"]["run_id"]
+    # Both seeds move together, on every arm, including the bench-profile ones.
+    assert all(c["root_seed"] == c["leaf_seed"] == c["seed"] for c in arms.calls)
+
+
+def test_the_orchestra_hooks_are_the_ones_the_scheduler_drives(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    _ArmRecorder().patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "needle-02"))
+    orchestra = fake_orchestra[0]
+    assert orchestra.kinds("swap") == ["bench"]
+    assert orchestra.kinds("quiesce") == ["resident", "resident", "bench", "bench"]
+    assert orchestra.kinds("handshake") == orchestra.kinds("quiesce")
+    assert ("start_resident", None) in orchestra.events
+    assert ("stop_all", None) in orchestra.events
+
+
+def test_the_ledger_carries_the_relaunch_the_orchestra_reported(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    """The whole path for the one column the store cannot hold:
+    `ServerOrchestra.swap_to` returns its `last_relaunch_s`, `rlm.bench._prepare`
+    catches it, and the cell that PAID for the swap ledgers it. §8 excludes
+    relaunch time from per-task wall-clock, so without this the ~10 s a swap
+    costs would be spent 179 times over a full grid and recorded nowhere."""
+    _ArmRecorder().patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "needle-02"))
+    rows = [json.loads(line) for line
+            in (tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+    by_arm = {r["arm"]: r for r in rows}
+    assert by_arm["b1"]["relaunch_s"] == fake_orchestra[0].last_relaunch_s == 11.5
+    # …and only that cell: rlm/b2 were already resident, b3 rode b1's relaunch.
+    assert [by_arm[a]["relaunch_s"] for a in ("rlm", "b2", "b3")] == [0.0, 0.0, 0.0]
+    # It is beside wall_s, never inside it.
+    assert by_arm["b1"]["wall_s"] < 11.5
+
+
+def test_no_launch_servers_is_carried_into_the_orchestra(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    _ArmRecorder().patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks",
+                     "needle-02", "--no-launch-servers"))
+    assert fake_orchestra[0].launch is False
+
+
+# --------------------------------------------------------------------------- #
+# the graded run: grid -> verdict -> escalation -> report -> exit code
+# --------------------------------------------------------------------------- #
+
+
+def _graded(valid_config_file, tmp_path, monkeypatch, outcomes, *extra):
+    arms = _ArmRecorder(outcomes, write=True).patch(monkeypatch)
+    rc = main(_bench_argv(valid_config_file, tmp_path,
+                          "--tasks", ",".join(FOUR_TASKS), *extra))
+    return rc, arms
+
+
+def _baselines_fail_everything():
+    return {(arm, task): Outcome.FAIL
+            for arm in ("b1", "b2", "b3") for task in FOUR_TASKS}
+
+
+def test_a_gate_pass_exits_zero_and_writes_the_report(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """RLM 4/4, every baseline 0/4 -> margin +4 against all three, which clears
+    §8's +3 threshold. The report is written with the narrative marker
+    preserved, and the exit code is the gate."""
+    from rlm.verdict import NARRATIVE_MARKER
+
+    rc, _arms = _graded(valid_config_file, tmp_path, monkeypatch,
+                        _baselines_fail_everything())
+    out = capsys.readouterr().out
+    report = (tmp_path / "RESULTS.md").read_text(encoding="utf-8")
+
+    assert rc == cli.EXIT_OK
+    assert "S4 GATE: PASS" in out and "S4 GATE: PASS" in report
+    assert NARRATIVE_MARKER in report
+    assert (tmp_path / "RESULTS.pareto.svg").exists()
+
+
+def test_a_gate_failure_exits_one(valid_config_file, tmp_path, capsys,
+                                  fake_orchestra, monkeypatch):
+    """A tie fails the gate (§8), and the exit code has to agree with the
+    heading -- a report that says FAIL beside an exit 0 is a green CI run over
+    a failed benchmark."""
+    rc, _arms = _graded(valid_config_file, tmp_path, monkeypatch, outcomes={})
+    out = capsys.readouterr().out
+    assert rc == cli.EXIT_FAILED
+    assert "S4 GATE: FAIL" in out
+
+
+def test_escalation_runs_both_arms_of_every_flagged_pair_then_recomputes_once(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """§8:343 end to end. RLM takes 3 of 4, every baseline 0 -> margin +3,
+    inside the {+1,+2,+3} band, so seeds {4,5} are owed on that pair's
+    DISCORDANT tasks -- and on BOTH arms of the pair, because a re-decided task
+    is re-decided for the COMPARISON, not for RLM alone."""
+    outcomes = _baselines_fail_everything()
+    outcomes[("rlm", "codeqa-01")] = Outcome.FAIL
+    rc, arms = _graded(valid_config_file, tmp_path, monkeypatch, outcomes)
+    out = capsys.readouterr().out
+    report = (tmp_path / "RESULTS.md").read_text(encoding="utf-8")
+
+    escalated = [c for c in arms.calls if c["seed"] in (4, 5)]
+    discordant = {"needle-02", "agg-02", "synth-01"}
+    assert {c["task_id"] for c in escalated} == discordant
+    assert {c["arm"] for c in escalated} == {"rlm", "b1", "b2", "b3"}
+    for arm in ("rlm", "b1", "b2", "b3"):
+        assert {(c["task_id"], c["seed"]) for c in escalated if c["arm"] == arm} == {
+            (t, s) for t in discordant for s in (4, 5)}
+    # ...and RLM's cells are run ONCE across the three pairs that all flagged
+    # them, not once per pair.
+    rlm_cells = [(c["task_id"], c["seed"]) for c in escalated if c["arm"] == "rlm"]
+    assert len(rlm_cells) == len(set(rlm_cells)) == 6
+
+    assert rc == cli.EXIT_OK
+    assert "Post-escalation gate: PASS" in report
+    assert "escalation" in out.lower()
+
+
+def test_a_margin_outside_the_band_escalates_nothing(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    _rc, arms = _graded(valid_config_file, tmp_path, monkeypatch,
+                        _baselines_fail_everything())
+    assert [c for c in arms.calls if c["seed"] in (4, 5)] == []
+
+
+def test_the_exit_code_is_the_post_escalation_gate():
+    """§8 makes the recomputation the DECISION and the pre-escalation figures a
+    reporting obligation. An exit code taken from the pre-escalation verdict
+    would report the number §8 says may not be chosen between."""
+    pre = SimpleNamespace(gate_pass=True)
+    post = SimpleNamespace(gate_pass=False)
+    assert cli.bench_exit_code(pre, None) == cli.EXIT_OK
+    assert cli.bench_exit_code(pre, post) == cli.EXIT_FAILED
+    assert cli.bench_exit_code(post, pre) == cli.EXIT_OK
+
+
+def test_bench_resumes_into_the_cells_it_has_not_decided(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """The 39-hour rule: an interrupted run resumes by run_id and re-runs only
+    what it never decided."""
+    arms = _ArmRecorder(_baselines_fail_everything(), write=True).patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--tasks", "needle-02",
+                     "--seeds", "1"))
+    run_id = arms.calls[0]["run_id"]
+    first = len(arms.calls)
+    assert first == 4
+
+    main(_bench_argv(valid_config_file, tmp_path, "--tasks", "needle-02",
+                     "--seeds", "1", "--resume", run_id))
+    assert len(arms.calls) == first, "a resumed run re-ran a decided cell"
+
+
+# --------------------------------------------------------------------------- #
+# `rlm export`
+# --------------------------------------------------------------------------- #
+
+
+def _synthetic_run(cfg, run_id, n=2):
+    """A closed store with `n` bench episodes, each carrying a step blob."""
+    async def build():
+        tl = TraceLogger(cfg.trace.db_path, cfg.trace.blob_root)
+        await tl.start()
+        ids = []
+        for i in range(n):
+            episode_id = str(uuid.uuid4())
+            ids.append(episode_id)
+            tl.open_episode({
+                "episode_id": episode_id, "task_id": f"t{i}", "task_hash": "h",
+                "started_at": utc_now(),
+                "config_snapshot": {"bench": {"run_id": run_id, "arm": "rlm",
+                                              "seed": 1, "block": i}}})
+            tl.put_step({"episode_id": episode_id, "actor": Actor.ROOT,
+                         "action_type": ActionType.REPL_EXEC,
+                         "status": StepStatus.OK},
+                        {"root_request_ref": f"request-{i}".encode()})
+            tl.close_episode(episode_id, Outcome.SUCCESS, None)
+        await tl.drain()
+        await tl.aclose()
+        return ids
+
+    return asyncio.run(build())
+
+
+def test_export_round_trips_a_whole_run(valid_config_file, tmp_path):
+    """The bundle is what a foreign reader gets: a second process cannot open
+    the .duckdb file at all on Windows, so the parquet pair plus the blob
+    directories are the only way anyone else ever sees a run."""
+    cfg = load_config(valid_config_file)
+    run_id = str(uuid.uuid4())
+    episode_ids = _synthetic_run(cfg, run_id)
+    dest = tmp_path / "bundle"
+
+    rc = main(["export", run_id, "--config", str(valid_config_file),
+               "--dest", str(dest)])
+    assert rc == cli.EXIT_OK
+
+    manifest = json.loads((dest / "bundle-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["run_id"] == run_id
+    assert sorted(manifest["episode_ids"]) == sorted(episode_ids)
+    assert len(manifest["config_snapshot_sha256"]) == 64
+
+    con = duckdb.connect()          # in-memory: no lock, no live handle
+    try:
+        rows = con.execute(
+            f"SELECT CAST(episode_id AS VARCHAR) FROM '{dest / 'episodes.parquet'}'"
+        ).fetchall()
+        assert sorted(r[0] for r in rows) == sorted(episode_ids)
+        steps = con.execute(
+            f"SELECT root_request_ref FROM '{dest / 'steps.parquet'}'").fetchall()
+        assert len(steps) == 2
+        # every blob a step points at resolves inside the bundle alone
+        for (rel,) in steps:
+            assert (dest / "blobs" / rel).is_file()
+    finally:
+        con.close()
+
+
+def test_export_resolves_a_bare_episode_id_too(valid_config_file, tmp_path):
+    cfg = load_config(valid_config_file)
+    episode_ids = _synthetic_run(cfg, str(uuid.uuid4()))
+    dest = tmp_path / "one"
+    rc = main(["export", episode_ids[1], "--config", str(valid_config_file),
+               "--dest", str(dest)])
+    assert rc == cli.EXIT_OK
+    manifest = json.loads((dest / "bundle-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["episode_ids"] == [episode_ids[1]]
+    assert manifest["resolved_by"] == "episode_id"
+
+
+def test_export_of_an_unknown_id_exits_two(valid_config_file, tmp_path, capsys):
+    cfg = load_config(valid_config_file)
+    _synthetic_run(cfg, str(uuid.uuid4()))
+    rc = main(["export", str(uuid.uuid4()), "--config", str(valid_config_file),
+               "--dest", str(tmp_path / "nothing")])
+    assert rc == cli.EXIT_REFUSED
+    assert "no episode" in capsys.readouterr().err.lower()
+
+
+def test_export_refuses_an_id_that_is_not_a_uuid(valid_config_file, tmp_path, capsys):
+    """`trace.py`'s SQL-injection caveat: the filter is INTERPOLATED into COPY
+    (DuckDB takes no bound parameter there). Validating the id as a UUID first
+    is what makes that interpolation safe, so a non-UUID is refused rather
+    than quoted."""
+    cfg = load_config(valid_config_file)
+    _synthetic_run(cfg, str(uuid.uuid4()))
+    rc = main(["export", "' OR 1=1 --", "--config", str(valid_config_file),
+               "--dest", str(tmp_path / "nothing")])
+    assert rc == cli.EXIT_REFUSED
+    assert "uuid" in capsys.readouterr().err.lower()
+
+
+def test_export_refuses_a_live_store(valid_config_file, tmp_path, capsys):
+    """`TraceLogger.start` cannot open a database another connection holds
+    under a different configuration -- which is exactly the state a live bench
+    run leaves the file in. That refusal is the CORRECT behaviour: a bundle
+    exported from a half-written store is a bundle of a different run."""
+    cfg = load_config(valid_config_file)
+    run_id = str(uuid.uuid4())
+    _synthetic_run(cfg, run_id)
+
+    holder = duckdb.connect(str(cfg.trace.db_path), read_only=True)
+    try:
+        rc = main(["export", run_id, "--config", str(valid_config_file),
+                   "--dest", str(tmp_path / "live")])
+    finally:
+        holder.close()
+    assert rc == cli.EXIT_REFUSED
+    assert "closed" in capsys.readouterr().err.lower()
+
+
+# --------------------------------------------------------------------------- #
+# the argument surface, and one cosmetic
+# --------------------------------------------------------------------------- #
+
+
+def test_bench_defaults_are_the_pre_registered_ones():
+    from rlm.cli import build_parser
+
+    args = build_parser().parse_args(["bench"])
+    assert args.arm is None and args.seeds is None and args.tasks is None
+    assert args.smoke is False and args.no_launch_servers is False
+    assert args.resume is None
+    assert Path(args.report) == cli.DEFAULT_REPORT_PATH
+    assert Path(args.ledger) == cli.LEDGER_PATH
+
+
+def test_export_defaults_to_a_dest_beside_the_trace_store():
+    from rlm.cli import build_parser
+
+    args = build_parser().parse_args(["export", "abc"])
+    assert args.dest is None and args.id == "abc"
+
+
+def test_the_transcript_labels_an_llm_call_by_its_actor(valid_config_file):
+    """A B2 episode's root reduce call is an `llm_call` with `actor='root'`.
+    Labelling every llm_call 'leaf' made the transcript say a call happened on
+    a server it never touched."""
+    cfg = load_config(valid_config_file)
+    steps = [
+        {"step_idx": 0, "actor": "root", "action_type": ActionType.LLM_CALL,
+         "status": "ok", "parent_step_idx": None, "retry_idx": 0,
+         "tokens_in": 10, "tokens_out": 2, "action_payload": "",
+         "observation_view": ""},
+        {"step_idx": 1, "actor": "leaf", "action_type": ActionType.LLM_CALL,
+         "status": "ok", "parent_step_idx": 0, "retry_idx": 0,
+         "tokens_in": 3, "tokens_out": 4, "action_payload": "",
+         "observation_view": ""},
+    ]
+    out = io.StringIO()
+    cli._render_transcript(cfg, steps, out)
+    rendered = out.getvalue()
+    assert "root llm_call" in rendered
+    assert rendered.count("leaf llm_call") == 1
