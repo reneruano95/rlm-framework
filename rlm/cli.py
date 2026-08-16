@@ -961,6 +961,20 @@ def _first_difference(want: list[dict], got: list[dict]) -> str:
 # `start_resident`, `to_bench_leaf` and `to_resident_leaf` alike, so
 # `swap_to`'s two callers can never race each other into a bound port.
 #
+# NO ADOPTION (ledgered ruling, superseding an earlier design). Whatever is
+# found live but UNOWNED on the shared leaf port -- on a resume, or in
+# principle at any other bring-up -- is always stopped (force-killed via
+# `_ensure_leaf_stopped`, after a shape check that refuses to touch anything
+# that doesn't look like a real `/props` body) and replaced with a FRESH,
+# OWNED process, even when it already matches the profile being requested.
+# `leaf_proc` is therefore never `None` while a leaf lives: rotation
+# (`LeafProcessManager`/`HandshakingProcessManager`) and teardown
+# (`stop_all`) are unconditional, and every reclaim is logged the same way
+# regardless of whether it happened during a resume or not -- there is no
+# separate "this was actually a resume" event to get wrong. The accepted
+# cost is one extra ~10s relaunch on a resume that would otherwise have
+# found a perfectly good survivor.
+#
 # THE HOOK SURFACE. `rlm/bench.py`'s `BenchCtx` takes three server-facing
 # callables; Task 12 binds them straight off one instance:
 #
@@ -968,9 +982,13 @@ def _first_difference(want: list[dict], got: list[dict]) -> str:
 #              handshake_fn=orchestra.handshake_profile,
 #              swap_servers_fn=orchestra.swap_to, ...)
 #
-# and the `ProcessManager` `run_b2`/`run_episode` rotate mid-episode (both
-# arms run exclusively on the RESIDENT profile -- `rlm.bench.ARM_PROFILE`) is
-# `orchestra.resident_process_manager()`.
+# and the mid-episode `ProcessManager` rotation is TWO DIFFERENT managers,
+# not one (ledgered ruling): `orchestra.episode_process_manager()` for
+# `run_episode` ('rlm' arm, which already re-handshakes itself after
+# `restart()` -- see `rlm.episode.Episode._rotate_leaf`) and
+# `orchestra.b2_process_manager()` for `run_b2` (which cannot, so its
+# manager wraps the re-handshake in). Both target the resident leaf --
+# `rlm.bench.ARM_PROFILE` runs both arms there exclusively.
 #
 # EVERYTHING THAT TOUCHES A PROCESS, THE NETWORK, OR THE OS IS INJECTED --
 # `rlm/arms.py`'s own discipline, restated here: `process_factory` defaults to
@@ -1023,13 +1041,14 @@ def _pid_on_port(port: int) -> int | None:
 
 
 async def _default_force_kill(port: int) -> None:
-    """Reclaim a port a resumed run does not own (§5 C4 resume safety,
-    ledgered ruling): the survivor of a crash that a fresh `ServerOrchestra`
-    never spawned, so `LlamaServerProcess.restart()`'s ownership check cannot
-    touch it -- there is no OBJECT to call `.restart()` on. Best-effort and
-    silent on failure (no `netstat`/`taskkill`, permission denied, already
-    exited); the caller's own `start()` still fails loudly (a bind error
-    surfaces as `ServerRotationError`) if the port stays occupied."""
+    """Reclaim a port this orchestra does not own (§5 C4 resume safety,
+    ledgered ruling): a survivor -- of a crash, or simply never spawned by
+    this object -- that `LlamaServerProcess.restart()`'s ownership check
+    cannot touch, because there is no OBJECT to call `.restart()` on.
+    Best-effort and silent on failure (no `netstat`/`taskkill`, permission
+    denied, already exited); the caller's own `start()` still fails loudly
+    (a bind error surfaces as `ServerRotationError`) if the port stays
+    occupied."""
     pid = _pid_on_port(port)
     if pid is None:
         return
@@ -1037,6 +1056,24 @@ async def _default_force_kill(port: int) -> None:
         subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True,
                        check=False, timeout=10)
     await asyncio.sleep(0.5)   # let the OS release the socket before a retry
+
+
+def _looks_like_llama_props(body: Any) -> bool:
+    """A loose shape check: does `body` look like a llama-server `/props`
+    response AT ALL, as opposed to some unrelated process that happens to
+    answer HTTP on this port? Checked before `_ensure_leaf_stopped` ever
+    force-kills a survivor -- `model_path`/`total_slots`/
+    `default_generation_settings` are fields a real `/props` body always
+    carries, even when their VALUES mismatch what config expects (that
+    mismatch is not this function's job; `assert_props` covers it). Not
+    matching this shape is grounds to refuse the kill outright, not to
+    proceed cautiously -- an unidentified process on a configured port is an
+    operator problem, not one `ServerOrchestra` should try to solve by
+    guessing."""
+    return (isinstance(body, dict)
+            and isinstance(body.get("model_path"), str)
+            and isinstance(body.get("total_slots"), int)
+            and isinstance(body.get("default_generation_settings"), dict))
 
 
 def bench_leaf_config(raw_cfg: dict) -> Config:
@@ -1070,32 +1107,56 @@ def bench_dispatcher(raw_cfg: dict, *,
     return LLMDispatcher.from_config(bench_leaf_config(raw_cfg), on_step=on_step)
 
 
-class HandshakingProcessManager:
-    """Wraps an OWNED leaf process so `.restart()` also re-runs the §4
-    handshake against `server_cfg` before returning.
+class LeafProcessManager:
+    """`ProcessManager` (one method, `.restart()`) over WHATEVER the
+    orchestra currently owns as the resident leaf -- looked up FRESH on
+    every call, not captured once, so a manager built at startup survives
+    any later leaf swap: the RLM/B2 arms always run on the resident
+    profile, but `leaf_proc`'s IDENTITY changes across swaps (a new
+    `LlamaServerProcess` object each time).
 
-    Required because `arms.py` cannot itself speak HTTP (the dependency
-    rule -- see its `_rotate_leaf` docstring), and because `run_b2` has no
-    built-in re-handshake of its own the way `run_episode`'s
-    `_rehandshake_leaf` does for the 'rlm' arm. Ledgered ruling: restore §5's
-    full rotation contract ("stop -> start -> re-handshake -> resume") for
-    EVERY caller of `ProcessManager.restart()`, not only the one that already
-    had it. `rlm.arms.ArmEpisode._rotate_leaf`'s own docstring names this
-    exact composition as the way to close that gap.
+    PLAIN: restart only, no re-handshake. This is `run_episode`'s manager
+    (`ServerOrchestra.episode_process_manager`) -- `rlm/episode.py`'s own
+    `Episode._rotate_leaf` already calls `_rehandshake_leaf()` immediately
+    after `process_manager.restart()` returns, so wrapping the handshake
+    HERE too would double the §4 probe on every RLM rotation for no
+    benefit. `HandshakingProcessManager` below is the subclass that adds it,
+    for the ONE caller that actually needs it (`run_b2`).
     """
 
-    def __init__(self, orchestra: "ServerOrchestra", role: str, server_cfg: Any) -> None:
+    def __init__(self, orchestra: "ServerOrchestra") -> None:
         self._orchestra = orchestra
-        self._role = role
-        self._server_cfg = server_cfg
 
     async def restart(self) -> None:
         proc = self._orchestra.leaf_proc
         if proc is None:
             raise ServerRotationError(
-                f"no {self._role} process is owned by this orchestra; there "
-                "is nothing to rotate (was start_resident() called?)")
+                "no leaf process is owned by this orchestra; there is "
+                "nothing to rotate (was start_resident() called?)")
         await proc.restart()
+
+
+class HandshakingProcessManager(LeafProcessManager):
+    """`LeafProcessManager` plus a re-handshake against `server_cfg` after
+    every restart.
+
+    Required because `arms.py` cannot itself speak HTTP (the dependency
+    rule -- see `rlm.arms.ArmEpisode._rotate_leaf`'s docstring), and `run_b2`
+    has no built-in re-handshake of its own -- unlike `run_episode`, which is
+    why THAT caller gets the plain base class instead (ledgered ruling: do
+    not double-handshake the 'rlm' arm). Ledgered ruling: restore §5's full
+    rotation contract ("stop -> start -> re-handshake -> resume") for `run_b2`,
+    the one caller that was missing it. `rlm.arms.ArmEpisode._rotate_leaf`'s
+    own docstring names this exact composition as the way to close that gap.
+    """
+
+    def __init__(self, orchestra: "ServerOrchestra", role: str, server_cfg: Any) -> None:
+        super().__init__(orchestra)
+        self._role = role
+        self._server_cfg = server_cfg
+
+    async def restart(self) -> None:
+        await super().restart()
         await self._orchestra._probe(self._role, self._server_cfg)
 
 
@@ -1132,8 +1193,8 @@ class ServerOrchestra:
         self._handshake_timeout_s = handshake_timeout_s
         self.root_proc: Any = None
         self.leaf_proc: Any = None
-        #: Which leaf profile `leaf_proc` (or an adopted-unowned survivor, see
-        #: `_maybe_adopt`) currently holds. `None` until `start_resident` runs.
+        #: Which leaf profile `leaf_proc` currently holds. `None` until
+        #: `start_resident` runs.
         self.current_profile: str | None = None
         #: Wall time the MOST RECENT swap spent stopped-to-healthy. §8
         #: excludes this from per-task wall-clock BY CONSTRUCTION: every
@@ -1210,49 +1271,46 @@ class ServerOrchestra:
 
     # -- resume reconciliation ------------------------------------------- #
 
-    async def _maybe_adopt(self, profile: str, target_cfg: Any) -> bool:
-        """Resume safety (ledgered ruling): a crash may leave EITHER leaf
-        profile alive on the shared port, unowned by this (freshly
-        constructed) orchestra -- `--resume` starts a NEW process with no
-        handle on anything the dead run started. Detect it via `/props` and
-        NEVER ASSUME: a match is left running (nothing to relaunch, `True`),
-        anything else -- a genuine mismatch, or unreachable for a reason
-        `_probe_liveness` cannot distinguish from "gone" -- is force-reclaimed
-        so the fresh process about to be spawned does not bind-fail against a
-        survivor it never started.
-        """
-        if self.leaf_proc is not None:
-            return False              # already own something; not an adoption
-        port = self.cfg.servers.leaf.port
-        live = await self._probe_liveness(port)
-        if live is None:
-            return False
-        try:
-            assert_props(live, target_cfg, profile)
-        except ConfigError as exc:
-            if self.lifecycle is not None:
-                self.lifecycle.event("server_health", role="leaf",
-                                     state="resume_mismatch", port=port,
-                                     error=str(exc))
-            await self._force_kill_fn(port)
-            return False
-        if self.lifecycle is not None:
-            self.lifecycle.event("server_health", role="leaf",
-                                 state="resume_adopted_unowned", port=port,
-                                 profile=profile)
-        return True
-
     async def _ensure_leaf_stopped(self) -> None:
+        """Whatever is on the shared leaf port is GONE by the time this
+        returns -- OWNED (via `.stop()`) or an unowned survivor
+        (force-killed). No adoption (ledgered ruling, superseding an
+        earlier design that left a matching survivor unowned): a leaf this
+        orchestra did not spawn is never trusted to be rotatable later
+        (`LeafProcessManager`/`HandshakingProcessManager` need an OWNED
+        `leaf_proc` to call `.restart()` on -- an adopted one leaves
+        mid-episode rotation permanently broken for that leaf's entire
+        tenure), so even a survivor that already matches the TARGET profile
+        is replaced. The ~10s extra relaunch on a resume is accepted:
+        correctness (rotation always works, every event means what it says)
+        over one saved relaunch.
+
+        Called for EVERY leaf bring-up, not only on resume: in ordinary
+        operation `leaf_proc` is already owned once `start_resident()` has
+        run once, so the unowned-survivor branch below is reachable only
+        before the very first bring-up in a process's lifetime -- an
+        ordinary swap between two OWNED processes never probes or logs
+        anything here at all.
+        """
         if self.leaf_proc is not None:
             await self.leaf_proc.stop()
             self.leaf_proc = None
             return
-        # No owned handle -- either nothing is there, or it is the unowned
-        # survivor `_maybe_adopt` deliberately left running on a PRIOR call.
-        # Probe before killing: a force-kill when nothing is listening is a
-        # wasted OS call, and on a real box, futile ones are worth avoiding.
-        if await self._probe_liveness(self.cfg.servers.leaf.port) is not None:
-            await self._force_kill_fn(self.cfg.servers.leaf.port)
+        port = self.cfg.servers.leaf.port
+        live = await self._probe_liveness(port)
+        if live is None:
+            return          # nothing there; nothing to reclaim
+        if not _looks_like_llama_props(live):
+            raise ConfigError(
+                f"port {port} is answering but its /props response does not "
+                f"look like a llama-server one ({live!r}); refusing to "
+                "force-kill a process that might not be a leaf server at "
+                "all -- stop whatever is bound to this port manually and "
+                "retry")
+        if self.lifecycle is not None:
+            self.lifecycle.event("server_health", role="leaf",
+                                 state="reclaiming_unowned_port", port=port)
+        await self._force_kill_fn(port)
 
     # -- leaf lifecycle -------------------------------------------------- #
 
@@ -1271,14 +1329,12 @@ class ServerOrchestra:
                 "--no-launch-servers to run it.")
         target_cfg = self._leaf_cfg(profile)
         t0 = time.monotonic()
-        adopted = await self._maybe_adopt(profile, target_cfg)
-        if not adopted:
-            await self._ensure_leaf_stopped()
-            self.leaf_proc = self._process_factory(
-                target_cfg, health_probe=self._health_probe(target_cfg.port))
-            await self.leaf_proc.start()
+        await self._ensure_leaf_stopped()
+        self.leaf_proc = self._process_factory(
+            target_cfg, health_probe=self._health_probe(target_cfg.port))
+        await self.leaf_proc.start()
         self.current_profile = profile
-        self.last_relaunch_s = 0.0 if adopted else round(time.monotonic() - t0, 3)
+        self.last_relaunch_s = round(time.monotonic() - t0, 3)
         role = "leaf" if profile == RESIDENT_PROFILE else "bench_leaf"
         props = await self._probe(role, target_cfg)
         if profile == BENCH_PROFILE:
@@ -1354,12 +1410,26 @@ class ServerOrchestra:
                           f"{RESIDENT_PROFILE!r} or {BENCH_PROFILE!r}")
 
     # -- the ProcessManager run_b2/run_episode rotate mid-episode --------- #
+    #
+    # BOTH arms run exclusively on the resident topology (`rlm.bench.ARM_PROFILE`),
+    # so both managers target the OWNED resident leaf -- but they are NOT
+    # interchangeable (ledgered ruling): `run_episode` already re-handshakes
+    # itself after `process_manager.restart()` (`Episode._rotate_leaf` ->
+    # `_rehandshake_leaf`), so it gets the PLAIN manager; `run_b2` has no such
+    # built-in re-handshake (`arms.py` cannot itself speak HTTP), so it gets
+    # the one that adds it.
 
-    def resident_process_manager(self) -> HandshakingProcessManager:
-        """The `ProcessManager` handed to `run_b2`/`run_episode` (both arms
-        run exclusively on the resident topology -- `rlm.bench.ARM_PROFILE`):
-        wraps the OWNED resident leaf so `.restart()` also re-runs the §4
-        handshake before returning."""
+    def episode_process_manager(self) -> LeafProcessManager:
+        """For `run_episode` ('rlm' arm). PLAIN restart -- `run_episode`'s
+        own rotation already re-runs the §4 handshake right after this
+        returns; wrapping it here too would double the probe on every RLM
+        rotation for no benefit."""
+        return LeafProcessManager(self)
+
+    def b2_process_manager(self) -> HandshakingProcessManager:
+        """For `run_b2`. Wraps the OWNED resident leaf so `.restart()` also
+        re-runs the §4 handshake before returning -- the ONLY caller that
+        needs it, since `run_b2` cannot re-handshake itself."""
         return HandshakingProcessManager(self, "leaf", self.cfg.servers.leaf)
 
 

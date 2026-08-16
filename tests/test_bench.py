@@ -891,6 +891,7 @@ def test_the_ledger_default_path_is_the_pre_registered_one():
 
 from rlm.cli import (  # noqa: E402 -- grouped with the rest of this section
     HandshakingProcessManager,
+    LeafProcessManager,
     ServerOrchestra,
     bench_dispatcher,
     bench_leaf_config,
@@ -925,6 +926,10 @@ class FakeWorld:
         self.log: list[tuple] = []              # (event, port, parallel), in order
         self.live: dict[int, Any] = {}           # port -> ServerConfig live there
         self.force_kill_calls: list[int] = []
+        #: port -> a raw `/props` BODY to answer with instead of deriving one
+        #: from `live` -- the shape-check tests need a response that does NOT
+        #: look like a llama-server `/props` at all.
+        self.props_override: dict[int, Any] = {}
 
 
 class FakeProcess:
@@ -966,21 +971,38 @@ class FakeClient:
         self.closed = False
 
     async def props(self) -> dict:
+        if self._port in self._world.props_override:
+            return self._world.props_override[self._port]
         cfg = self._world.live.get(self._port)
         if cfg is None:
             raise ConnectionError(f"nothing live on port {self._port}")
         return _fake_props(cfg)
 
     async def health(self) -> bool:
-        return self._world.live.get(self._port) is not None
+        return (self._port in self._world.props_override
+                or self._world.live.get(self._port) is not None)
 
     async def aclose(self) -> None:
         self.closed = True
 
 
+class FakeLifecycle:
+    """`Lifecycle`'s shape (`.event(kind, **fields)`), recording every call
+    so a test can assert on WHICH event fired -- distinguishing a real
+    reclaim from silence is the whole point of `test_...` around the
+    "no false reclaim on an ordinary swap" ruling."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple] = []
+
+    def event(self, kind: str, **fields: Any) -> None:
+        self.events.append((kind, fields))
+
+
 async def _fake_force_kill(port: int, world: FakeWorld) -> None:
     world.force_kill_calls.append(port)
     world.live.pop(port, None)
+    world.props_override.pop(port, None)
 
 
 def _orchestra(cfg: Config, world: FakeWorld, *, launch: bool = True,
@@ -1176,14 +1198,23 @@ async def test_a_real_launch_log_satisfies_the_bench_leaf_cache_check(
 
 
 # -- the ProcessManager run_b2/run_episode rotate mid-episode ---------------- #
+#
+# Ledgered ruling: these are TWO DIFFERENT managers, not one. `run_episode`'s
+# own rotation (`rlm.episode.Episode._rotate_leaf`) already calls
+# `_rehandshake_leaf()` immediately after `process_manager.restart()`
+# returns, so ITS manager must be PLAIN (`episode_process_manager`) --
+# wrapping a second handshake in here too would double the §4 probe on
+# every RLM rotation. `run_b2` has no such built-in re-handshake (`arms.py`
+# cannot itself speak HTTP), so it alone gets the wrapped one
+# (`b2_process_manager`).
 
 
-async def test_resident_process_manager_rehandshakes_after_restart(bench_cfg_dict):
-    """Ledgered ruling: `run_b2`/`run_episode`'s injected `process_manager`
-    must WRAP `restart()` to also re-run the leaf handshake before returning
-    -- `arms.py` cannot itself speak HTTP (the dependency rule), so this is
-    the ONLY place §5's full rotation contract can be restored for `run_b2`.
-    """
+async def test_episode_manager_is_plain_and_b2_manager_handshakes_composed(
+        bench_cfg_dict):
+    """The composition the ruling asks for, in one scenario: the rlm-arm
+    manager performs ZERO handshakes on restart; the b2 manager performs
+    EXACTLY one -- built off the SAME orchestra, so this also proves they
+    are not secretly sharing state."""
     handshake_calls: list[str] = []
 
     async def counting_handshake(client, server_cfg, role, lifecycle):
@@ -1197,51 +1228,89 @@ async def test_resident_process_manager_rehandshakes_after_restart(bench_cfg_dic
     handshake_calls.clear()
     world.log.clear()
 
-    pm = orch.resident_process_manager()
-    assert isinstance(pm, HandshakingProcessManager)
-    await pm.restart()
-
+    episode_pm = orch.episode_process_manager()
+    assert isinstance(episode_pm, LeafProcessManager)
+    assert not isinstance(episode_pm, HandshakingProcessManager)
+    await episode_pm.restart()
     assert world.log == [("restart", 8081, 128)]
-    assert handshake_calls == ["leaf"]     # re-handshake ran AFTER the restart
+    assert handshake_calls == []           # PLAIN: run_episode re-handshakes itself
+
+    world.log.clear()
+    b2_pm = orch.b2_process_manager()
+    assert isinstance(b2_pm, HandshakingProcessManager)
+    await b2_pm.restart()
+    assert world.log == [("restart", 8081, 128)]
+    assert handshake_calls == ["leaf"]     # exactly one, AFTER the restart
 
 
-async def test_resident_process_manager_refuses_when_nothing_is_owned(bench_cfg_dict):
-    """No `start_resident()` ever ran -- there is no process to rotate, and
-    `HandshakingProcessManager` must refuse rather than silently doing
-    nothing (which `rlm.serverproc.ProcessManager`'s own contract forbids)."""
+async def test_episode_manager_refuses_when_nothing_is_owned(bench_cfg_dict):
     cfg = Config.model_validate(bench_cfg_dict)
     world = FakeWorld()
     orch = _orchestra(cfg, world)
-    pm = orch.resident_process_manager()
     with pytest.raises(ServerRotationError, match="nothing to rotate"):
-        await pm.restart()
+        await orch.episode_process_manager().restart()
+
+
+async def test_b2_manager_refuses_when_nothing_is_owned(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    with pytest.raises(ServerRotationError, match="nothing to rotate"):
+        await orch.b2_process_manager().restart()
+
+
+async def test_a_manager_built_at_startup_tracks_the_leaf_across_a_swap(bench_cfg_dict):
+    """`episode_process_manager()`/`b2_process_manager()` look up
+    `orchestra.leaf_proc` FRESH on every `.restart()` -- not captured once --
+    because Task 12 builds them ONCE and `leaf_proc` is a NEW object after
+    every swap. Provoke exactly that: build the manager, swap away and back,
+    then rotate -- it must still work."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+    episode_pm = orch.episode_process_manager()   # built while leaf_proc is #1
+
+    await orch.to_bench_leaf()
+    await orch.to_resident_leaf()                 # leaf_proc is now a NEW object
+    world.log.clear()
+
+    await episode_pm.restart()                    # must rotate the CURRENT one
+    assert world.log == [("restart", 8081, 128)]
 
 
 # -- resume reconciliation: stop/replace, never assume ------------------------ #
+#
+# Ledgered ruling: NO ADOPTION. Any live-but-unowned survivor on the shared
+# leaf port -- matching the target profile or not -- is force-killed and
+# replaced with a fresh, OWNED process. `leaf_proc` is therefore never
+# `None` while a leaf lives, so rotation (`episode_process_manager`/
+# `b2_process_manager`) always works, and an ordinary swap between two
+# OWNED processes never probes or logs a "reclaim" at all -- there is no
+# separate, mislabelled "resume" event path left to fire by accident.
 
 
-async def test_resume_adopts_a_matching_unowned_resident_leaf(bench_cfg_dict):
-    """A crash may have died with the RIGHT leaf profile still up. A fresh
-    `ServerOrchestra` (a resumed run) owns nothing, but must not relaunch a
-    perfectly good server just because it never spawned it."""
+async def test_resume_replaces_even_a_matching_survivor(bench_cfg_dict):
+    """A crash may have died with the RIGHT leaf profile still up -- but an
+    adopted-unowned leaf can never be rotated later (no `LlamaServerProcess`
+    handle), so it is relaunched anyway. The ~10s cost is accepted."""
     cfg = Config.model_validate(bench_cfg_dict)
     world = FakeWorld()
-    world.live[8081] = cfg.servers.leaf          # survivor: correct profile
+    world.live[8081] = cfg.servers.leaf          # survivor: correct profile already
 
     orch = _orchestra(cfg, world)
     await orch.start_resident()
 
-    assert world.force_kill_calls == []
-    assert [e for e in world.log if e[1] == 8081] == []   # never (re)started
+    assert world.force_kill_calls == [8081]
+    assert ("start", 8081, 128) in world.log     # a FRESH resident leaf was spawned
     assert orch.current_profile == RESIDENT_PROFILE
-    assert orch.leaf_proc is None            # adopted, not owned
+    assert orch.leaf_proc is not None            # OWNED, unlike the old adoption path
 
 
 async def test_resume_force_kills_a_mismatched_survivor(bench_cfg_dict):
-    """The scenario the ruling names explicitly: a crash died with
-    `bench_leaf` up. `start_resident()` must detect the mismatch (total_slots
-    2 != 128) and reclaim the port before the resident leaf is spawned --
-    never assume the survivor is fine."""
+    """The scenario named explicitly: a crash died with `bench_leaf` up.
+    `start_resident()` must reclaim the port before the resident leaf is
+    spawned -- never assume the survivor is fine."""
     cfg = Config.model_validate(bench_cfg_dict)
     world = FakeWorld()
     world.live[8081] = cfg.servers.bench_leaf     # survivor: WRONG profile
@@ -1250,9 +1319,9 @@ async def test_resume_force_kills_a_mismatched_survivor(bench_cfg_dict):
     await orch.start_resident()
 
     assert world.force_kill_calls == [8081]
-    assert ("start", 8081, 128) in world.log      # a fresh resident leaf was spawned
+    assert ("start", 8081, 128) in world.log
     assert orch.current_profile == RESIDENT_PROFILE
-    assert orch.leaf_proc is not None             # this time, OWNED
+    assert orch.leaf_proc is not None
 
 
 async def test_resume_with_nothing_live_starts_normally(bench_cfg_dict):
@@ -1262,6 +1331,69 @@ async def test_resume_with_nothing_live_starts_normally(bench_cfg_dict):
     await orch.start_resident()
     assert world.force_kill_calls == []
     assert ("start", 8081, 128) in world.log
+
+
+async def test_reclaim_events_and_force_kills_never_recur_on_ordinary_swaps(
+        bench_cfg_dict):
+    """The false-positive this ruling closes: once `start_resident()` has
+    reconciled (owning `leaf_proc`), an ORDINARY swap must never force-kill
+    or log a "reclaiming" event again -- it stops what it OWNS via
+    `.stop()`, the same as if no resume had ever happened."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    world.live[8081] = cfg.servers.bench_leaf     # a survivor to reconcile away
+    lifecycle = FakeLifecycle()
+
+    orch = _orchestra(cfg, world, lifecycle=lifecycle)
+    await orch.start_resident()
+    assert world.force_kill_calls == [8081]
+    reclaim_events_after_reconcile = [e for e in lifecycle.events
+                                      if e[0] == "server_health"
+                                      and e[1].get("state") == "reclaiming_unowned_port"]
+    assert len(reclaim_events_after_reconcile) == 1
+    world.force_kill_calls.clear()
+
+    await orch.to_bench_leaf()
+    await orch.to_resident_leaf()
+
+    assert world.force_kill_calls == []           # no NEW reclaims
+    reclaim_events_total = [e for e in lifecycle.events
+                            if e[0] == "server_health"
+                            and e[1].get("state") == "reclaiming_unowned_port"]
+    assert reclaim_events_total == reclaim_events_after_reconcile   # still just the one
+
+
+async def test_rotation_works_in_the_first_resumed_block(bench_cfg_dict):
+    """The functional gap the old adoption path left: an adopted-unowned
+    leaf could never be rotated (no owned handle), breaking R13 recovery
+    for its whole tenure. Post-reconciliation, rotation must work
+    IMMEDIATELY -- proven here in the very first block after a resume."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    world.live[8081] = cfg.servers.bench_leaf     # a mismatched survivor
+
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()                   # reconciles: force-kill + fresh spawn
+    world.log.clear()
+
+    await orch.episode_process_manager().restart()  # must NOT raise
+    assert world.log == [("restart", 8081, 128)]
+
+
+async def test_ensure_leaf_stopped_refuses_to_kill_a_non_llama_response(bench_cfg_dict):
+    """Minor, narrow-risk fix: before force-killing an unowned survivor,
+    verify its `/props` response actually LOOKS like a llama-server one.
+    Something else entirely happening to answer HTTP on this port must not
+    be nuked just because it is in the way."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    world.live[8081] = cfg.servers.leaf
+    world.props_override[8081] = {"status": "ok", "not_llama": True}
+
+    orch = _orchestra(cfg, world)
+    with pytest.raises(ConfigError, match="does not look like a llama-server"):
+        await orch.start_resident()
+    assert world.force_kill_calls == []
 
 
 # -- --no-launch-servers: assert-only ----------------------------------------- #
