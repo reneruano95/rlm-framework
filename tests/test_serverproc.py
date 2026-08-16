@@ -118,3 +118,44 @@ async def test_the_launch_log_is_where_config_says(valid_cfg: Config, tmp_path):
     await proc.start()          # returns only once the probe says healthy
     await proc.stop()
     assert "hello" in (tmp_path / "leaf-server.log").read_text(encoding="utf-8")
+
+
+async def test_the_config_env_block_reaches_the_child_merged_over_os_environ(
+        valid_cfg: Config, tmp_path):
+    """`servers.<role>.env` is a launch value like any other flag: it lives in
+    config so `config_snapshot` can record it (R11). MERGED over `os.environ`,
+    not substituted for it -- a child launched with a two-entry environment has
+    no PATH and cannot load a single backend DLL."""
+    cfg = valid_cfg.model_copy(deep=True)
+    cfg.servers.leaf.log_path = tmp_path / "leaf-server.log"
+    cfg.servers.leaf.env = {"RLM_TEST_ENV": "hipblaslt-on"}
+    up = tmp_path / "up"
+
+    async def healthy() -> bool:
+        return up.exists()
+
+    proc = LlamaServerProcess(
+        cfg.servers.leaf, health_probe=healthy, poll_s=0.05,
+        argv=[sys.executable, "-c",
+              "import os, sys, pathlib, time; "
+              "print(os.environ.get('RLM_TEST_ENV'), 'PATH' in os.environ, "
+              "file=sys.stderr, flush=True); "
+              f"pathlib.Path({str(up)!r}).write_text('up'); time.sleep(30)"])
+    await proc.start()
+    await proc.stop()
+    assert "hipblaslt-on True" in (tmp_path / "leaf-server.log").read_text(
+        encoding="utf-8")
+
+
+async def test_an_explicit_env_argument_still_overrides_the_config_block(
+        valid_cfg: Config):
+    """The `env=` parameter stays an override (s2's harnesses build their own),
+    and a config with no env block leaves the child inheriting os.environ."""
+    cfg = valid_cfg.model_copy(deep=True)
+    cfg.servers.leaf.env = {"RLM_TEST_ENV": "from-config"}
+    proc = LlamaServerProcess(cfg.servers.leaf, health_probe=always_healthy,
+                              env={"RLM_TEST_ENV": "from-caller"})
+    assert proc.env == {"RLM_TEST_ENV": "from-caller"}
+    cfg.servers.leaf.env = {}
+    assert LlamaServerProcess(cfg.servers.leaf,
+                              health_probe=always_healthy).env == {}

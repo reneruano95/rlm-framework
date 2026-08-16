@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import textwrap
@@ -274,6 +275,11 @@ def test_all_null_sha256_validates_fine_even_though_files_dont_exist(tmp_path, m
     prompts["leaf_envelope"] = {"path": str(missing), "sha256": None}
     for cat in prompts["strategy_templates"]:
         prompts["strategy_templates"][cat] = {"path": str(missing), "sha256": None}
+    # S4's baseline slots are prompt refs like any other, so they get the same
+    # treatment -- and the loop below is the reason this test is the one that
+    # notices a new slot enumeration going in unaccompanied.
+    for name in prompts.get("baselines", {}):
+        prompts["baselines"][name] = {"path": str(missing), "sha256": None}
     cfg = Config.model_validate(minimal_cfg_dict)  # must not raise
     for _, ref in cfg._prompt_refs():
         assert ref.sha256 is None
@@ -448,3 +454,107 @@ def test_the_wall_clock_budget_carries_the_aggregation_ruling(valid_cfg):
     # 302 windows x 2 sub-calls must still fit the sub-call budget, or the
     # ruling would have moved the breach rather than removed it.
     assert valid_cfg.scaffold.budgets.max_subcalls >= 604
+
+
+# --------------------------------------------------------------------------- #
+# S4 (§8): the baseline arms' prompts, the B1/B3 relaunch profile, the frozen
+# benchmark's pins, and the launch environment.
+# --------------------------------------------------------------------------- #
+
+
+def test_baseline_prompts_load_pin_and_render(valid_cfg):
+    reg = valid_cfg.prompt_registry()
+    text = reg.render_baseline("b1_single_shot")
+    assert "only the answer value" in text
+    hashes = reg.hashes()
+    assert "baselines.b1_single_shot.file" in hashes   # recorded => replay-safe
+
+
+def test_bench_leaf_profile_validates_and_derives_argv(valid_cfg):
+    from rlm.serverproc import launch_argv
+    bl = valid_cfg.servers.bench_leaf
+    assert bl is not None and bl.parallel == 2 and bl.ctx == 524288
+    argv = launch_argv(bl)
+    assert "-np" in argv and argv[argv.index("-np") + 1] == "2"
+    assert argv[argv.index("-c") + 1] == "524288"
+
+
+def test_benchmark_pins_present(valid_cfg):
+    assert valid_cfg.benchmark.manifest_sha256 is not None
+    assert valid_cfg.benchmark.escalation_seeds == [4, 5]
+
+
+def test_config_without_baselines_still_validates(minimal_cfg_dict):
+    raw = copy.deepcopy(minimal_cfg_dict)
+    raw["scaffold"]["prompts"].pop("baselines", None)
+    raw["servers"].pop("bench_leaf", None)
+    Config.model_validate(raw)   # pre-S4 configs and snapshots stay loadable
+
+
+def test_every_baseline_prompt_is_pinned_and_renders(valid_cfg):
+    """All four names, not just B1's: a slot that is declared but unreadable
+    (or unpinned) is one whose text `config_snapshot` cannot vouch for, and §8
+    scores the baselines against RLM on exactly that text."""
+    reg = valid_cfg.prompt_registry().load()
+    hashes = reg.hashes()
+    for name in ("b1_single_shot", "b2_leaf_summary", "b2_root_final",
+                 "b3_single_shot"):
+        assert reg.render_baseline(name).strip()
+        assert f"baselines.{name}.file" in hashes
+    pinned = valid_cfg.pinned_prompt_hashes()
+    for _, ref in valid_cfg._prompt_refs():
+        assert ref.sha256 is not None, f"{ref.path} is not pinned"
+        assert pinned[str(ref.path)] == hashlib.sha256(
+            ref.path.read_bytes()).hexdigest()
+
+
+def test_render_baseline_without_baselines_configured_is_refused(minimal_cfg_dict):
+    """A missing `baselines` block must name itself, not KeyError deep inside an
+    arm runner half an hour into a bench block."""
+    raw = copy.deepcopy(minimal_cfg_dict)
+    raw["scaffold"]["prompts"].pop("baselines", None)
+    reg = Config.model_validate(raw).prompt_registry()
+    with pytest.raises(ConfigError, match="baselines"):
+        reg.render_baseline("b1_single_shot")
+
+
+def test_the_bench_leaf_profile_is_the_shipped_leaf_with_two_full_slots(valid_cfg):
+    """§8:344 (v0.2.6 correction). B1 and B3 each get a slot of the leaf's full
+    native 262,144-token window, so neither is measured on a truncation the
+    scaffold chose for it, and they stop sharing slot 0 (R13's smallest repro).
+    `--cont-batching` is deliberately absent: this profile serves exactly two
+    sequential single calls per block, and R14 measured continuous batching as
+    the mechanism behind concurrent-dispatch corruption."""
+    leaf, bench = valid_cfg.servers.leaf, valid_cfg.servers.bench_leaf
+    assert bench.model == leaf.model and bench.backend_dir == leaf.backend_dir
+    assert bench.backend == leaf.backend and bench.port == leaf.port
+    assert bench.ctx // bench.parallel == 262_144
+    assert bench.log_path != leaf.log_path, "start() truncates the log (D27)"
+    assert "--cont-batching" not in bench.extra_flags
+    assert bench.env.get("ROCBLAS_USE_HIPBLASLT") == "1"
+    # A plain ServerConfig: slot discipline is the RLM leaf's, and a
+    # `slot_policy` here would advertise a knob nothing reads.
+    assert not hasattr(bench, "slot_policy")
+
+
+def test_the_leaf_carries_the_rocblas_env_the_launch_path_used_to_drop(valid_cfg):
+    """`s2/run_occupancy.py:455` sets ROCBLAS_USE_HIPBLASLT for every leaf
+    measurement recorded so far; the CLI's own launch path passed `env=None`,
+    so `--launch-leaf` would have run the S4 blocks against a differently
+    configured BLAS than every S2 number they are compared with."""
+    assert valid_cfg.servers.leaf.env == {"ROCBLAS_USE_HIPBLASLT": "1"}
+
+
+def test_the_benchmark_pin_is_the_frozen_manifests_own_hash(valid_cfg):
+    """`benchmark.version` names the manifest; this is the number that MOVES if
+    any task, corpus hash, checker or precondition result changes. Pinning it in
+    config means `config_snapshot` records which freeze an episode was scored
+    against, not merely that one existed."""
+    from pathlib import Path
+    manifest = Path(__file__).resolve().parents[1] / "bench" / "manifest.json"
+    assert valid_cfg.benchmark.manifest_sha256 == hashlib.sha256(
+        manifest.read_bytes()).hexdigest()
+    # The escalation seeds are DISJOINT from the primary ones, or an escalated
+    # block would re-run seeds already spent and report the same draw twice.
+    assert not (set(valid_cfg.benchmark.escalation_seeds)
+                & set(valid_cfg.benchmark.seeds))

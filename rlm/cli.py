@@ -193,6 +193,13 @@ def leaf_process_manager(cfg: Config, *, launch: bool):
     instead of once per exhausted pool. `--launch-leaf` is what makes the
     R13 mitigation usable past window `--parallel`: the scaffold can only
     replace a process it started.
+
+    The child's environment comes from `servers.leaf.env` (merged over
+    `os.environ` by `LlamaServerProcess`), NOT from this process's environment
+    alone. No `env=` is passed here precisely so that the launch environment is
+    a config value `config_snapshot` records -- passing `env=None` is what
+    silently dropped ROCBLAS_USE_HIPBLASLT, which every leaf number in `s2/`
+    was measured with (`s2/run_occupancy.py:455`).
     """
     if cfg.scaffold.dispatcher != "real" or not launch:
         return None
@@ -661,6 +668,13 @@ def episode_config(snapshot: dict) -> tuple[Config, Any]:
     # back missing the `leaf_envelope.*` entries the episode recorded and every
     # replay of an envelope episode reads as prompt DRIFT.
     envelope_ref = prompts.get("leaf_envelope")
+    # Same rule, same bug class, for §8's baseline prompts (S4): a slot the
+    # registry loads but this rebuild skips comes back missing from
+    # `registry.hashes()`, and EVERY episode recorded since it landed replays as
+    # prompt DRIFT. `Config.prompt_registry` is the enumeration this one has to
+    # agree with; the `or {}` keeps a pre-S4 snapshot (no baselines block at
+    # all) rebuilding exactly as it did before.
+    baseline_refs = prompts.get("baselines") or {}
     try:
         registry = PromptRegistry.from_files(
             root_path=Path(prompts["root"]["path"]),
@@ -668,6 +682,8 @@ def episode_config(snapshot: dict) -> tuple[Config, Any]:
             leaf_envelope_path=(Path(envelope_ref["path"]) if envelope_ref else None),
             strategy_paths={cat: Path(ref["path"])
                             for cat, ref in prompts["strategy_templates"].items()},
+            baseline_paths={name: Path(ref["path"])
+                            for name, ref in baseline_refs.items()},
         ).load()
     except KeyError as exc:
         raise ConfigError(f"config_snapshot has no prompt path for {exc}") from exc

@@ -405,6 +405,56 @@ def test_launch_leaf_builds_the_manager_from_config_flags(valid_config_file):
     assert not manager.owned          # nothing started yet; `run` starts it
 
 
+def test_launch_leaf_carries_the_config_env_to_the_child(valid_config_file):
+    """`servers.leaf.env` is merged over os.environ at launch. The CLI passed
+    `env=None` here, which silently dropped ROCBLAS_USE_HIPBLASLT -- the
+    variable every S2 leaf measurement was taken with (`s2/run_occupancy.py`
+    :455) -- so a `--launch-leaf` S4 block would have been compared against
+    numbers from a differently configured BLAS."""
+    from rlm.cli import leaf_process_manager
+
+    cfg = load_config(valid_config_file)
+    manager = leaf_process_manager(cfg, launch=True)
+    assert manager is not None
+    assert manager.env == dict(cfg.servers.leaf.env)
+    assert manager.env["ROCBLAS_USE_HIPBLASLT"] == "1"
+
+
+def test_replay_survives_an_s4_era_snapshot_with_baseline_prompts(mock_episode_env):
+    """An episode recorded with baselines loaded must replay clean: the
+    episode_config rebuild includes baselines.* or PromptDrift fires on every
+    S4 episode (the leaf_envelope bug class, cli.py:659-663)."""
+    main(["run", str(mock_episode_env.task_file), "--config",
+          str(mock_episode_env.config_file)])
+    assert main(["replay", mock_episode_env.last_episode_id(), "--config",
+                 str(mock_episode_env.config_file)]) == 0
+
+
+def test_the_recorded_prompt_hashes_include_the_baselines(mock_episode_env):
+    """The half the replay test cannot see on its own: if the baselines never
+    reached `prompt_hashes`, the rebuild would agree with the snapshot by both
+    being empty and the trap would look shut while standing open."""
+    import json
+
+    import duckdb
+
+    main(["run", str(mock_episode_env.task_file), "--config",
+          str(mock_episode_env.config_file)])
+    ep = mock_episode_env.last_episode_id()
+    con = duckdb.connect(str(mock_episode_env.db_path), read_only=True)
+    try:
+        snap = json.loads(con.execute(
+            "SELECT config_snapshot FROM episodes WHERE episode_id = ?",
+            [ep]).fetchone()[0])
+    finally:
+        con.close()
+    hashes = snap["prompt_hashes"]
+    for name in ("b1_single_shot", "b2_leaf_summary", "b2_root_final",
+                 "b3_single_shot"):
+        assert f"baselines.{name}.file" in hashes
+        assert f"baselines.{name}.body" in hashes
+
+
 def test_run_takes_launch_leaf_and_defaults_to_off():
     """Off by default: taking ownership silently would kill an operator's own
     leaf server at the end of an episode."""

@@ -126,6 +126,39 @@ servers:
     # entry can never be hit at all, so the 8.2 GiB it costs buys zero.
     # `--no-cache-idle-slots` is the equivalent alternative; both measured.
     extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching", "--cache-ram 0"]
+    # Every leaf number in s2/ was measured with hipBLASLt on
+    # (`s2/run_occupancy.py:455` exports it before launching). It lives here so
+    # `config_snapshot` records it and so `rlm run --launch-leaf` cannot
+    # silently launch against a differently configured BLAS than the runs it is
+    # compared with. Merged over os.environ at launch, never substituted for it.
+    env: { ROCBLAS_USE_HIPBLASLT: '1' }
+  bench_leaf:
+    # §8:344 (v0.2.6 correction): the B1/B3 relaunch profile. Two slots so B1
+    # and B3 stop sharing slot 0 (R13's smallest repro); 524288/2 = 262144
+    # per-slot = the leaf's full native window.
+    #
+    # SAME PORT as the leaf, deliberately: this is a RELAUNCH of the one leaf
+    # process, not a second server. Dual residency is already 51.53 GiB of the
+    # 64 GiB carve with one leaf up (§4), so two of them do not fit and the
+    # bench block stops the RLM-profile leaf before starting this one.
+    model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
+    port: 8081
+    backend: rocm
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
+    log_path: traces/logs/leaf-server-bench.log   # own path: start() truncates (D27)
+    ctx: 524288
+    parallel: 2
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    env: { ROCBLAS_USE_HIPBLASLT: '1' }
+    # `--cont-batching` is deliberately ABSENT (the RLM leaf carries it): this
+    # profile serves exactly two sequential single calls per block, so batching
+    # buys nothing, and R14 (`s2/OCCUPANCY.md` §7) puts the concurrent-dispatch
+    # decode corruption behind exactly that path. The rest is the shipped leaf
+    # line minus the slot-pool-specific flags.
+    extra_flags: ['-lm none', '--no-kv-unified', '--cache-ram 0']
   fallback_leaf: null
 
 scaffold:
@@ -297,6 +330,13 @@ scaffold:
       synthesis: { path: prompts/strat-synthesis.v1.md, sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c }
       code_qa: { path: prompts/strat-codeqa.v1.md, sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e }
       default: { path: prompts/strat-default.v1.md, sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415 }
+    baselines:
+      # §8 baseline arms (S4). Authored 2026-08-16, pinned at commit, never
+      # iterated against benchmark content (no-overfit rule).
+      b1_single_shot: { path: prompts/b1-single-shot.v1.md, sha256: 6884cbb6855ceeed2aca11389d7a22ebed99eb9f986ceea26f6976b35ac551dd }
+      b2_leaf_summary: { path: prompts/b2-leaf-summary.v1.md, sha256: 7f738b8e5b156f694353ffa5f16059c32d4baa2a70496a96c87c4c03c7877aa3 }
+      b2_root_final: { path: prompts/b2-root-final.v1.md, sha256: f08f207cec3da8d9405d31f4d0b678bf611ce864efb55eef52a0b2803a8a4332 }
+      b3_single_shot: { path: prompts/b3-single-shot.v1.md, sha256: 703c6099f0fb985ee21bd8aefb95ed30dd9b9a2cd49c0a1d3352f98cbc10fbc8 }
   # DECIDED BY THE S2 A/B (`s2/REFUSAL-AB.md`), not by taste. `enabled` appends
   # the format block to the leaf prefix and makes C4 parse/validate the reply
   # scaffold-side; `grammar` is the SEPARATE server-side enforcement flag and is
@@ -371,5 +411,16 @@ trace:
 # (30 tasks x 2 models x 3 seeds, 0/6 everywhere — no task is answerable without
 # its corpus) and the checker near-miss suites (>=3 per checker, in
 # rlm/checkers.py beside the implementations).
-benchmark: { version: v1, seeds: [1, 2, 3] }
+#
+# `manifest_sha256` IS that freeze hash, pinned so `config_snapshot` records
+# WHICH freeze an episode was scored against rather than merely that one
+# existed. `escalation_seeds` are §8's two extra draws, disjoint from `seeds`,
+# spent only on a block whose sign test lands short of significance -- declared
+# up front so escalation is a pre-registered rule and not a decision made after
+# seeing the result.
+benchmark:
+  version: v1
+  manifest_sha256: 571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91
+  seeds: [1, 2, 3]
+  escalation_seeds: [4, 5]
 power_sampling: { enabled: false }

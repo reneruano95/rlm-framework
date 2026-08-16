@@ -844,6 +844,8 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
         prompts["leaf_envelope"]["path"] = str(REPO_ROOT / prompts["leaf_envelope"]["path"])
     for ref in prompts["strategy_templates"].values():
         ref["path"] = str(REPO_ROOT / ref["path"])
+    for ref in (prompts.get("baselines") or {}).values():
+        ref["path"] = str(REPO_ROOT / ref["path"])
     raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
     raw["trace"]["blob_root"] = str(tmp_path / "blobs")
     if over.get("truncation_cap") is not None:
@@ -999,6 +1001,8 @@ def valid_config_file(minimal_cfg_dict: dict, tmp_path: Path) -> Path:
     if prompts.get("leaf_envelope"):
         prompts["leaf_envelope"]["path"] = str(REPO_ROOT / prompts["leaf_envelope"]["path"])
     for ref in prompts["strategy_templates"].values():
+        ref["path"] = str(REPO_ROOT / ref["path"])
+    for ref in (prompts.get("baselines") or {}).values():
         ref["path"] = str(REPO_ROOT / ref["path"])
     raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
     raw["trace"]["blob_root"] = str(tmp_path / "blobs")

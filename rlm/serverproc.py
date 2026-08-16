@@ -85,6 +85,9 @@ def launch_argv(server_cfg: ServerConfig) -> list[str]:
     preference: D27 measured that `/props` cannot report KV cache types, so
     `rlm validate` recovers them by parsing this log level's output. A server
     launched below it is UNVERIFIED, which validate treats as a refusal.
+
+    `server_cfg.env` is deliberately NOT here: it is the child's environment,
+    not a command-line word, and `LlamaServerProcess` applies it at spawn.
     """
     argv = [str(Path(server_cfg.backend_dir) / _exe_name()),
             "-m", str(server_cfg.model),
@@ -124,7 +127,13 @@ class LlamaServerProcess:
                  poll_s: float = DEFAULT_POLL_S) -> None:
         self.server_cfg = server_cfg
         self.argv = argv if argv is not None else launch_argv(server_cfg)
-        self.env = env
+        #: The environment overlay applied over `os.environ` at launch. Comes
+        #: from config by default, for the same reason `argv` does: a launch
+        #: value invented in code is one `config_snapshot` cannot record (R11),
+        #: and ROCBLAS_USE_HIPBLASLT was set for every leaf measurement in
+        #: `s2/` while this launch path silently dropped it. An explicit `env=`
+        #: still wins, so a harness that builds its own environment can.
+        self.env: dict[str, str] = dict(server_cfg.env if env is None else env)
         self._health = health_probe
         self._start_timeout_s = start_timeout_s
         self._stop_timeout_s = stop_timeout_s
@@ -160,9 +169,11 @@ class LlamaServerProcess:
         log_path = Path(self.server_cfg.log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log = log_path.open("wb")
-        env = None
-        if self.env is not None:
-            env = {**os.environ, **self.env}
+        # MERGED over the parent environment, never substituted for it: a child
+        # handed a one-entry environment has no PATH and loads no backend DLL.
+        # `None` (inherit) when there is nothing to overlay, so the common case
+        # stays exactly what it was.
+        env = {**os.environ, **self.env} if self.env else None
         try:
             self._proc = subprocess.Popen(  # noqa: S603 -- argv from config
                 self.argv, stdout=self._log, stderr=subprocess.STDOUT, env=env)

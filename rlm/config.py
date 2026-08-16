@@ -55,6 +55,14 @@ class ServerConfig(_Strict):
     ub: int
     b: int
     extra_flags: list[str] = []
+    #: Environment overlay for the launch, MERGED over `os.environ` (never
+    #: substituted for it -- a child with a two-entry environment has no PATH
+    #: and loads no backend DLL). Here rather than in code for the same reason
+    #: `extra_flags` is: a launch value invented in code is one
+    #: `config_snapshot` cannot record (R11), and ROCBLAS_USE_HIPBLASLT is set
+    #: for every leaf measurement in `s2/` (`s2/run_occupancy.py:455`) while
+    #: the scaffold's own launch path dropped it.
+    env: dict[str, str] = {}
 
 
 class LeafServerConfig(ServerConfig):
@@ -79,6 +87,15 @@ class ServersConfig(_Strict):
     root: ServerConfig
     leaf: LeafServerConfig
     fallback_leaf: ServerConfig | None = None
+    #: §8's B1/B3 relaunch profile (S4): the SAME leaf weights on the same port,
+    #: relaunched with two slots of the model's full native window so the
+    #: single-shot baselines are measured on what the model can actually read
+    #: rather than on the 2,560-token slot R13's pool arithmetic gives the RLM
+    #: arm. A plain `ServerConfig`: slot discipline belongs to the pool the
+    #: scaffold allocates from, and this profile serves two sequential calls
+    #: per block on fixed slots 0 and 1, so a `slot_policy` here would
+    #: advertise a knob nothing reads. `None` on a pre-S4 config.
+    bench_leaf: ServerConfig | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -156,6 +173,32 @@ class StrategyTemplates(_Strict):
     default: PromptRef
 
 
+#: The four §8 baseline prompt slots. A `Literal` rather than a bare `str` so
+#: an arm runner asking for a name that was never authored fails at the type
+#: checker and at `render_baseline`, not silently at scoring time.
+BaselineName = Literal["b1_single_shot", "b2_leaf_summary",
+                       "b2_root_final", "b3_single_shot"]
+
+BASELINE_NAMES: tuple[BaselineName, ...] = (
+    "b1_single_shot", "b2_leaf_summary", "b2_root_final", "b3_single_shot")
+
+
+class BaselinePromptsCfg(_Strict):
+    """§8's baseline arms' prompts (S4), pinned like every other registry file.
+
+    They are pre-registered: authored once, hashed at commit, and never
+    iterated against benchmark content. §8's whole comparison is RLM against
+    these three arms, so a prompt tuned until B1 looked weak would make the
+    result an artefact of the tuning. The pin is what makes that auditable --
+    `config_snapshot` records the bytes each arm actually ran.
+    """
+
+    b1_single_shot: PromptRef
+    b2_leaf_summary: PromptRef
+    b2_root_final: PromptRef
+    b3_single_shot: PromptRef
+
+
 class PromptsCfg(_Strict):
     root: PromptRef
     leaf_prefix: PromptRef
@@ -167,6 +210,12 @@ class PromptsCfg(_Strict):
     #: A/B without being edited. `null` when the envelope is not in use.
     leaf_envelope: PromptRef | None = None
     strategy_templates: StrategyTemplates
+    #: `None` on a pre-S4 config (and in a pre-S4 `config_snapshot`, which must
+    #: keep replaying). Every slot declared here must ALSO appear in
+    #: `Config._prompt_refs`, `Config.prompt_registry` and `cli.episode_config`'s
+    #: rebuild -- a slot the registry loads but the rebuild does not is
+    #: `PromptDrift` on replay of every episode that recorded it.
+    baselines: BaselinePromptsCfg | None = None
 
 
 class LeafEnvelope(_Strict):
@@ -255,6 +304,17 @@ class TraceCfg(_Strict):
 class BenchmarkCfg(_Strict):
     version: str | None = None
     seeds: list[int] = [1, 2, 3]
+    #: The frozen manifest's OWN sha256 -- the one number that moves if any
+    #: task, corpus hash, checker or precondition result changes. `version`
+    #: names the manifest; this identifies the exact freeze, so an episode's
+    #: snapshot says which task set it was scored against. `None` pre-S4.
+    manifest_sha256: str | None = None
+    #: §8's escalation draws, spent only on a block whose sign test lands short
+    #: of significance. Disjoint from `seeds` by construction: re-running a
+    #: seed already spent would report the same draw twice and inflate n
+    #: without adding evidence. Declared here so escalation is a pre-registered
+    #: rule rather than a decision made after seeing the result.
+    escalation_seeds: list[int] = [4, 5]
 
 
 class PowerSamplingCfg(_Strict):
@@ -442,9 +502,20 @@ class Config(_Strict):
         return self
 
     def _prompt_refs(self) -> list[tuple[str, PromptRef]]:
+        """Every prompt slot this config declares, as (registry name, ref).
+
+        ONE OF FOUR ENUMERATIONS that must agree on the slot set: this one,
+        `PromptsCfg`, `prompt_registry()`, and `cli.episode_config`'s replay
+        rebuild. A slot added here but not to the rebuild is `PromptDrift` on
+        every episode recorded after it lands (see `cli.py`'s `leaf_envelope`
+        note for the bug class).
+        """
         prompts = self.scaffold.prompts
         envelope = ([("leaf_envelope", prompts.leaf_envelope)]
                     if prompts.leaf_envelope is not None else [])
+        baselines = ([(f"baselines.{name}", getattr(prompts.baselines, name))
+                      for name in BASELINE_NAMES]
+                     if prompts.baselines is not None else [])
         return [
             ("root", prompts.root),
             ("leaf_prefix", prompts.leaf_prefix),
@@ -454,6 +525,7 @@ class Config(_Strict):
             ("strategy_templates.synthesis", prompts.strategy_templates.synthesis),
             ("strategy_templates.code_qa", prompts.strategy_templates.code_qa),
             ("strategy_templates.default", prompts.strategy_templates.default),
+            *baselines,
         ]
 
     def pinned_prompt_hashes(self) -> dict[str, str]:
@@ -468,8 +540,16 @@ class Config(_Strict):
         }
 
     def prompt_registry(self) -> "PromptRegistry":
-        """Build (but do not `.load()`) the PromptRegistry this config declares."""
+        """Build (but do not `.load()`) the PromptRegistry this config declares.
+
+        Third of the four slot enumerations (see `_prompt_refs`): what lands in
+        the registry is what `registry.hashes()` records into every episode's
+        snapshot, and therefore what `cli.episode_config` must rebuild.
+        """
         prompts = self.scaffold.prompts
+        baseline_refs = ({name: getattr(prompts.baselines, name)
+                          for name in BASELINE_NAMES}
+                         if prompts.baselines is not None else {})
         strategy_refs = {
             "needle": prompts.strategy_templates.needle,
             "aggregation": prompts.strategy_templates.aggregation,
@@ -489,6 +569,11 @@ class Config(_Strict):
             strategy_paths={cat: ref.path for cat, ref in strategy_refs.items()},
             strategy_sha256={
                 cat: ref.sha256 for cat, ref in strategy_refs.items()
+                if ref.sha256 is not None
+            },
+            baseline_paths={name: ref.path for name, ref in baseline_refs.items()},
+            baseline_sha256={
+                name: ref.sha256 for name, ref in baseline_refs.items()
                 if ref.sha256 is not None
             },
         )
@@ -591,12 +676,19 @@ class PromptRegistry:
     #: vary independently and `leaf-prefix.v1.md` never has to be edited.
     leaf_envelope_path: Path | None = None
     leaf_envelope_sha256: str | None = None
+    #: §8's baseline-arm prompts (S4), keyed by `BaselineName`. Empty on a
+    #: pre-S4 config -- and on a pre-S4 SNAPSHOT, which `cli.episode_config`
+    #: rebuilds this registry from, so replay of an old episode must keep
+    #: working with no baselines at all.
+    baseline_paths: dict[str, Path] = field(default_factory=dict)
+    baseline_sha256: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._root_body: str | None = None
         self._leaf_prefix_body: str | None = None
         self._leaf_envelope_body: str | None = None
         self._strategy_bodies: dict[str, str] = {}
+        self._baseline_bodies: dict[str, str] = {}
         self._hashes: dict[str, str] = {}
         self._loaded = False
 
@@ -612,6 +704,8 @@ class PromptRegistry:
         strategy_sha256: dict[str, str] | None = None,
         leaf_envelope_path: Path | None = None,
         leaf_envelope_sha256: str | None = None,
+        baseline_paths: dict[str, Path] | None = None,
+        baseline_sha256: dict[str, str] | None = None,
     ) -> "PromptRegistry":
         return cls(
             root_path=root_path,
@@ -622,6 +716,8 @@ class PromptRegistry:
             strategy_sha256=dict(strategy_sha256 or {}),
             leaf_envelope_path=leaf_envelope_path,
             leaf_envelope_sha256=leaf_envelope_sha256,
+            baseline_paths=dict(baseline_paths or {}),
+            baseline_sha256=dict(baseline_sha256 or {}),
         )
 
     def _load_one(self, name: str, path: Path, pinned: str | None) -> str:
@@ -655,6 +751,10 @@ class PromptRegistry:
             pinned = self.strategy_sha256.get(category)
             self._strategy_bodies[category] = self._load_one(
                 f"strategy.{category}", path, pinned
+            )
+        for name, path in self.baseline_paths.items():
+            self._baseline_bodies[name] = self._load_one(
+                f"baselines.{name}", path, self.baseline_sha256.get(name)
             )
         self._loaded = True
         return self
@@ -704,6 +804,28 @@ class PromptRegistry:
         if not envelope:
             return self.leaf_prefix()
         return f"{self.leaf_prefix()}\n\n{self.leaf_envelope()}"
+
+    def render_baseline(self, name: BaselineName) -> str:
+        """The pinned prompt for one §8 baseline arm (spec §8, S4).
+
+        Returned as-is: unlike `render_root`, nothing is appended. The baselines
+        are single, self-contained instruction blocks by design -- an arm whose
+        prompt were assembled from parts would be measuring the assembly as much
+        as the topology.
+
+        Raises ConfigError when the slot is not configured, rather than
+        KeyError-ing inside an arm runner an hour into a bench block: a config
+        with no `scaffold.prompts.baselines` cannot run §8's baselines at all,
+        and that is worth being told once, by name.
+        """
+        self._ensure_loaded()
+        if name not in self._baseline_bodies:
+            raise ConfigError(
+                f"no baseline prompt {name!r} is declared; "
+                f"scaffold.prompts.baselines must pin all of {list(BASELINE_NAMES)} "
+                "before §8's baseline arms can run (spec §8)"
+            )
+        return self._baseline_bodies[name]
 
     def hashes(self) -> dict[str, str]:
         self._ensure_loaded()
