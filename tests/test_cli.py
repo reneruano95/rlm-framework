@@ -430,6 +430,48 @@ def test_replay_survives_an_s4_era_snapshot_with_baseline_prompts(mock_episode_e
                  str(mock_episode_env.config_file)]) == 0
 
 
+def test_replay_of_a_pre_s4_snapshot_without_the_new_keys_still_works(mock_episode_env):
+    """The other half of the same trap, in the other direction.
+
+    Every episode recorded BEFORE S4 has a snapshot with no `baselines` block,
+    no `servers.bench_leaf`, no `servers.*.env` and no benchmark pins. A rebuild
+    that reached for `prompts["baselines"]` unconditionally, or a schema whose
+    new fields had no defaults, would turn all of them into a ConfigError --
+    which is a spec violation, not a cosmetic one: the trace store is the
+    experimental record and replay is how it is audited.
+    """
+    import json
+
+    import duckdb
+
+    main(["run", str(mock_episode_env.task_file), "--config",
+          str(mock_episode_env.config_file)])
+    ep = mock_episode_env.last_episode_id()
+
+    con = duckdb.connect(str(mock_episode_env.db_path))
+    try:
+        snap = json.loads(con.execute(
+            "SELECT config_snapshot FROM episodes WHERE episode_id = ?",
+            [ep]).fetchone()[0])
+        # Age the snapshot back to its pre-S4 shape: the keys S4 introduced
+        # simply were not there, including the hashes the registry recorded.
+        snap["scaffold"]["prompts"].pop("baselines")
+        snap["servers"].pop("bench_leaf")
+        for role in ("root", "leaf"):
+            snap["servers"][role].pop("env")
+        for key in ("manifest_sha256", "escalation_seeds"):
+            snap["benchmark"].pop(key)
+        snap["prompt_hashes"] = {k: v for k, v in snap["prompt_hashes"].items()
+                                 if not k.startswith("baselines.")}
+        con.execute("UPDATE episodes SET config_snapshot = ? WHERE episode_id = ?",
+                    [json.dumps(snap), ep])
+    finally:
+        con.close()
+
+    assert main(["replay", ep, "--config",
+                 str(mock_episode_env.config_file)]) == 0
+
+
 def test_the_recorded_prompt_hashes_include_the_baselines(mock_episode_env):
     """The half the replay test cannot see on its own: if the baselines never
     reached `prompt_hashes`, the rebuild would agree with the snapshot by both
