@@ -9,6 +9,15 @@ from rlm.errors import ActionType, Actor, Outcome, StepStatus
 from rlm.trace import TraceLogger, recover_orphans, safe_text
 
 
+def _episode_row(episode_id: str, **over) -> dict:
+    """Minimal `open_episode` dict, matching the inline shape used throughout
+    this file (episode_id/task_id/task_hash/config_snapshot)."""
+    row = {"episode_id": episode_id, "task_id": "t", "task_hash": "h",
+           "config_snapshot": {}}
+    row.update(over)
+    return row
+
+
 def test_safe_text_survives_lone_surrogates():
     assert safe_text("a" + chr(0xDCFF) + "b")  # must not raise
     json.dumps(safe_text("a" + chr(0xD800)))
@@ -203,3 +212,46 @@ def test_the_rotation_column_is_added_to_a_pre_existing_steps_table(tmp_path):
     con.execute(schema)
     assert "server_rotation" in [r[0] for r in con.execute("DESCRIBE steps").fetchall()]
     con.close()
+
+
+async def test_update_episode_metrics_sets_only_supplied_columns(tmp_path):
+    # episode_id must be a real UUID string (schema.sql:21 -- episodes.episode_id
+    # is typed UUID); a non-UUID literal fails the INSERT with a DuckDB
+    # ConversionException that the writer loop swallows silently (no
+    # `lifecycle` wired up here), which would otherwise masquerade as this
+    # test failing for the wrong reason.
+    ep = "33333333-3333-3333-3333-333333333333"
+    tl = TraceLogger(tmp_path / "t.duckdb", tmp_path / "blobs")
+    await tl.start()
+    try:
+        tl.open_episode(_episode_row(ep))
+        tl.update_episode_metrics(ep, pkg_temp_c_start=61.5)
+        tl.update_episode_metrics(ep, avg_power_w=117.2,
+                                   energy_j=42_000.0, pkg_temp_c_end=88.0)
+        await tl.drain()
+        row = tl.monitor().execute(
+            "SELECT pkg_temp_c_start, pkg_temp_c_end, avg_power_w, energy_j "
+            "FROM episodes WHERE episode_id = ?", [ep]).fetchone()
+        # pytest.approx: the columns are REAL (float32, schema.sql:34-37), so
+        # a round trip through storage does not preserve every float64 bit
+        # pattern -- 117.2 comes back 117.19999694824219.
+        assert row == pytest.approx((61.5, 88.0, 117.2, 42_000.0))
+    finally:
+        await tl.aclose()
+
+
+async def test_mark_superseded_links_the_rerun(tmp_path):
+    tl = TraceLogger(tmp_path / "t.duckdb", tmp_path / "blobs")
+    await tl.start()
+    try:
+        tl.open_episode(_episode_row("11111111-1111-1111-1111-111111111111"))
+        tl.open_episode(_episode_row("22222222-2222-2222-2222-222222222222"))
+        tl.mark_superseded("11111111-1111-1111-1111-111111111111",
+                            "22222222-2222-2222-2222-222222222222")
+        await tl.drain()
+        got = tl.monitor().execute(
+            "SELECT superseded_by FROM episodes WHERE episode_id = ?",
+            ["11111111-1111-1111-1111-111111111111"]).fetchone()[0]
+        assert str(got) == "22222222-2222-2222-2222-222222222222"
+    finally:
+        await tl.aclose()

@@ -203,6 +203,21 @@ class _CloseMsg:
 
 
 @dataclass(slots=True)
+class _MetricsMsg:
+    episode_id: Any
+    pkg_temp_c_start: float | None
+    pkg_temp_c_end: float | None
+    avg_power_w: float | None
+    energy_j: float | None
+
+
+@dataclass(slots=True)
+class _SupersedeMsg:
+    old_episode_id: Any
+    new_episode_id: Any
+
+
+@dataclass(slots=True)
 class _Shutdown:
     pass
 
@@ -266,6 +281,23 @@ class TraceLogger:
                        outcome_reason: Any = None, final_answer_ref: Any = None) -> None:
         self.queue.put_nowait(
             _CloseMsg(episode_id, outcome, outcome_reason, final_answer_ref, utc_now()))
+
+    def update_episode_metrics(self, episode_id: Any, *, pkg_temp_c_start: float | None = None,
+                                pkg_temp_c_end: float | None = None,
+                                avg_power_w: float | None = None,
+                                energy_j: float | None = None) -> None:
+        """Cost-scorecard columns (schema.sql:34-37). Only the supplied
+        (non-None) columns are written -- callers stamp pkg_temp_c_start at
+        launch and the rest at teardown, in separate calls, and neither call
+        should clobber columns the other one owns."""
+        self.queue.put_nowait(
+            _MetricsMsg(episode_id, pkg_temp_c_start, pkg_temp_c_end,
+                        avg_power_w, energy_j))
+
+    def mark_superseded(self, old_episode_id: Any, new_episode_id: Any) -> None:
+        """§8's rerun rule: `old_episode_id` was superseded by `new_episode_id`
+        (schema.sql:33, episodes.superseded_by)."""
+        self.queue.put_nowait(_SupersedeMsg(old_episode_id, new_episode_id))
 
     # -- monitoring: in-process ONLY (DuckDB holds an exclusive file lock on
     #    Windows -- connect/connect-read-only/ATTACH/copyfile all fail from a
@@ -376,6 +408,10 @@ class TraceLogger:
             self._commit_step(con, msg)
         elif isinstance(msg, _CloseMsg):
             self._commit_close(con, msg)
+        elif isinstance(msg, _MetricsMsg):
+            self._commit_metrics(con, msg)
+        elif isinstance(msg, _SupersedeMsg):
+            self._commit_supersede(con, msg)
         else:
             raise TypeError(f"unknown trace message: {type(msg)!r}")
 
@@ -451,6 +487,34 @@ class TraceLogger:
             con.execute("ROLLBACK")
             raise
         self._next_idx.pop(str(msg.episode_id), None)
+
+    def _commit_metrics(self, con: duckdb.DuckDBPyConnection, msg: _MetricsMsg) -> None:
+        sets, params = [], []
+        for col in ("pkg_temp_c_start", "pkg_temp_c_end", "avg_power_w", "energy_j"):
+            val = getattr(msg, col)
+            if val is not None:
+                sets.append(f"{col} = ?")
+                params.append(val)
+        if not sets:
+            return
+        con.execute("BEGIN TRANSACTION")
+        try:
+            con.execute(f"UPDATE episodes SET {', '.join(sets)} WHERE episode_id = ?",
+                        [*params, msg.episode_id])
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
+    def _commit_supersede(self, con: duckdb.DuckDBPyConnection, msg: _SupersedeMsg) -> None:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            con.execute("UPDATE episodes SET superseded_by = ? WHERE episode_id = ?",
+                        [msg.new_episode_id, msg.old_episode_id])
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
 
     def _write_blob(self, rel: str, data: bytes) -> None:
         p = self.blob_root / rel
