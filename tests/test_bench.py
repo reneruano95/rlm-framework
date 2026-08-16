@@ -35,7 +35,7 @@ from rlm.bench import (
     seeded_config,
 )
 from rlm.config import Config
-from rlm.episode import Task
+from rlm.episode import Task, handshake
 from rlm.errors import ConfigError, Outcome
 from rlm.power import PowerReading
 from rlm.trace import TraceLogger, utc_now
@@ -875,3 +875,486 @@ def test_the_ledger_default_path_is_the_pre_registered_one():
     from rlm.bench import LEDGER_PATH
 
     assert LEDGER_PATH.parts[-3:] == ("s4", "results", "ledger.jsonl")
+
+
+# --------------------------------------------------------------------------- #
+# ServerOrchestra (Task 10): FakeProcess/fake-client doubles, no real servers.
+#
+# `ServerOrchestra` fills bench.py's `quiesce_fn`/`handshake_fn`/
+# `swap_servers_fn` hooks -- but the lint (`tests/test_import_rules.py`)
+# forces the CLASS ITSELF to live in `rlm/cli.py`, not a new module: it needs
+# `ServerClient` for the §4 handshake, and `FORBIDDEN_RLM` bans `rlm.dispatcher`
+# from any module that would have to join `ISOLATED` (see the module docstring
+# on `rlm.cli.ServerOrchestra`). These tests import it from there and exercise
+# it exactly as `rlm.bench` will: through fakes, no servers, no network.
+# --------------------------------------------------------------------------- #
+
+from rlm.cli import (  # noqa: E402 -- grouped with the rest of this section
+    HandshakingProcessManager,
+    ServerOrchestra,
+    bench_dispatcher,
+    bench_leaf_config,
+)
+from rlm.episode import assert_props
+from rlm.errors import ServerRotationError
+
+
+def _fake_props(server_cfg) -> dict:
+    """A `/props` body a real llama-server launched with `server_cfg` would
+    answer with, as far as `rlm.episode.assert_props` looks: model_path,
+    total_slots, per-slot n_ctx, build_info."""
+    return {
+        "model_path": str(server_cfg.model),
+        "total_slots": server_cfg.parallel,
+        "default_generation_settings": {"n_ctx": server_cfg.ctx // server_cfg.parallel},
+        # Matches the sample `-lv 4` build line used below (D27 cache-type
+        # tests): `log_is_current` requires BOTH the commit and the number
+        # parsed from the log to appear in this string.
+        "build_info": "10375 (ba360efe1)",
+    }
+
+
+class FakeWorld:
+    """Shared state across one test's `FakeProcess`/`FakeClient` doubles:
+    which `ServerConfig` (if any) is answering on each port right now. Leaf
+    and bench_leaf SHARE port 8081, so a `/props` probe through the fake
+    client must reflect whichever one most recently started -- the same
+    coupling `assert_props` exists to catch for real."""
+
+    def __init__(self) -> None:
+        self.log: list[tuple] = []              # (event, port, parallel), in order
+        self.live: dict[int, Any] = {}           # port -> ServerConfig live there
+        self.force_kill_calls: list[int] = []
+
+
+class FakeProcess:
+    """`LlamaServerProcess`'s shape (`start`/`stop`/`restart`, `.owned`),
+    enough for `ServerOrchestra` to drive with no real server anywhere."""
+
+    def __init__(self, server_cfg: Any, world: FakeWorld, **_kw: Any) -> None:
+        self.server_cfg = server_cfg
+        self._world = world
+        self.owned = False
+
+    async def start(self) -> None:
+        self._world.log.append(("start", self.server_cfg.port, self.server_cfg.parallel))
+        self._world.live[self.server_cfg.port] = self.server_cfg
+        self.owned = True
+
+    async def stop(self) -> None:
+        self._world.log.append(("stop", self.server_cfg.port, self.server_cfg.parallel))
+        if self._world.live.get(self.server_cfg.port) is self.server_cfg:
+            del self._world.live[self.server_cfg.port]
+        self.owned = False
+
+    async def restart(self) -> None:
+        self._world.log.append(("restart", self.server_cfg.port, self.server_cfg.parallel))
+        self._world.live[self.server_cfg.port] = self.server_cfg
+        self.owned = True
+
+
+class FakeClient:
+    """`ServerClient`'s shape, enough for the REAL `handshake`/`assert_props`
+    logic to run against synthesized `/props` bodies -- so these tests prove
+    the WIRING (which config a probe checks against), not merely that a mock
+    was called."""
+
+    def __init__(self, base_url: str, world: FakeWorld, **_kw: Any) -> None:
+        self.base_url = base_url
+        self._world = world
+        self._port = int(base_url.rsplit(":", 1)[1])
+        self.closed = False
+
+    async def props(self) -> dict:
+        cfg = self._world.live.get(self._port)
+        if cfg is None:
+            raise ConnectionError(f"nothing live on port {self._port}")
+        return _fake_props(cfg)
+
+    async def health(self) -> bool:
+        return self._world.live.get(self._port) is not None
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def _fake_force_kill(port: int, world: FakeWorld) -> None:
+    world.force_kill_calls.append(port)
+    world.live.pop(port, None)
+
+
+def _orchestra(cfg: Config, world: FakeWorld, *, launch: bool = True,
+               lifecycle: Any = None, handshake_fn=None, cache_check_fn=None) -> ServerOrchestra:
+    kwargs: dict[str, Any] = dict(
+        launch=launch, lifecycle=lifecycle,
+        process_factory=lambda server_cfg, **kw: FakeProcess(server_cfg, world),
+        client_factory=lambda url, **kw: FakeClient(url, world),
+        force_kill_fn=lambda port: _fake_force_kill(port, world),
+        cache_check_fn=cache_check_fn or (lambda *a, **k: True),
+    )
+    if handshake_fn is not None:
+        kwargs["handshake_fn"] = handshake_fn
+    return ServerOrchestra(cfg, **kwargs)
+
+
+# -- start/stop order, port-conflict prevention ------------------------------ #
+
+
+async def test_start_resident_starts_root_then_leaf_in_order(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+    assert world.log == [("start", 8080, 1), ("start", 8081, 128)]
+    assert orch.current_profile == RESIDENT_PROFILE
+    assert orch.root_proc is not None and orch.leaf_proc is not None
+
+
+async def test_to_bench_leaf_stops_the_resident_leaf_before_starting_bench_leaf(
+        bench_cfg_dict):
+    """§8: bench_leaf SHARES port 8081 with the RLM leaf, so starting it
+    while the resident leaf is still up would either bind-fail or leave two
+    servers answering. The stop must be ordered strictly before the start."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+    world.log.clear()
+
+    await orch.to_bench_leaf()
+    assert world.log == [("stop", 8081, 128), ("start", 8081, 2)]
+    assert orch.current_profile == BENCH_PROFILE
+    assert world.live[8081] is cfg.servers.bench_leaf
+
+
+async def test_to_resident_leaf_reverses_the_swap(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+    await orch.to_bench_leaf()
+    world.log.clear()
+
+    await orch.to_resident_leaf()
+    assert world.log == [("stop", 8081, 2), ("start", 8081, 128)]
+    assert orch.current_profile == RESIDENT_PROFILE
+
+
+async def test_swap_to_is_the_swap_servers_fn_shape_bench_wires_up(bench_cfg_dict):
+    """`swap_to(profile) -> Awaitable[Any]` matches `BenchCtx.swap_servers_fn`
+    exactly -- Task 12 wires `swap_servers_fn=orchestra.swap_to` directly."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+
+    await orch.swap_to(BENCH_PROFILE)
+    assert orch.current_profile == BENCH_PROFILE
+    await orch.swap_to(RESIDENT_PROFILE)
+    assert orch.current_profile == RESIDENT_PROFILE
+    with pytest.raises(ConfigError, match="unknown server profile"):
+        await orch.swap_to("nonsense")
+
+
+async def test_bring_up_leaf_is_a_no_op_already_on_the_target_profile(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+    world.log.clear()
+
+    relaunch_s = await orch.to_resident_leaf()
+    assert relaunch_s == 0.0
+    assert world.log == []          # nothing stopped, nothing started again
+
+
+async def test_stop_all_stops_leaf_then_root(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+    world.log.clear()
+
+    await orch.stop_all()
+    assert world.log == [("stop", 8081, 128), ("stop", 8080, 1)]
+    assert orch.leaf_proc is None and orch.root_proc is None
+    assert orch.current_profile is None
+
+
+# -- handshake against the ARM-SPECIFIC ServerConfig ------------------------- #
+
+
+async def test_handshake_after_a_swap_checks_the_arm_specific_config(bench_cfg_dict):
+    """The ruling this guards: passing `cfg.servers.leaf` (128 slots) for a
+    `bench_leaf` process (2 slots) fails `total_slots` and would wrongly
+    refuse every B1/B3 episode. `to_bench_leaf` must succeed -- proving it
+    handshaked against `servers.bench_leaf`, not `servers.leaf`."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+
+    await orch.to_bench_leaf()          # would raise ConfigError if mischecked
+
+    # And the contrast that proves it: the SAME live props, checked against
+    # the WRONG config, really do fail -- so a correct implementation had to
+    # choose `servers.bench_leaf` deliberately, not by accident.
+    bench_props = _fake_props(cfg.servers.bench_leaf)
+    with pytest.raises(ConfigError, match="total_slots"):
+        assert_props(bench_props, cfg.servers.leaf, "leaf")
+
+
+async def test_handshake_profile_probes_root_and_the_named_leaf(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+
+    result = await orch.handshake_profile(RESIDENT_PROFILE)
+    assert set(result) == {"root", "leaf"}
+
+    await orch.to_bench_leaf()
+    result = await orch.handshake_profile(BENCH_PROFILE)
+    assert set(result) == {"root", "bench_leaf"}
+
+
+# -- D27 gap: bench_leaf's cache types are never checked by `rlm validate` --- #
+
+
+async def test_a_bench_leaf_cache_type_mismatch_refuses_the_swap(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world, cache_check_fn=lambda *a, **k: False)
+    await orch.start_resident()
+
+    with pytest.raises(ConfigError, match="cache type"):
+        await orch.to_bench_leaf()
+    # The process really did come up (the mismatch is in the LOG, not the
+    # process) -- current_profile reflects what is actually live.
+    assert orch.current_profile == BENCH_PROFILE
+
+
+async def test_the_cache_check_receives_exactly_the_bench_leaf_role(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    seen: list[tuple] = []
+
+    def spy(cfg_, probed, out, err, *, probe_ran, roles=("root", "leaf")):
+        seen.append((tuple(probed), roles, probe_ran))
+        return True
+
+    orch = _orchestra(cfg, world, cache_check_fn=spy)
+    await orch.start_resident()
+    await orch.to_bench_leaf()
+    assert seen == [(("bench_leaf",), ("bench_leaf",), True)]
+
+
+async def test_a_real_launch_log_satisfies_the_bench_leaf_cache_check(
+        tmp_path, bench_cfg_dict):
+    """End to end with the REAL `_check_cache_types`/`parse_launch_log` (D27's
+    actual verification, reused rather than reinvented): a `-lv 4` log
+    matching `bench_leaf`'s configured cache_type/flash_attn is accepted."""
+    from rlm.cli import _check_cache_types
+
+    raw = copy.deepcopy(bench_cfg_dict)
+    log_path = tmp_path / "leaf-server-bench.log"
+    raw["servers"]["bench_leaf"]["log_path"] = str(log_path)
+    cfg = Config.model_validate(raw)
+    bl = cfg.servers.bench_leaf
+    log_path.write_text(
+        "build: 10375 (ba360efe1) with clang for x86_64-pc-windows-msvc\n"
+        f"llama_context: flash_attn = {'enabled' if bl.flash_attn == 'on' else 'disabled'}\n"
+        f"llama_kv_cache: size =  1088.00 MiB (  32768 cells,  16 layers,  "
+        f"1/1 seqs), K ({bl.cache_type}):  544.00 MiB, V ({bl.cache_type}):  544.00 MiB\n",
+        encoding="utf-8")
+
+    world = FakeWorld()
+    orch = _orchestra(cfg, world, cache_check_fn=_check_cache_types)
+    await orch.start_resident()
+    await orch.to_bench_leaf()          # does not raise
+    assert orch.current_profile == BENCH_PROFILE
+
+
+# -- the ProcessManager run_b2/run_episode rotate mid-episode ---------------- #
+
+
+async def test_resident_process_manager_rehandshakes_after_restart(bench_cfg_dict):
+    """Ledgered ruling: `run_b2`/`run_episode`'s injected `process_manager`
+    must WRAP `restart()` to also re-run the leaf handshake before returning
+    -- `arms.py` cannot itself speak HTTP (the dependency rule), so this is
+    the ONLY place §5's full rotation contract can be restored for `run_b2`.
+    """
+    handshake_calls: list[str] = []
+
+    async def counting_handshake(client, server_cfg, role, lifecycle):
+        handshake_calls.append(role)
+        return await handshake(client, server_cfg, role, lifecycle)
+
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world, handshake_fn=counting_handshake)
+    await orch.start_resident()
+    handshake_calls.clear()
+    world.log.clear()
+
+    pm = orch.resident_process_manager()
+    assert isinstance(pm, HandshakingProcessManager)
+    await pm.restart()
+
+    assert world.log == [("restart", 8081, 128)]
+    assert handshake_calls == ["leaf"]     # re-handshake ran AFTER the restart
+
+
+async def test_resident_process_manager_refuses_when_nothing_is_owned(bench_cfg_dict):
+    """No `start_resident()` ever ran -- there is no process to rotate, and
+    `HandshakingProcessManager` must refuse rather than silently doing
+    nothing (which `rlm.serverproc.ProcessManager`'s own contract forbids)."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    pm = orch.resident_process_manager()
+    with pytest.raises(ServerRotationError, match="nothing to rotate"):
+        await pm.restart()
+
+
+# -- resume reconciliation: stop/replace, never assume ------------------------ #
+
+
+async def test_resume_adopts_a_matching_unowned_resident_leaf(bench_cfg_dict):
+    """A crash may have died with the RIGHT leaf profile still up. A fresh
+    `ServerOrchestra` (a resumed run) owns nothing, but must not relaunch a
+    perfectly good server just because it never spawned it."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    world.live[8081] = cfg.servers.leaf          # survivor: correct profile
+
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+
+    assert world.force_kill_calls == []
+    assert [e for e in world.log if e[1] == 8081] == []   # never (re)started
+    assert orch.current_profile == RESIDENT_PROFILE
+    assert orch.leaf_proc is None            # adopted, not owned
+
+
+async def test_resume_force_kills_a_mismatched_survivor(bench_cfg_dict):
+    """The scenario the ruling names explicitly: a crash died with
+    `bench_leaf` up. `start_resident()` must detect the mismatch (total_slots
+    2 != 128) and reclaim the port before the resident leaf is spawned --
+    never assume the survivor is fine."""
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    world.live[8081] = cfg.servers.bench_leaf     # survivor: WRONG profile
+
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+
+    assert world.force_kill_calls == [8081]
+    assert ("start", 8081, 128) in world.log      # a fresh resident leaf was spawned
+    assert orch.current_profile == RESIDENT_PROFILE
+    assert orch.leaf_proc is not None             # this time, OWNED
+
+
+async def test_resume_with_nothing_live_starts_normally(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    await orch.start_resident()
+    assert world.force_kill_calls == []
+    assert ("start", 8081, 128) in world.log
+
+
+# -- --no-launch-servers: assert-only ----------------------------------------- #
+
+
+async def test_no_launch_servers_handshakes_but_never_spawns(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    world.live[8080] = cfg.servers.root
+    world.live[8081] = cfg.servers.leaf
+    orch = _orchestra(cfg, world, launch=False)
+
+    await orch.start_resident()
+    assert world.log == []            # never touched a process
+    assert orch.current_profile == RESIDENT_PROFILE
+
+
+async def test_no_launch_servers_refuses_a_swap_with_a_clear_error(bench_cfg_dict):
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    world.live[8080] = cfg.servers.root
+    world.live[8081] = cfg.servers.leaf
+    orch = _orchestra(cfg, world, launch=False)
+    await orch.start_resident()
+
+    with pytest.raises(ConfigError, match="no-launch-servers"):
+        await orch.to_bench_leaf()
+    assert world.log == []
+    assert world.force_kill_calls == []
+
+
+# -- dispatcher lifecycle: RLM/B2 vs the B1/B3 bench_leaf topology ----------- #
+
+
+def test_bench_leaf_config_swaps_servers_leaf_for_bench_leafs_fields(bench_cfg_dict):
+    cfg2 = bench_leaf_config(bench_cfg_dict)
+    bl = Config.model_validate(bench_cfg_dict).servers.bench_leaf
+    assert cfg2.servers.leaf.parallel == bl.parallel == 2
+    assert cfg2.servers.leaf.ctx == bl.ctx == 524288
+    assert cfg2.servers.leaf.port == bl.port == 8081
+    # the ORIGINAL config is untouched (never mutate a built Config).
+    original = Config.model_validate(bench_cfg_dict)
+    assert original.servers.leaf.parallel == 128
+
+
+def test_bench_leaf_config_refuses_without_a_bench_leaf_profile(bench_cfg_dict):
+    raw = copy.deepcopy(bench_cfg_dict)
+    raw["servers"]["bench_leaf"] = None
+    with pytest.raises(ConfigError, match="bench_leaf"):
+        bench_leaf_config(raw)
+
+
+def test_bench_dispatcher_sees_the_true_two_slot_topology(bench_cfg_dict):
+    from rlm.dispatcher import LLMDispatcher
+
+    d = bench_dispatcher(bench_cfg_dict)
+    assert isinstance(d, LLMDispatcher)
+    assert d.slots.size == 2
+    assert d._targets["leaf"].slot_capacity_tokens == 262144
+
+
+# -- composed with rlm.bench.run_block: relaunch strictly between episodes --- #
+
+
+async def test_orchestra_wired_into_run_block_keeps_relaunch_out_of_wall_s(
+        tmp_path, bench_cfg_dict):
+    """The ledgered contract restated with the REAL orchestration, not just
+    `Hooks` fakes (Task 9 already proves the scheduler-side half of this in
+    `test_wall_clock_excludes_the_relaunch_and_the_handshake`): swaps happen
+    strictly inside `_prepare`, entirely before `_run_cell` reads its own
+    `t0`, so driving `ServerOrchestra` as the real hooks must not leak any
+    extra clock reads into the timed bracket."""
+    async def _always_idle(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    cfg = Config.model_validate(bench_cfg_dict)
+    world = FakeWorld()
+    orch = _orchestra(cfg, world)
+    orch._slots_idle_fn = _always_idle   # quiesce: no real /slots probe
+    await orch.start_resident()
+    world.log.clear()
+
+    clock = FakeClock(step=1.0)
+    arms = FakeArms()
+    ctx = BenchCtx(
+        raw_cfg=bench_cfg_dict, cfg=cfg, run_id="run-1",
+        manifest=_manifest(["t1"]), ledger=BenchLedger(tmp_path / "ledger.jsonl"),
+        trace=FakeTrace(), arm_runners=arms.runners(), load_task_fn=_task_loader,
+        quiesce_fn=orch.quiesce, handshake_fn=orch.handshake_profile,
+        swap_servers_fn=orch.swap_to, clock=clock, repo_root=tmp_path)
+
+    records = await run_block(build_blocks(ctx.manifest, [1])[0], ["rlm", "b1"], ctx)
+    assert [r["wall_s"] for r in records] == [1.0, 1.0]
+    # ...and the swap genuinely happened (real FakeProcess start/stop), not
+    # merely a no-op hook that would make this assertion vacuous.
+    assert ("stop", 8081, 128) in world.log and ("start", 8081, 2) in world.log

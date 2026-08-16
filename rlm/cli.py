@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import copy
 import datetime as dt
 import hashlib
 import json
@@ -39,22 +40,25 @@ import os
 import re
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import duckdb
 
+from rlm.bench import BENCH_PROFILE, RESIDENT_PROFILE
 from rlm.config import Config, PromptRegistry, load_config
 from rlm.dispatcher import LLMDispatcher, MockDispatcher, ServerClient
 from rlm.episode import (
     Task,
     assert_props,
     compose_user_message,
+    handshake,
     no_cell_observation,
     run_episode,
 )
-from rlm.errors import ActionType, ConfigError, RlmError, StepStatus
+from rlm.errors import ActionType, ConfigError, RlmError, ServerRotationError, StepStatus
 from rlm.lifecycle import Lifecycle
 from rlm.rootclient import assistant_prefix, extract_cell
 from rlm.serverproc import LlamaServerProcess
@@ -394,7 +398,8 @@ async def _probe_servers(cfg: Config, lifecycle: Lifecycle, out) -> dict[str, di
 
 
 def _check_cache_types(cfg: Config, probed: dict[str, dict], out, err,
-                        *, probe_ran: bool) -> bool:
+                        *, probe_ran: bool,
+                        roles: tuple[str, ...] = ("root", "leaf")) -> bool:
     """D27's half of the §4 handshake: cache types + flash-attn, from the
     launch log, cross-checked against the live build so a stale log cannot
     satisfy the assertion.
@@ -407,9 +412,15 @@ def _check_cache_types(cfg: Config, probed: dict[str, dict], out, err,
     config-and-isolation only and there is no live build to tie a log to;
     `probe_ran` carries that distinction rather than letting an empty `probed`
     dict stand in for it.
+
+    `roles` defaults to `cmd_validate`'s pair, but `ServerOrchestra.to_bench_leaf`
+    (S4 Task 10) calls this with `roles=("bench_leaf",)` -- the D27 gap
+    `rlm validate` never closes on its own, since it only ever probes
+    `root`/`leaf`. Every role named here must be an attribute of
+    `cfg.servers` (`getattr(cfg.servers, role)`).
     """
     ok = True
-    for role in ("root", "leaf"):
+    for role in roles:
         server_cfg = getattr(cfg.servers, role)
         parsed = parse_launch_log(server_cfg.log_path)
         unverified = None
@@ -915,6 +926,441 @@ def _first_difference(want: list[dict], got: list[dict]) -> str:
             return (f"message {i} ({a.get('role')}): stored {a.get('content', '')[:120]!r} "
                     f"vs re-derived {b.get('content', '')[:120]!r}")
     return f"stored {len(want)} messages, re-derived {len(got)}"
+
+
+# =========================================================================== #
+# ServerOrchestra (S4 Task 10): who owns BOTH server profiles for a bench run
+# =========================================================================== #
+#
+# WHY THIS CLASS LIVES HERE, IN THE PROCESS ROOT, AND NOT IN A NEW MODULE.
+# `rlm/bench.py`'s dependency-rule exemption is spec-frozen at exactly two
+# modules -- `rlm/episode.py` and `rlm/cli.py` (`tests/test_import_rules.py`'s
+# `ISOLATED` list and its comment on `bench.py`). A standalone `rlm/benchserve.py`
+# was the first design considered, and it does not survive that lint. Every
+# module on disk that is not one of the two exempt composition roots (or the
+# small always-exempt set -- `dispatcher.py`, `rootclient.py`, `config.py`,
+# `lifecycle.py`, `errors.py`, `__init__.py`) MUST appear in `ISOLATED`
+# (`test_lint_covers_every_isolated_module_that_exists`), and every module IN
+# `ISOLATED` is forbidden from importing `rlm.dispatcher`/`rlm.rootclient`
+# directly (`FORBIDDEN_RLM`). `ServerOrchestra` needs `ServerClient` for the §4
+# handshake (`rlm.episode.handshake` takes one as its first argument) -- so a
+# `benchserve.py` housing it would have to import `rlm.dispatcher`, which is
+# exactly the one import `ISOLATED` membership forbids. There is no import
+# shape that gets HTTP into a new isolated module; the class joins
+# `leaf_process_manager` here instead of widening the exemption list, exactly
+# as `rlm/serverproc.py`'s own docstring anticipates ("the CLI ... supplies an
+# implementation").
+#
+# WHAT IT OWNS. `root_proc` is started once by `start_resident()` and only
+# ever RE-PROBED after that -- the root never changes across a bench run.
+# `leaf_proc` moves between the RESIDENT profile (`servers.leaf`, RLM/B2) and
+# the BENCH profile (`servers.bench_leaf`, B1/B3); the two SHARE port 8081 by
+# config (its own comment: "this is a RELAUNCH of the one leaf process, not a
+# second server"), so a swap always stops whatever is live before starting the
+# other. `_bring_up_leaf` is the one place that happens -- used by
+# `start_resident`, `to_bench_leaf` and `to_resident_leaf` alike, so
+# `swap_to`'s two callers can never race each other into a bound port.
+#
+# THE HOOK SURFACE. `rlm/bench.py`'s `BenchCtx` takes three server-facing
+# callables; Task 12 binds them straight off one instance:
+#
+#     BenchCtx(quiesce_fn=orchestra.quiesce,
+#              handshake_fn=orchestra.handshake_profile,
+#              swap_servers_fn=orchestra.swap_to, ...)
+#
+# and the `ProcessManager` `run_b2`/`run_episode` rotate mid-episode (both
+# arms run exclusively on the RESIDENT profile -- `rlm.bench.ARM_PROFILE`) is
+# `orchestra.resident_process_manager()`.
+#
+# EVERYTHING THAT TOUCHES A PROCESS, THE NETWORK, OR THE OS IS INJECTED --
+# `rlm/arms.py`'s own discipline, restated here: `process_factory` defaults to
+# `LlamaServerProcess`, `client_factory` to `ServerClient`, `handshake_fn` to
+# `rlm.episode.handshake`, `cache_check_fn` to `_check_cache_types`,
+# `slots_idle_fn` to `_slots_idle`, `force_kill_fn` to a best-effort Windows
+# port-reclaim. Unit tests substitute a `FakeProcess`/fake-client pair for the
+# first two and let the REAL `handshake`/`assert_props` logic run against
+# synthesized `/props` bodies, so the tests prove the WIRING -- which config
+# reaches which check -- not merely that a mock was called.
+
+
+#: The §4 handshake's own read timeout, reused for the swap-time probe.
+DEFAULT_ORCHESTRA_HANDSHAKE_TIMEOUT_S = 15.0
+#: A liveness probe (resume reconciliation, health polling) is not the
+#: handshake itself -- it exists to answer "is anything there at all", so it
+#: fails fast rather than waiting out the full handshake budget.
+DEFAULT_ORCHESTRA_LIVENESS_TIMEOUT_S = 5.0
+
+
+class _NullLifecycle:
+    """A `Lifecycle`-shaped no-op. `_slots_idle` calls `.event(...)`
+    unconditionally, and `ServerOrchestra` is meant to be constructible (and
+    testable) with no lifecycle log at all."""
+
+    def event(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_NULL_LIFECYCLE = _NullLifecycle()
+
+
+def _pid_on_port(port: int) -> int | None:
+    """Best-effort: which PID (if any) is LISTENING on `port`, via `netstat`.
+    Windows-only, like the rest of this module's process ownership. Returns
+    `None` on any failure to parse or run the command -- the caller's own
+    `start()` still fails loudly if the port turns out to still be bound."""
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True,
+                             text=True, check=False, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    needle = f"127.0.0.1:{port} "
+    for line in out.splitlines():
+        if "LISTENING" in line and needle in line:
+            parts = line.split()
+            if parts and parts[-1].isdigit():
+                return int(parts[-1])
+    return None
+
+
+async def _default_force_kill(port: int) -> None:
+    """Reclaim a port a resumed run does not own (§5 C4 resume safety,
+    ledgered ruling): the survivor of a crash that a fresh `ServerOrchestra`
+    never spawned, so `LlamaServerProcess.restart()`'s ownership check cannot
+    touch it -- there is no OBJECT to call `.restart()` on. Best-effort and
+    silent on failure (no `netstat`/`taskkill`, permission denied, already
+    exited); the caller's own `start()` still fails loudly (a bind error
+    surfaces as `ServerRotationError`) if the port stays occupied."""
+    pid = _pid_on_port(port)
+    if pid is None:
+        return
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True,
+                       check=False, timeout=10)
+    await asyncio.sleep(0.5)   # let the OS release the socket before a retry
+
+
+def bench_leaf_config(raw_cfg: dict) -> Config:
+    """The `Config` §8's B1/B3 dispatcher is built against: `servers.leaf`
+    REPLACED by `servers.bench_leaf`'s fields, so `LLMDispatcher.from_config`
+    (and `rlm.arms.bench_slot_capacity`) read the TRUE 2-slot/524288-ctx
+    topology instead of the resident 128-slot one.
+
+    Patches the RAW dict and re-validates -- `rlm.bench.seeded_config`'s
+    pattern, verbatim: never mutate a built `Config`, so every cross-field
+    rule in `rlm.config` (slot capacity vs chunk budget, dispatch_concurrency
+    vs parallel) runs again against the swapped-in values rather than being
+    assumed to still hold.
+    """
+    raw = copy.deepcopy(raw_cfg)
+    bench = (raw.get("servers") or {}).get("bench_leaf")
+    if bench is None:
+        raise ConfigError(
+            "servers.bench_leaf is not configured; §8's B1/B3 dispatcher "
+            "cannot be built without it (ARCHITECTURE.md §8)")
+    raw["servers"]["leaf"] = copy.deepcopy(bench)
+    return Config.model_validate(raw)
+
+
+def bench_dispatcher(raw_cfg: dict, *,
+                      on_step: Callable[[dict[str, Any]], None] | None = None
+                      ) -> LLMDispatcher:
+    """§8's B1/B3 leaf dispatcher: the same construction as the RLM/B2
+    dispatcher (`LLMDispatcher.from_config`), against the swapped-in
+    `bench_leaf` topology (`bench_leaf_config`)."""
+    return LLMDispatcher.from_config(bench_leaf_config(raw_cfg), on_step=on_step)
+
+
+class HandshakingProcessManager:
+    """Wraps an OWNED leaf process so `.restart()` also re-runs the §4
+    handshake against `server_cfg` before returning.
+
+    Required because `arms.py` cannot itself speak HTTP (the dependency
+    rule -- see its `_rotate_leaf` docstring), and because `run_b2` has no
+    built-in re-handshake of its own the way `run_episode`'s
+    `_rehandshake_leaf` does for the 'rlm' arm. Ledgered ruling: restore §5's
+    full rotation contract ("stop -> start -> re-handshake -> resume") for
+    EVERY caller of `ProcessManager.restart()`, not only the one that already
+    had it. `rlm.arms.ArmEpisode._rotate_leaf`'s own docstring names this
+    exact composition as the way to close that gap.
+    """
+
+    def __init__(self, orchestra: "ServerOrchestra", role: str, server_cfg: Any) -> None:
+        self._orchestra = orchestra
+        self._role = role
+        self._server_cfg = server_cfg
+
+    async def restart(self) -> None:
+        proc = self._orchestra.leaf_proc
+        if proc is None:
+            raise ServerRotationError(
+                f"no {self._role} process is owned by this orchestra; there "
+                "is nothing to rotate (was start_resident() called?)")
+        await proc.restart()
+        await self._orchestra._probe(self._role, self._server_cfg)
+
+
+class ServerOrchestra:
+    """Owns the root process, and swaps the leaf process between the
+    RESIDENT (RLM/B2) and BENCH (B1/B3) profiles for one bench run (§8's
+    within-block order: RLM -> B2 -> [swap] -> B1 -> B3 -> [swap, lazily, at
+    the next block's RLM arm]).
+    """
+
+    def __init__(self, cfg: Config, *, launch: bool = True,
+                 lifecycle: Any = None, out: Any = None, err: Any = None,
+                 process_factory: Callable[..., Any] = LlamaServerProcess,
+                 client_factory: Callable[..., Any] = ServerClient,
+                 handshake_fn: Callable[..., Awaitable[dict]] = handshake,
+                 cache_check_fn: Callable[..., bool] = _check_cache_types,
+                 slots_idle_fn: Callable[..., Awaitable[bool]] = _slots_idle,
+                 force_kill_fn: Callable[[int], Awaitable[None]] | None = None,
+                 handshake_timeout_s: float = DEFAULT_ORCHESTRA_HANDSHAKE_TIMEOUT_S
+                 ) -> None:
+        self.cfg = cfg
+        #: False is `--no-launch-servers`: assert-only. Handshakes still run
+        #: (against whatever an operator already has up); swaps refuse.
+        self.launch = launch
+        self.lifecycle = lifecycle
+        self.out = out if out is not None else sys.stdout
+        self.err = err if err is not None else sys.stderr
+        self._process_factory = process_factory
+        self._client_factory = client_factory
+        self._handshake_fn = handshake_fn
+        self._cache_check_fn = cache_check_fn
+        self._slots_idle_fn = slots_idle_fn
+        self._force_kill_fn = force_kill_fn if force_kill_fn is not None else _default_force_kill
+        self._handshake_timeout_s = handshake_timeout_s
+        self.root_proc: Any = None
+        self.leaf_proc: Any = None
+        #: Which leaf profile `leaf_proc` (or an adopted-unowned survivor, see
+        #: `_maybe_adopt`) currently holds. `None` until `start_resident` runs.
+        self.current_profile: str | None = None
+        #: Wall time the MOST RECENT swap spent stopped-to-healthy. §8
+        #: excludes this from per-task wall-clock BY CONSTRUCTION: every
+        #: caller awaits it from `rlm.bench._prepare`, entirely before that
+        #: function's caller (`_run_cell`) reads its own clock for `t0`.
+        self.last_relaunch_s: float = 0.0
+
+    # -- low-level probes --------------------------------------------------- #
+
+    def _health_probe(self, port: int) -> Callable[[], Awaitable[bool]]:
+        async def health() -> bool:
+            client = self._client_factory(
+                f"http://127.0.0.1:{port}", timeout=DEFAULT_ORCHESTRA_LIVENESS_TIMEOUT_S)
+            try:
+                return await client.health()
+            finally:
+                await client.aclose()
+        return health
+
+    async def _probe(self, role: str, server_cfg: Any) -> dict:
+        """The §4 handshake against ONE server, `role`'s OWN `server_cfg` --
+        never a different role's, which is exactly the total_slots 2!=128
+        mismatch a bench_leaf process handshaked against `servers.leaf` would
+        raise."""
+        client = self._client_factory(f"http://127.0.0.1:{server_cfg.port}",
+                                       timeout=self._handshake_timeout_s)
+        try:
+            return await self._handshake_fn(client, server_cfg, role, self.lifecycle)
+        finally:
+            await client.aclose()
+
+    async def _probe_liveness(self, port: int) -> dict | None:
+        """Raw `/props`, or `None` for "nothing answered" -- resume
+        reconciliation's read, deliberately weaker than `_probe`: an
+        unreachable port is not a handshake failure here, it is the ordinary
+        "nothing to reconcile against" case."""
+        client = self._client_factory(
+            f"http://127.0.0.1:{port}", timeout=DEFAULT_ORCHESTRA_LIVENESS_TIMEOUT_S)
+        try:
+            return await client.props()
+        except Exception:  # noqa: BLE001 -- unreachable IS "nothing live"
+            return None
+        finally:
+            await client.aclose()
+
+    def _leaf_cfg(self, profile: str) -> Any:
+        if profile == RESIDENT_PROFILE:
+            return self.cfg.servers.leaf
+        if profile == BENCH_PROFILE:
+            bench = self.cfg.servers.bench_leaf
+            if bench is None:
+                raise ConfigError(
+                    "servers.bench_leaf is not configured; §8's B1/B3 "
+                    "relaunch profile cannot run without it (ARCHITECTURE.md §8)")
+            return bench
+        raise ConfigError(f"unknown server profile {profile!r}; expected "
+                          f"{RESIDENT_PROFILE!r} or {BENCH_PROFILE!r}")
+
+    def _verify_bench_cache_types(self, props: dict) -> None:
+        """D27 gap (ledgered ruling): `rlm validate` never checks
+        `bench_leaf`'s cache types -- it only ever probes `root`/`leaf`
+        (`_probe_servers`). Reuses the exact verification `cmd_validate` runs
+        for the other two servers (`parse_launch_log` + `_check_cache_types`),
+        scoped to just this role, so a bench run that relaunched into a
+        mis-flagged `bench_leaf` refuses rather than measuring B1/B3 against
+        an unverified KV cache configuration."""
+        ok = self._cache_check_fn(self.cfg, {"bench_leaf": props}, self.out, self.err,
+                                   probe_ran=True, roles=("bench_leaf",))
+        if not ok:
+            raise ConfigError(
+                f"bench_leaf KV cache type verification FAILED after relaunch "
+                f"(see {self.cfg.servers.bench_leaf.log_path}); refusing to "
+                "run B1/B3 against an unverified cache configuration (D27)")
+
+    # -- resume reconciliation ------------------------------------------- #
+
+    async def _maybe_adopt(self, profile: str, target_cfg: Any) -> bool:
+        """Resume safety (ledgered ruling): a crash may leave EITHER leaf
+        profile alive on the shared port, unowned by this (freshly
+        constructed) orchestra -- `--resume` starts a NEW process with no
+        handle on anything the dead run started. Detect it via `/props` and
+        NEVER ASSUME: a match is left running (nothing to relaunch, `True`),
+        anything else -- a genuine mismatch, or unreachable for a reason
+        `_probe_liveness` cannot distinguish from "gone" -- is force-reclaimed
+        so the fresh process about to be spawned does not bind-fail against a
+        survivor it never started.
+        """
+        if self.leaf_proc is not None:
+            return False              # already own something; not an adoption
+        port = self.cfg.servers.leaf.port
+        live = await self._probe_liveness(port)
+        if live is None:
+            return False
+        try:
+            assert_props(live, target_cfg, profile)
+        except ConfigError as exc:
+            if self.lifecycle is not None:
+                self.lifecycle.event("server_health", role="leaf",
+                                     state="resume_mismatch", port=port,
+                                     error=str(exc))
+            await self._force_kill_fn(port)
+            return False
+        if self.lifecycle is not None:
+            self.lifecycle.event("server_health", role="leaf",
+                                 state="resume_adopted_unowned", port=port,
+                                 profile=profile)
+        return True
+
+    async def _ensure_leaf_stopped(self) -> None:
+        if self.leaf_proc is not None:
+            await self.leaf_proc.stop()
+            self.leaf_proc = None
+            return
+        # No owned handle -- either nothing is there, or it is the unowned
+        # survivor `_maybe_adopt` deliberately left running on a PRIOR call.
+        # Probe before killing: a force-kill when nothing is listening is a
+        # wasted OS call, and on a real box, futile ones are worth avoiding.
+        if await self._probe_liveness(self.cfg.servers.leaf.port) is not None:
+            await self._force_kill_fn(self.cfg.servers.leaf.port)
+
+    # -- leaf lifecycle -------------------------------------------------- #
+
+    async def _bring_up_leaf(self, profile: str) -> float:
+        already_there = (self.current_profile == profile
+                         and (self.leaf_proc is not None or not self.launch))
+        if already_there:
+            return 0.0
+        if not self.launch:
+            raise ConfigError(
+                "ServerOrchestra is running --no-launch-servers (assert-only): "
+                f"swapping the leaf to the {profile!r} profile requires the "
+                "scaffold to OWN the server process, which an operator-managed "
+                "run does not grant. The full B1/B2/B3/RLM grid is not "
+                "supported against operator-managed servers (§5); drop "
+                "--no-launch-servers to run it.")
+        target_cfg = self._leaf_cfg(profile)
+        t0 = time.monotonic()
+        adopted = await self._maybe_adopt(profile, target_cfg)
+        if not adopted:
+            await self._ensure_leaf_stopped()
+            self.leaf_proc = self._process_factory(
+                target_cfg, health_probe=self._health_probe(target_cfg.port))
+            await self.leaf_proc.start()
+        self.current_profile = profile
+        self.last_relaunch_s = 0.0 if adopted else round(time.monotonic() - t0, 3)
+        role = "leaf" if profile == RESIDENT_PROFILE else "bench_leaf"
+        props = await self._probe(role, target_cfg)
+        if profile == BENCH_PROFILE:
+            self._verify_bench_cache_types(props)
+        return self.last_relaunch_s
+
+    async def start_resident(self) -> None:
+        """Bring up the RESIDENT topology (root + the RLM/B2 leaf) and probe
+        both. In `--no-launch-servers` mode this is handshake-only -- no
+        process is spawned, matching an operator-managed server."""
+        if not self.launch:
+            await self._probe("root", self.cfg.servers.root)
+            await self._probe("leaf", self.cfg.servers.leaf)
+            self.current_profile = RESIDENT_PROFILE
+            return
+        if self.root_proc is None:
+            self.root_proc = self._process_factory(
+                self.cfg.servers.root,
+                health_probe=self._health_probe(self.cfg.servers.root.port))
+            await self.root_proc.start()
+        await self._probe("root", self.cfg.servers.root)
+        await self._bring_up_leaf(RESIDENT_PROFILE)
+
+    async def to_bench_leaf(self) -> float:
+        """Stop the RLM leaf, start `bench_leaf`, handshake vs `bench_leaf`'s
+        OWN config, verify its cache types (D27 gap). Returns the relaunch
+        wall time (0.0 if nothing needed to move)."""
+        return await self._bring_up_leaf(BENCH_PROFILE)
+
+    async def to_resident_leaf(self) -> float:
+        """The reverse of `to_bench_leaf`."""
+        return await self._bring_up_leaf(RESIDENT_PROFILE)
+
+    async def stop_all(self) -> None:
+        if self.leaf_proc is not None:
+            await self.leaf_proc.stop()
+            self.leaf_proc = None
+        if self.root_proc is not None:
+            await self.root_proc.stop()
+            self.root_proc = None
+        self.current_profile = None
+
+    # -- the BenchCtx hook surface (rlm.bench.BenchCtx) ------------------- #
+
+    async def quiesce(self, profile: str) -> dict[str, bool]:
+        """`BenchCtx.quiesce_fn` -- the §5 C5 quiesce point, reusing
+        `_slots_idle` for both servers this profile serves. Root's slot is
+        awaited too: a root call mid-flight when the leaf swaps is still a
+        call the swap must not step on."""
+        role = "leaf" if profile == RESIDENT_PROFILE else "bench_leaf"
+        lc = self.lifecycle if self.lifecycle is not None else _NULL_LIFECYCLE
+        root_idle = await self._slots_idle_fn(self.cfg, "root", lc)
+        leaf_idle = await self._slots_idle_fn(self.cfg, role, lc)
+        return {"root": root_idle, role: leaf_idle}
+
+    async def handshake_profile(self, profile: str) -> dict[str, dict]:
+        """`BenchCtx.handshake_fn` -- §4's per-episode `/props` re-assertion,
+        against root and whichever leaf `profile` names."""
+        role = "leaf" if profile == RESIDENT_PROFILE else "bench_leaf"
+        server_cfg = self._leaf_cfg(profile)
+        root_props = await self._probe("root", self.cfg.servers.root)
+        leaf_props = await self._probe(role, server_cfg)
+        return {"root": root_props, role: leaf_props}
+
+    async def swap_to(self, profile: str) -> float:
+        """`BenchCtx.swap_servers_fn` -- the leaf relaunch, dispatched by
+        profile name."""
+        if profile == RESIDENT_PROFILE:
+            return await self.to_resident_leaf()
+        if profile == BENCH_PROFILE:
+            return await self.to_bench_leaf()
+        raise ConfigError(f"unknown server profile {profile!r}; expected "
+                          f"{RESIDENT_PROFILE!r} or {BENCH_PROFILE!r}")
+
+    # -- the ProcessManager run_b2/run_episode rotate mid-episode --------- #
+
+    def resident_process_manager(self) -> HandshakingProcessManager:
+        """The `ProcessManager` handed to `run_b2`/`run_episode` (both arms
+        run exclusively on the resident topology -- `rlm.bench.ARM_PROFILE`):
+        wraps the OWNED resident leaf so `.restart()` also re-runs the §4
+        handshake before returning."""
+        return HandshakingProcessManager(self, "leaf", self.cfg.servers.leaf)
 
 
 # --------------------------------------------------------------------------- #
