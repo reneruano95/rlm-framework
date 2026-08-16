@@ -333,10 +333,10 @@ scaffold:
     baselines:
       # §8 baseline arms (S4). Authored 2026-08-16, pinned at commit, never
       # iterated against benchmark content (no-overfit rule).
-      b1_single_shot: { path: prompts/b1-single-shot.v1.md, sha256: 6884cbb6855ceeed2aca11389d7a22ebed99eb9f986ceea26f6976b35ac551dd }
-      b2_leaf_summary: { path: prompts/b2-leaf-summary.v1.md, sha256: 7f738b8e5b156f694353ffa5f16059c32d4baa2a70496a96c87c4c03c7877aa3 }
-      b2_root_final: { path: prompts/b2-root-final.v1.md, sha256: f08f207cec3da8d9405d31f4d0b678bf611ce864efb55eef52a0b2803a8a4332 }
-      b3_single_shot: { path: prompts/b3-single-shot.v1.md, sha256: 703c6099f0fb985ee21bd8aefb95ed30dd9b9a2cd49c0a1d3352f98cbc10fbc8 }
+      b1_single_shot: { path: prompts/b1-single-shot.v1.md, sha256: 528223ad24988ec76f55d1a5835cfcace05593e796af87bae59d6aeb0c32f8d5 }
+      b2_leaf_summary: { path: prompts/b2-leaf-summary.v1.md, sha256: 2621d76a602ba8300d10177f6cf488d7ba7f9121042a3f8a2444a9271f5064ec }
+      b2_root_final: { path: prompts/b2-root-final.v1.md, sha256: e4c67521a16a87e09e98ca59aa3604b6ab262f85287e5701eaf46056959e6f1b }
+      b3_single_shot: { path: prompts/b3-single-shot.v1.md, sha256: b8591d4e8895c9ad80c847f888c1b095e1f14068b2649c3a14cbf60bcaea1267 }
   # DECIDED BY THE S2 A/B (`s2/REFUSAL-AB.md`), not by taste. `enabled` appends
   # the format block to the leaf prefix and makes C4 parse/validate the reply
   # scaffold-side; `grammar` is the SEPARATE server-side enforcement flag and is

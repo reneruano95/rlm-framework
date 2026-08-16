@@ -466,6 +466,11 @@ def test_baseline_prompts_load_pin_and_render(valid_cfg):
     reg = valid_cfg.prompt_registry()
     text = reg.render_baseline("b1_single_shot")
     assert "only the answer value" in text
+    # The changelog header is registry bookkeeping and must never reach the
+    # model: the first draft of these files opened with a one-line comment the
+    # loader does not strip, which put "§8 B1 -- single shot, full context" --
+    # the name of the experimental arm -- at the top of every B1 prompt.
+    assert "<!--" not in text
     hashes = reg.hashes()
     assert "baselines.b1_single_shot.file" in hashes   # recorded => replay-safe
 
@@ -499,8 +504,14 @@ def test_every_baseline_prompt_is_pinned_and_renders(valid_cfg):
     hashes = reg.hashes()
     for name in ("b1_single_shot", "b2_leaf_summary", "b2_root_final",
                  "b3_single_shot"):
-        assert reg.render_baseline(name).strip()
+        rendered = reg.render_baseline(name)
+        assert rendered.strip()
+        assert "<!--" not in rendered and "changelog" not in rendered
         assert f"baselines.{name}.file" in hashes
+        # …and both hashes are recorded, and they DIFFER -- the same property
+        # `test_registry_strips_changelog_header_but_hashes_both` pins for
+        # every other prompt. Equal file/body hashes mean nothing was stripped.
+        assert hashes[f"baselines.{name}.file"] != hashes[f"baselines.{name}.body"]
     pinned = valid_cfg.pinned_prompt_hashes()
     for _, ref in valid_cfg._prompt_refs():
         assert ref.sha256 is not None, f"{ref.path} is not pinned"

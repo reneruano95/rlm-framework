@@ -9,7 +9,13 @@ PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "leaf-prefix.v1.md",
          "strat-needle.v1.md", "strat-aggregation.v1.md",
          "strat-aggregation.v2.md",
-         "strat-synthesis.v1.md", "strat-codeqa.v1.md", "strat-default.v1.md"]
+         "strat-synthesis.v1.md", "strat-codeqa.v1.md", "strat-default.v1.md",
+         # §8's baseline arms (S4). Listed here, and not merely pinned in
+         # config.yaml, because the header shape is load-bearing rather than
+         # decorative: `PromptRegistry._strip_changelog` only strips THIS form,
+         # and a header it does not recognise is a header the model reads.
+         "b1-single-shot.v1.md", "b2-leaf-summary.v1.md",
+         "b2-root-final.v1.md", "b3-single-shot.v1.md"]
 
 #: The two recorded S1 A/B arms. Their bytes ARE the published 6/6-vs-6/6
 #: result: editing either one retroactively invalidates it, so the hashes are
