@@ -193,6 +193,19 @@ def _entry(task_id: str, *, category: str = "needle") -> TaskEntry:
                      question_sha256="1" * 64)
 
 
+def frozen_manifest() -> BenchmarkManifest:
+    """The REAL frozen manifest. `run_bench` verifies the pin itself, so every
+    test that goes through it runs against the artifact S4 will schedule --
+    a hand-built manifest is refused there, by design."""
+    return BenchmarkManifest.load(REPO_ROOT / "bench" / "manifest.json")
+
+
+def _two_blocks() -> list[Block]:
+    """The first two blocks of the frozen grid: enough to see task-major
+    ordering and resume, without running 30 tasks of doubles."""
+    return build_blocks(frozen_manifest(), [1])[:2]
+
+
 def _manifest(task_ids: list[str]) -> BenchmarkManifest:
     return BenchmarkManifest(benchmark_version="test", built_at="2026-08-16",
                              token_counter="approx-offline",
@@ -593,50 +606,69 @@ async def test_a_failed_episode_is_never_rerun(tmp_path, bench_cfg_dict):
 
 async def test_resume_skips_tuples_already_decided(tmp_path, bench_cfg_dict):
     ledger = BenchLedger(tmp_path / "ledger.jsonl")
+    blocks = _two_blocks()
     first = FakeArms()
     ctx = _ctx(tmp_path, bench_cfg_dict, arms=first, ledger=ledger,
-               manifest=_manifest(["t1", "t2"]))
-    await run_bench(ctx, arms=["rlm", "b2"], seeds=[1])
+               manifest=frozen_manifest())
+    await run_bench(ctx, arms=["rlm", "b2"], blocks=blocks)
 
     second = FakeArms()
     ctx2 = _ctx(tmp_path, bench_cfg_dict, arms=second, ledger=ledger,
-                manifest=_manifest(["t1", "t2"]))
-    await run_bench(ctx2, arms=["rlm", "b2"], seeds=[1])
+                manifest=frozen_manifest())
+    await run_bench(ctx2, arms=["rlm", "b2"], blocks=blocks)
     assert second.calls == []
     assert len(first.calls) == 4
 
     third = FakeArms()
     ctx3 = _ctx(tmp_path, bench_cfg_dict, arms=third, ledger=ledger,
-                manifest=_manifest(["t1", "t2"]))
-    await run_bench(ctx3, arms=list(ARM_ORDER), seeds=[1])
+                manifest=frozen_manifest())
+    await run_bench(ctx3, arms=list(ARM_ORDER), blocks=blocks)
     assert third.order() == ["b1", "b3", "b1", "b3"]        # only the new arms
 
 
 async def test_resume_runs_the_rerun_a_crashed_run_still_owed(tmp_path, bench_cfg_dict):
     ledger = BenchLedger(tmp_path / "ledger.jsonl")
-    lone = {"run_id": "run-1", "block": 0, "task_id": "t1", "seed": 1, "arm": "rlm",
-            "episode_id": _uuid(), "outcome": "error", "reason": "arm_error",
-            "wall_s": 2.0, "superseded_by": None}
+    block = _two_blocks()[0]
+    lone = {"run_id": "run-1", "block": 0, "task_id": block.task_entry.task_id,
+            "seed": 1, "arm": "rlm", "episode_id": _uuid(), "outcome": "error",
+            "reason": "arm_error", "wall_s": 2.0, "superseded_by": None}
     ledger.append(lone)
 
     arms = FakeArms()
     trace = FakeTrace()
-    ctx = _ctx(tmp_path, bench_cfg_dict, arms=arms, trace=trace, ledger=ledger)
-    records = await run_bench(ctx, arms=["rlm"], seeds=[1])
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=arms, trace=trace, ledger=ledger,
+               manifest=frozen_manifest())
+    records = await run_bench(ctx, arms=["rlm"], blocks=[block])
 
     assert arms.order() == ["rlm"]                          # the rerun, and only it
     assert trace.superseded == [(lone["episode_id"], records[0]["episode_id"])]
-    assert ledger.completed("run-1")[("t1", 1, "rlm")]["outcome"] == "success"
+    cell = (block.task_entry.task_id, 1, "rlm")
+    assert ledger.completed("run-1")[cell]["outcome"] == "success"
 
 
 async def test_a_different_run_id_shares_no_resume_state(tmp_path, bench_cfg_dict):
     ledger = BenchLedger(tmp_path / "ledger.jsonl")
-    ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), ledger=ledger)
-    await run_bench(ctx, arms=["rlm"], seeds=[1])
+    blocks = _two_blocks()[:1]
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), ledger=ledger,
+               manifest=frozen_manifest())
+    await run_bench(ctx, arms=["rlm"], blocks=blocks)
     other = FakeArms()
-    ctx2 = _ctx(tmp_path, bench_cfg_dict, arms=other, ledger=ledger, run_id="run-2")
-    await run_bench(ctx2, arms=["rlm"], seeds=[1])
+    ctx2 = _ctx(tmp_path, bench_cfg_dict, arms=other, ledger=ledger, run_id="run-2",
+                manifest=frozen_manifest())
+    await run_bench(ctx2, arms=["rlm"], blocks=blocks)
     assert other.order() == ["rlm"]
+
+
+async def test_run_bench_refuses_a_manifest_that_is_not_the_frozen_one(
+        tmp_path, bench_cfg_dict):
+    """The startup assertion lives where the episodes are: a caller that
+    forgot `assert_manifest_pinned` must not be able to score a 39-hour run
+    against a manifest nobody verified."""
+    arms = FakeArms()
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=arms, manifest=_manifest(["t1"]))
+    with pytest.raises(ConfigError, match="manifest_sha256"):
+        await run_bench(ctx, arms=["rlm"], seeds=[1])
+    assert arms.calls == [] and ctx.ledger.read() == []
 
 
 # --------------------------------------------------------------------------- #
@@ -665,16 +697,20 @@ async def test_a_refusal_leaves_the_cell_open_for_a_resumed_run(tmp_path, bench_
     episode row to score, so the cell stays unfilled until the fault is fixed
     and the run resumed."""
     ledger = BenchLedger(tmp_path / "ledger.jsonl")
+    blocks = _two_blocks()[:1]
     broken = FakeArms({"b1": [ConfigError("no bench_leaf")]})
-    ctx = _ctx(tmp_path, bench_cfg_dict, arms=broken, ledger=ledger)
-    await run_bench(ctx, arms=["b1"], seeds=[1])
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=broken, ledger=ledger,
+               manifest=frozen_manifest())
+    await run_bench(ctx, arms=["b1"], blocks=blocks)
     assert ledger.completed("run-1") == {}
 
     fixed = FakeArms()
-    ctx2 = _ctx(tmp_path, bench_cfg_dict, arms=fixed, ledger=ledger)
-    await run_bench(ctx2, arms=["b1"], seeds=[1])
+    ctx2 = _ctx(tmp_path, bench_cfg_dict, arms=fixed, ledger=ledger,
+                manifest=frozen_manifest())
+    await run_bench(ctx2, arms=["b1"], blocks=blocks)
     assert fixed.order() == ["b1"]
-    assert ledger.completed("run-1")[("t1", 1, "b1")]["outcome"] == "success"
+    cell = (blocks[0].task_entry.task_id, 1, "b1")
+    assert ledger.completed("run-1")[cell]["outcome"] == "success"
 
 
 async def test_an_unreadable_task_file_refuses_every_arm_in_the_block(
@@ -734,10 +770,16 @@ async def test_an_arm_with_no_runner_is_refused(tmp_path, bench_cfg_dict):
 
 async def test_power_is_stamped_from_the_energy_delta(tmp_path, bench_cfg_dict):
     """`power_mw` reads garbage on this box: `avg_power_w` is DERIVED from the
-    energy delta over the measured duration, never taken from the sampler."""
+    energy delta, never taken from the sampler.
+
+    The denominator is the READINGS' interval (3 s here), not `wall_s` (2 s):
+    the sampler publishes at 1 Hz, so the bracket reads sit inside a window
+    offset from the episode's at both ends, and dividing by `wall_s` would
+    report watts nothing measured.
+    """
     sampler = FakeSampler([
-        PowerReading(ts=0.0, energy_pwh=0, power_mw=999_999.0),
-        PowerReading(ts=2.0, energy_pwh=1_000_000_000, power_mw=999_999.0),
+        PowerReading(ts=10.0, energy_pwh=0, power_mw=999_999.0),
+        PowerReading(ts=13.0, energy_pwh=1_000_000_000, power_mw=999_999.0),
     ])
     trace = FakeTrace()
     ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), trace=trace,
@@ -745,12 +787,41 @@ async def test_power_is_stamped_from_the_energy_delta(tmp_path, bench_cfg_dict):
                temp_fn=lambda: 51.5)
     records = await run_block(build_blocks(ctx.manifest, [1])[0], ["rlm"], ctx)
 
+    assert records[0]["wall_s"] == 2.0
     assert len(trace.metrics) == 1
     episode_id, cols = trace.metrics[0]
     assert episode_id == records[0]["episode_id"]
     assert cols["energy_j"] == pytest.approx(3.6)
-    assert cols["avg_power_w"] == pytest.approx(3.6 / 2.0)
+    assert cols["avg_power_w"] == pytest.approx(3.6 / 3.0)      # NOT 3.6 / wall_s
     assert cols["pkg_temp_c_start"] == 51.5 and cols["pkg_temp_c_end"] == 51.5
+
+
+async def test_an_unchanged_reading_stamps_no_power(tmp_path, bench_cfg_dict):
+    """1 Hz sampling against an episode shorter than the sample interval: both
+    bracket reads return the SAME cached reading. A zero delta over a real
+    episode is not a measurement of zero — stamping 0.0 W would be
+    indistinguishable from one at scoring time, which is the fabrication §8
+    forbids. The temperature, which IS a fresh read, still lands."""
+    cached = PowerReading(ts=7.0, energy_pwh=5_000, power_mw=118_000.0)
+    trace = FakeTrace()
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), trace=trace,
+               sampler=FakeSampler([cached]), temp_fn=lambda: 42.0)
+    await run_block(build_blocks(ctx.manifest, [1])[0], ["rlm"], ctx)
+
+    assert trace.metrics[0][1] == {"pkg_temp_c_start": 42.0, "pkg_temp_c_end": 42.0,
+                                   "avg_power_w": None, "energy_j": None}
+
+
+async def test_a_stale_reading_stamps_nothing_at_all(tmp_path, bench_cfg_dict):
+    """…and with no temperature source either, the call is skipped entirely
+    (`update_episode_metrics` writes only non-None columns, so the two are the
+    same NULLs — this pins that no zero is ever manufactured)."""
+    cached = PowerReading(ts=7.0, energy_pwh=5_000, power_mw=118_000.0)
+    trace = FakeTrace()
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), trace=trace,
+               sampler=FakeSampler([cached]))
+    await run_block(build_blocks(ctx.manifest, [1])[0], ["rlm"], ctx)
+    assert trace.metrics == []
 
 
 async def test_a_dead_sampler_records_nulls(tmp_path, bench_cfg_dict):

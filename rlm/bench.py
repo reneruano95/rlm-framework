@@ -500,20 +500,31 @@ def _reading(sampler: Any):
 
 
 def _stamp_metrics(ctx: BenchCtx, episode_id: str, *, start, end,
-                    temp_start: float | None, temp_end: float | None,
-                    wall_s: float) -> None:
+                    temp_start: float | None, temp_end: float | None) -> None:
     """The cost-scorecard columns, or nothing at all.
 
-    `avg_power_w` is DERIVED — energy delta over the measured duration — and
-    never read from the sampler's `power_mw`, which reads garbage on this box.
-    When the sampler was not alive at both ends there is no delta to take, and
-    the columns stay NULL: the sampler's known failure mode is dying silently
-    at launch, and a fabricated watt figure is worse than a missing one.
+    `avg_power_w` is DERIVED — energy delta over the interval that delta was
+    measured across — and never read from the sampler's `power_mw`, which
+    reads garbage on this box.
+
+    THE DENOMINATOR IS THE READINGS' OWN INTERVAL, NOT `wall_s`. The sampler
+    publishes at 1 Hz and each bracket read takes whatever sample happened to
+    be latest, so `[start.ts, end.ts]` is offset from `[t0, t1]` at both ends;
+    dividing a numerator measured over one window by the length of a different
+    window reports watts nothing measured. (`wall_s` is a third quantity again
+    — it excludes the relaunch — which is exactly the mixing this module's
+    docstring forbids.)
+
+    NOTHING is stamped unless a real delta exists: the sampler dies silently
+    at launch (so `alive()` is checked at both ends), and on a sub-second
+    episode both reads return the SAME cached reading — a delta of zero over a
+    real episode is not a measurement of zero, it is no measurement, and a
+    fabricated 0.0 W would be indistinguishable from one at scoring time.
     """
     energy_j = avg_power_w = None
-    if start is not None and end is not None:
+    if start is not None and end is not None and end.ts > start.ts:
         energy_j = energy_j_between(start, end)
-        avg_power_w = energy_j / max(wall_s, 1e-9)
+        avg_power_w = energy_j / (end.ts - start.ts)
     if (energy_j is None and avg_power_w is None
             and temp_start is None and temp_end is None):
         return
@@ -563,7 +574,7 @@ async def _run_cell(ctx: BenchCtx, block: Block, arm: str, task: "Task",
     end = _reading(ctx.sampler)
     temp_end = ctx.temp_fn() if ctx.temp_fn is not None else None
     _stamp_metrics(ctx, result.episode_id, start=start, end=end,
-                    temp_start=temp_start, temp_end=temp_end, wall_s=wall_s)
+                    temp_start=temp_start, temp_end=temp_end)
     return ctx.ledger.append({
         "run_id": ctx.run_id, "block": block.idx,
         "task_id": block.task_entry.task_id, "seed": block.seed, "arm": arm,
@@ -640,10 +651,18 @@ async def run_bench(ctx: BenchCtx, *, arms: list[str] | tuple[str, ...] = ARM_OR
                      blocks: list[Block] | None = None) -> list[dict]:
     """The whole grid for one `run_id`, resumable.
 
+    The freeze is verified HERE, before any block runs, and not only in
+    `rlm/cli.py`: `assert_manifest_pinned` is also exported so a CLI can
+    refuse early with a better error surface, but a forgotten call there must
+    not be able to score 39 hours of episodes against a manifest nobody
+    checked. The startup assertion belongs where the episodes are, so it
+    cannot be bypassed by wiring.
+
     Resume state is read ONCE, up front: the cells this run already decided
     are skipped, and the cells still owed a rerun are run and linked. Reading
     it per block would let this run's own rows re-enter the calculation.
     """
+    assert_manifest_pinned(ctx.manifest, ctx.cfg)
     seeds = seeds if seeds is not None else list(ctx.cfg.benchmark.seeds)
     blocks = blocks if blocks is not None else build_blocks(ctx.manifest, seeds)
     done = ctx.ledger.completed(ctx.run_id, store=ctx.store)
