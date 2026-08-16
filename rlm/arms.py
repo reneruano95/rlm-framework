@@ -85,7 +85,9 @@ smarter rule than the one pre-registered here. `run_b3` writes it into
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import re
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -121,14 +123,17 @@ __all__ = [
     "FIT_SLACK_TOKENS",
     "MAX_FIT_VERIFY_ROUNDS",
     "NO_ANSWER",
+    "NO_SUMMARY",
     "SERVER_UNREACHABLE",
     "SNAPSHOT_KEYS",
     "ArmEpisode",
     "ArmResult",
+    "b2_summary_n_predict",
     "bench_slot_capacity",
     "bm25_select",
     "outcome_for_error",
     "run_b1",
+    "run_b2",
     "run_b3",
     "truncate_head_tail",
 ]
@@ -151,6 +156,12 @@ NO_ANSWER = "no_answer"
 #: tombstones as `orphaned_at_recovery` at the next startup and loses the
 #: attribution — and the exception is re-raised, so it stays loud.
 ARM_ERROR = "arm_error"
+
+#: B2's deterministic stand-in for an empty/whitespace-only chunk summary
+#: (module docstring, B2 section): never crash-and-error the arm on one bad
+#: summary, and never silently drop the chunk from the numbered list either —
+#: the root still sees a slot for it, just one that says nothing was there.
+NO_SUMMARY = "[no summary]"
 
 #: Slack between the fitted prompt and the slot's true capacity, in tokens. It
 #: absorbs the two separators this module inserts and the chat template's markup,
@@ -268,6 +279,42 @@ def outcome_for_error(exc: BaseException) -> tuple[Outcome, str]:
     if isinstance(exc, DispatchError):
         return Outcome.ERROR, SERVER_UNREACHABLE
     return Outcome.ERROR, ARM_ERROR
+
+
+def _settled_tokens(attempts: list[dict[str, Any]]) -> tuple[int, int]:
+    """`rlm/episode.py::settled_tokens`, DUPLICATED ON PURPOSE: importing
+    `rlm.episode` here would drag C4's composition root into this module (the
+    module docstring's "THIS MODULE NEVER IMPORTS C4"). The sum itself is
+    tiny — every attempt's tokens count against `max_total_tokens` (spec §5
+    C4), zero for an attempt that reported none — so duplicating it costs two
+    lines; `test_settled_tokens_matches_the_episode_runners_implementation`
+    pins the two implementations equal so the duplication cannot drift in
+    silence."""
+    return (sum(a.get("tokens_in") or 0 for a in attempts),
+            sum(a.get("tokens_out") or 0 for a in attempts))
+
+
+#: `rlm.rootclient.strip_reasoning`'s think-block regex, copied verbatim —
+#: see `_strip_reasoning`'s docstring for why it is copied rather than
+#: imported.
+_THINK_BLOCK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
+
+
+def _strip_reasoning(text: str) -> str:
+    """`rlm.rootclient.strip_reasoning`, DUPLICATED ON PURPOSE: `arms.py` may
+    not import `rlm.rootclient` (`tests/test_import_rules.py`'s
+    `FORBIDDEN_RLM` — it is C4's HTTP client, exactly what the module
+    docstring's "THIS MODULE NEVER IMPORTS C4" forbids). B2's root call still
+    needs D16's belt-and-braces strip (a leading `<think>...</think>` block,
+    or text up to the LAST `</think>`) so a root that reopens or never closes
+    a think block cannot leak reasoning into the scored answer.
+    `test_strip_reasoning_matches_rootclients_implementation` pins this
+    implementation equal to the original so the duplication cannot drift in
+    silence."""
+    text = _THINK_BLOCK_RE.sub("", text)
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[1]
+    return text.lstrip()
 
 
 def _accepts_slot_id(query: Any) -> bool:
@@ -440,17 +487,30 @@ class ArmEpisode:
 
     def log_call(self, call_id: str, prompt: str, *, answer: str | None = None,
                   parent: int | None = None, actor: str = Actor.LEAF,
-                  depth: int = 1) -> str | None:
+                  depth: int = 1,
+                  attempts: list[dict[str, Any]] | None = None) -> str | None:
         """One trace step per dispatch ATTEMPT, copied from C4's own records.
 
         Idempotent per `(call_id, retry_idx)` so the failure path and a later
         flush cannot double-write the same attempt (`rlm/episode.py:720-757`).
         Returns the blob path holding the answer, or None when no attempt
         produced one.
+
+        `attempts` defaults to C4's own attempt records for `call_id`
+        (`self.dispatcher.steps` filtered) — every leaf caller's behaviour.
+        B2's root call passes ONE SYNTHESIZED attempt instead: root traffic
+        goes through the injected `root_client`, never through `dispatcher`,
+        so there is nothing on `dispatcher.steps` to filter. Shaping that one
+        attempt like C4's own (same keys: `status`, `tokens_in/out`, `rendered`,
+        ...) is what lets it flow through this SAME method — the blob-writing
+        and `STEP_COLS` projection below — rather than a second, parallel
+        implementation for root calls.
         """
         ref = None
-        for attempt in [s for s in self.dispatcher.steps
-                        if s.get("call_id") == call_id]:
+        if attempts is None:
+            attempts = [s for s in self.dispatcher.steps
+                        if s.get("call_id") == call_id]
+        for attempt in attempts:
             key = (call_id, attempt.get("retry_idx", 0))
             if key in self._logged_attempts:
                 continue
@@ -500,7 +560,8 @@ class ArmEpisode:
 
     async def call_leaf(self, prompt: str, *, chunk: str | None = None,
                          slot_id: int | None = None,
-                         parent: int | None = None) -> str:
+                         parent: int | None = None,
+                         admit_tokens: int | None = None) -> str:
         """One leaf call through C4, wall-clock-checked on both sides and
         logged either way.
 
@@ -508,9 +569,28 @@ class ArmEpisode:
         arm with no watchdog, and it runs AFTER the step is written: a call that
         overran still happened, and an episode whose kill erased its own
         evidence would be unauditable.
+
+        `admit_tokens`, when given, is the pre-flight PROMPT token count and
+        routes this call through `BudgetEnforcer.admit()`/`.settle()` — B2's
+        obligation (this task): its leaf summaries are admitted against
+        `max_subcalls` AND `max_total_tokens` exactly as the RLM arm's leaf
+        sub-calls are (`rlm/episode.py`'s `_EpisodeRun._on_llm_query`/
+        `_settle`, mirrored here rather than imported — the dependency rule).
+        B1/B3 never
+        pass it: their ONE call per episode is already bounded by the
+        bench_leaf relaunch profile's single-slot capacity, so admitting it
+        besides would only duplicate that check with a different one.
+
+        A `BudgetBreach` from `.admit()` is raised BEFORE any dispatch and
+        BEFORE any reservation is recorded (`BudgetEnforcer.admit` never
+        partially reserves — see its docstring) — nothing was sent, so
+        (matching `rlm/episode.py`'s own admission path) nothing is logged as
+        a step; the breach itself is the episode's outcome.
         """
         self.check_wall_clock()
         call_id = str(uuid.uuid4())
+        reservation = (self.enforcer.admit(admit_tokens, "leaf", call_id)
+                       if admit_tokens is not None else None)
         kwargs: dict[str, Any] = {"role": "leaf", "call_id": call_id,
                                   "chunk": chunk}
         if slot_id is not None and self.can_pin_slot():
@@ -518,12 +598,27 @@ class ArmEpisode:
         try:
             raw = await self.dispatcher.query(prompt, **kwargs)
         except BaseException:
+            if reservation is not None:
+                self._settle_admission(reservation, call_id)
             self.log_call(call_id, prompt, parent=parent)
             raise
         answer = _answer_text(raw)
+        if reservation is not None:
+            self._settle_admission(reservation, call_id)
         self.log_call(call_id, prompt, answer=answer, parent=parent)
         self.check_wall_clock()
         return answer
+
+    def _settle_admission(self, reservation: Any, call_id: str) -> None:
+        """Release `reservation`'s hold and charge what the call ACTUALLY
+        cost, summed over every attempt C4 recorded for `call_id` — spec §5
+        C4's asymmetry: a retried call counts once against `max_subcalls`,
+        but every attempt's tokens count against `max_total_tokens`. The mock
+        dispatcher records no token usage, so this settles zero for it —
+        stated, not a bug (`rlm/episode.py::_settle`'s pattern, mirrored)."""
+        attempts = [s for s in self.dispatcher.steps if s.get("call_id") == call_id]
+        tokens_in, tokens_out = _settled_tokens(attempts)
+        self.enforcer.settle(reservation, tokens_in, tokens_out)
 
     # -- §6 outcome ---------------------------------------------------------- #
 
@@ -829,6 +924,212 @@ async def run_b3(task: "Task", cfg: Config, *, dispatcher: Any, trace: Any,
                          tokenized_task_len=corpus_tokens)
         try:
             answer = await ep.call_leaf(prompt, slot_id=slot_id)
+        except (BudgetBreach, DispatchError) as exc:
+            return ep.close(*outcome_for_error(exc))
+        except BaseException:
+            # Never orphan the row (§6). The exception still propagates: a bug
+            # in an arm must not be scoreable as an ordinary `error` episode.
+            ep.close(Outcome.ERROR, ARM_ERROR)
+            raise
+        return ep.finish(answer)
+    finally:
+        # D21: the trace is durable before the caller reads or exports it. The
+        # TraceLogger itself belongs to the bench run, not to one episode, so it
+        # is drained here and closed there.
+        await trace.drain()
+
+
+# --------------------------------------------------------------------------- #
+# B2 -- deterministic map-reduce: chunk, summarise (serial), reduce (one root
+# call). The honest control: if RLM does not beat this, the root's agency is
+# not earning its complexity (module docstring).
+#
+# UNLIKE B1/B3, B2 runs on the RESIDENT leaf topology -- the RLM-profile
+# `LLMDispatcher`, C4's never-reuse slot discipline included -- not the
+# bench_leaf single-shot relaunch profile. Two consequences, both
+# pre-registered here rather than discovered later: (1) `run_b2` never calls
+# `bench_slot_capacity` and never requests a slot pin (`ep.call_leaf`'s
+# `slot_id` stays unset for every summary call) -- C4 assigns the slot, the
+# same discipline the RLM arm runs under; (2) the summary calls are admitted
+# against the SAME episode budget (`max_subcalls`/`max_total_tokens`) an RLM
+# episode would be, via `ArmEpisode.call_leaf`'s `admit_tokens` (this task's
+# addition to the shared plumbing).
+#
+# `LLMDispatcher.query` (checked against its signature, `rlm/dispatcher.py`)
+# has NO per-call `n_predict` -- a target's generation budget is fixed at
+# construction to `cfg.scaffold.budgets.max_predict.leaf` for every call on
+# that role, and hacking a per-call override into C4 for one baseline arm is
+# exactly the drift the module docstring's "THIS MODULE NEVER IMPORTS C4"
+# rule exists to keep out of a component §8 depends on staying identical
+# across every arm. So `b2_summary_n_predict`'s value is NOT enforced
+# per-call: it is the pre-registered target the prompt sizing is built
+# around (every summary should fit inside it so the reduce prompt fits 80% of
+# the root window), it is RECORDED in `config_snapshot["bench"]`
+# (`summary_n_predict`) so a result is auditable against it, and actual
+# enforcement is whatever the leaf role's `max_predict` already does.
+# --------------------------------------------------------------------------- #
+
+
+def b2_summary_n_predict(cfg: Config, n_chunks: int) -> int:
+    """§8's pre-registered B2 summary budget (no tuning): sized so that ALL
+    `n_chunks` summaries fit 80% of the root window by construction --
+    `n_chunks * n_predict <= 0.8 * window_tokens`, i.e.
+    `n_predict = (8 * window_tokens) // (10 * n_chunks)` -- floored at 16
+    tokens (a summary shorter than that is not a useful compression of a
+    whole chunk) and capped at the leaf role's configured `max_predict` (the
+    dispatcher will not decode past it regardless; see the module docstring
+    just above for why the value is recorded rather than enforced per-call).
+
+    `n_chunks <= 0` (an empty corpus) returns the leaf role's `max_predict`
+    unshrunk rather than dividing by zero -- there is no summary call to size
+    for, so the number is moot, and a crash here would turn an empty-document
+    task into an `arm_error` for an arithmetic reason that has nothing to do
+    with the task.
+    """
+    if n_chunks <= 0:
+        return cfg.scaffold.budgets.max_predict.leaf
+    window = cfg.scaffold.root.window_tokens
+    return max(16, min(cfg.scaffold.budgets.max_predict.leaf,
+                        (8 * window) // (10 * n_chunks)))
+
+
+async def _b2_chunks(task: "Task", cfg: Config, *,
+                      dispatcher: Any) -> tuple[list[str], int]:
+    """C2's chunker, verbatim -- the SAME construction `_b3_prompt` uses
+    (field-for-field: `size_tokens`, `overhead_tokens`, `snap_to_boundary`,
+    `snap_tolerance`, `stride_tokens`), because B2/B3 sharing C2 verbatim is a
+    §8 pre-registration. Runs BEFORE the episode row is opened, for the same
+    reason `_b1_prompt`/`_b3_prompt` do: a refusal here (an unreadable
+    corpus, an unreachable tokenizer) must not leave a NULL-outcome row for
+    crash recovery to tombstone.
+    """
+    corpus = load_context(task.context)
+    corpus_tokens = await dispatcher.count_tokens(corpus, role="leaf")
+    loop = asyncio.get_running_loop()
+    counter = _ChunkTokenCounter(dispatcher, loop)
+    chunk_cfg = ChunkConfig(size_tokens=cfg.scaffold.chunk.size_tokens,
+                             overhead_tokens=cfg.scaffold.chunk.overhead_tokens,
+                             snap_to_boundary=cfg.scaffold.chunk.snap_to_boundary,
+                             snap_tolerance=cfg.scaffold.chunk.snap_tolerance,
+                             stride_tokens=cfg.scaffold.chunk.stride_tokens)
+    chunks = await asyncio.to_thread(split, corpus, chunk_cfg, counter)
+    return chunks, corpus_tokens
+
+
+async def _b2_root_final(cfg: Config, *, ep: ArmEpisode, registry: PromptRegistry,
+                          root_client: Any, summaries: list[str],
+                          question: str) -> str:
+    """B2's reduce step: ONE root call, mirroring `s1/run_s1.py:control_attempt`
+    (:144-156) -- `/apply-template` then `/completion`, with
+    `cfg.scaffold.sampling.root` (temperature/top_p/seed) carried verbatim,
+    via the injected `root_client` at the root port (never constructed here --
+    `arms.py` may not import `rlm.dispatcher`, the dependency rule).
+
+    The prompt is `render_baseline("b2_root_final") + "\\n\\n" + numbered
+    summaries in order + "\\n\\n" + task.text` (pre-registered, §8). B2 parses
+    the RAW completion text as the answer -- there is no REPL cell, the reply
+    IS the answer -- with reasoning stripped by `_strip_reasoning` (D16's
+    belt-and-braces strip, duplicated from `rlm.rootclient` rather than
+    imported; see that function's docstring).
+
+    Logged as ONE `llm_call` step with `actor="root"` through
+    `ArmEpisode.log_call`'s shared blob-writing/`STEP_COLS` machinery, via a
+    single SYNTHESIZED attempt built from the `CompletionResult` --
+    `log_call`'s docstring explains why that is the same method every leaf
+    call uses rather than a second implementation.
+    """
+    head = registry.render_baseline("b2_root_final")
+    numbered = "\n\n".join(f"{i + 1}. {s}" for i, s in enumerate(summaries))
+    prompt = f"{head}\n\n{numbered}\n\n{question}"
+    messages = [{"role": "user", "content": prompt}]
+
+    ep.check_wall_clock()
+    call_id = str(uuid.uuid4())
+    rendered = await root_client.apply_template(
+        messages,
+        chat_template_kwargs={"enable_thinking": cfg.scaffold.root.enable_thinking})
+    sampling = cfg.scaffold.sampling.root
+    result = await root_client.completion(
+        rendered, n_predict=cfg.scaffold.budgets.max_predict.root,
+        temperature=sampling.temperature, top_p=sampling.top_p,
+        seed=sampling.seed, stream=True)
+    answer = _strip_reasoning(result.content).strip()
+
+    attempt = {
+        "call_id": call_id, "retry_idx": 0, "status": StepStatus.OK,
+        "tokens_in": result.tokens_in, "tokens_out": result.tokens_out,
+        "tokens_cached": result.cache_n, "slot_id": result.slot_id,
+        "t_first_byte": result.t_first_byte, "t_end": tracemod.utc_now(),
+        "latency_prefill_ms": result.prompt_ms,
+        "latency_decode_ms": result.predicted_ms,
+        "root_view_hash": hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
+        "rendered": rendered,
+    }
+    # depth=0: the root sits at the top of the tree (§6), same convention
+    # `rlm/episode.py`'s own root-turn logging uses -- LEAF steps are the
+    # ones at depth 1 (`log_call`'s default).
+    ep.log_call(call_id, prompt, answer=answer, actor=Actor.ROOT, depth=0,
+                attempts=[attempt])
+    ep.check_wall_clock()
+    return answer
+
+
+async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any,
+                  trace: Any, registry: PromptRegistry, bench_extra: dict[str, Any],
+                  scaffold_instance_id: str = "",
+                  scaffold_git_sha: str = "") -> ArmResult:
+    """§8's B2: deterministic map-reduce -- chunk (C2 verbatim), summarise
+    (SERIAL, one leaf call per chunk -- `scaffold.dispatch_concurrency` is
+    pinned at 1 by config, R14: concurrent leaf dispatch corrupts the answer),
+    reduce (one root call over the numbered summaries, in order).
+
+    `root_client` is a second injected dependency alongside `dispatcher`: the
+    map step dispatches through C4 exactly as an RLM leaf sub-call does (see
+    the section docstring above for the slot/admission consequences of that),
+    while the reduce step talks directly to the root server the way
+    `s1/run_s1.py:control_attempt` does. Neither is constructed here --
+    `arms.py` may not import `rlm.dispatcher`/`rlm.rootclient` (the dependency
+    rule; `tests/test_import_rules.py` lints it).
+    """
+    ep = ArmEpisode(task, cfg, dispatcher=dispatcher, trace=trace,
+                     registry=registry, arm="b2", bench_extra=bench_extra,
+                     scaffold_instance_id=scaffold_instance_id,
+                     scaffold_git_sha=scaffold_git_sha)
+    ep.start_clock()
+    try:
+        chunks, corpus_tokens = await _b2_chunks(task, cfg, dispatcher=dispatcher)
+        # R13's detector, indexed against EVERY chunk C2 produced -- B2 sends
+        # ALL of them (no selection, unlike B3), so this is the same full-
+        # coverage index `run_b3` builds, just over the complete chunk list
+        # rather than a BM25 subset. Mandatory before the first dispatch
+        # (`ArmEpisode.set_corpus`'s docstring: NULL means NOT CHECKED).
+        ep.set_corpus(chunks)
+        n_predict = b2_summary_n_predict(cfg, len(chunks))
+        ep.open_episode(arm_snapshot={"n_chunks": len(chunks),
+                                       "summary_n_predict": n_predict},
+                         tokenized_task_len=corpus_tokens)
+        try:
+            head = registry.render_baseline("b2_leaf_summary")
+            summaries: list[str] = []
+            for chunk_text in chunks:
+                prompt = f"{head}\n\n{chunk_text}"
+                prompt_tokens = await dispatcher.count_tokens(prompt, role="leaf")
+                # `admit_tokens`: this task's obligation -- every summary is
+                # admitted against `max_subcalls`/`max_total_tokens` exactly
+                # as an RLM leaf sub-call is. `call_leaf`'s own
+                # `check_wall_clock()` at the top of every call is what makes
+                # the clock "checked between calls" (Task 6's rule) without a
+                # second check here.
+                summary = await ep.call_leaf(prompt, admit_tokens=prompt_tokens)
+                # Deterministic, never crash-and-error the arm on one bad
+                # summary (module docstring): an empty/whitespace reply still
+                # gets a numbered slot in the reduce prompt, just a literal
+                # one instead of nothing.
+                summaries.append(summary if summary.strip() else NO_SUMMARY)
+            answer = await _b2_root_final(cfg, ep=ep, registry=registry,
+                                            root_client=root_client,
+                                            summaries=summaries,
+                                            question=task.text)
         except (BudgetBreach, DispatchError) as exc:
             return ep.close(*outcome_for_error(exc))
         except BaseException:

@@ -21,19 +21,22 @@ from rlm.arms import (
     ARM_ERROR,
     CHECKER_FAILED,
     NO_ANSWER,
+    NO_SUMMARY,
     SERVER_UNREACHABLE,
     ArmEpisode,
     ArmResult,
+    b2_summary_n_predict,
     bench_slot_capacity,
     bm25_select,
     outcome_for_error,
     run_b1,
+    run_b2,
     run_b3,
     truncate_head_tail,
 )
 from rlm.config import Config
 from rlm.episode import Task
-from rlm.errors import ConfigError, DispatchError, Outcome
+from rlm.errors import BudgetBreach, ConfigError, DispatchError, Outcome
 from rlm.trace import TraceLogger
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -114,7 +117,7 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
 
     def build(*, bench_ctx: int | None = None, bench_parallel: int | None = None,
               drop_bench_leaf: bool = False, max_wall_clock_s: int | None = None,
-              chunk: dict | None = None) -> Config:
+              max_subcalls: int | None = None, chunk: dict | None = None) -> Config:
         raw = copy.deepcopy(minimal_cfg_dict)
         prompts = raw["scaffold"]["prompts"]
         prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
@@ -138,6 +141,8 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
                 raw["servers"]["bench_leaf"]["parallel"] = bench_parallel
         if max_wall_clock_s is not None:
             raw["scaffold"]["budgets"]["max_wall_clock_s"] = max_wall_clock_s
+        if max_subcalls is not None:
+            raw["scaffold"]["budgets"]["max_subcalls"] = max_subcalls
         if chunk is not None:
             raw["scaffold"]["chunk"].update(chunk)
         return Config.model_validate(raw)
@@ -814,3 +819,384 @@ async def test_arm_episode_close_is_idempotent(bench_cfg):
     first, second = await env.run(factory)
     assert first is second
     assert env.episode["outcome"] == "fail"
+
+
+# --------------------------------------------------------------------------- #
+# ArmEpisode.call_leaf -- the admission plumbing this task adds
+# --------------------------------------------------------------------------- #
+
+
+async def test_call_leaf_without_admit_tokens_does_not_touch_the_enforcer(bench_cfg):
+    """B1/B3 never pass `admit_tokens` -- their existing behaviour (no
+    admission at all) must be unchanged by this task's addition."""
+    cfg = bench_cfg()
+    env = _ArmEnv(cfg)
+    holder: dict = {}
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=_ScriptedDispatcher("ANSWER"),
+                         trace=tl, registry=cfg.prompt_registry(), arm="b1",
+                         bench_extra=BENCH_EXTRA)
+        holder["ep"] = ep
+        ep.start_clock()
+        ep.open_episode()
+        answer = await ep.call_leaf("q1")
+        return ep.finish(answer)
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.SUCCESS
+    assert holder["ep"].enforcer.subcalls_used == 0
+    assert holder["ep"].enforcer.tokens_used == 0
+
+
+async def test_call_leaf_admits_and_settles_against_the_enforcer(bench_cfg):
+    cfg = bench_cfg()
+    env = _ArmEnv(cfg)
+    holder: dict = {}
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=_ScriptedDispatcher("ANSWER"),
+                         trace=tl, registry=cfg.prompt_registry(), arm="b2",
+                         bench_extra=BENCH_EXTRA)
+        holder["ep"] = ep
+        ep.start_clock()
+        ep.open_episode()
+        answer = await ep.call_leaf("q1", admit_tokens=10)
+        return ep.finish(answer)
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.SUCCESS
+    ep = holder["ep"]
+    assert ep.enforcer.subcalls_used == 1
+    # the mock dispatcher records no token usage -- settle with zeros is fine
+    assert ep.enforcer.tokens_used == 0
+    assert ep.enforcer.reserved_total == 0     # released by settle
+
+
+async def test_call_leaf_admit_breach_raises_before_dispatch_and_logs_nothing(bench_cfg):
+    cfg = bench_cfg(max_subcalls=1)
+    env = _ArmEnv(cfg)
+    disp = _ScriptedDispatcher("ANSWER")
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=disp, trace=tl,
+                         registry=cfg.prompt_registry(), arm="b2",
+                         bench_extra=BENCH_EXTRA)
+        ep.start_clock()
+        ep.open_episode()
+        await ep.call_leaf("q1", admit_tokens=10)     # spends the only subcall
+        try:
+            await ep.call_leaf("q2", admit_tokens=10)
+        except BudgetBreach as exc:
+            return ep.close(*outcome_for_error(exc))
+        raise AssertionError("expected a BudgetBreach on the second call")
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.BUDGET_KILL and res.reason == "max_subcalls"
+    # the breached call never dispatched, so only the FIRST call's step exists
+    assert len(env.steps) == 1
+    assert env.steps[0]["action_payload"] == "q1"
+
+
+def test_settled_tokens_matches_the_episode_runners_implementation():
+    """`arms._settled_tokens` is `rlm/episode.py::settled_tokens`, duplicated
+    (the dependency rule -- see the module docstring). Pinned equal so the
+    duplication cannot drift in silence."""
+    from rlm.arms import _settled_tokens
+
+    attempts = [{"tokens_in": 10, "tokens_out": 5},
+                {"tokens_in": None, "tokens_out": None},
+                {"tokens_in": 3, "tokens_out": 2}]
+    assert _settled_tokens(attempts) == episodemod.settled_tokens(attempts)
+
+
+def test_strip_reasoning_matches_rootclients_implementation():
+    """`arms._strip_reasoning` is `rlm.rootclient.strip_reasoning`, duplicated
+    for the same import-rule reason (`arms.py` may not import `rlm.rootclient`
+    -- `tests/test_import_rules.py`). Pinned equal here."""
+    from rlm.arms import _strip_reasoning
+    from rlm.rootclient import strip_reasoning
+
+    samples = [
+        "<think>\nreasoning\n</think>\nFINAL",
+        "no think block here",
+        "<think></think>FINAL",
+        "FINAL<think>reopened but never closed",
+        "  <think>a</think>  <think>b</think>  tail",
+    ]
+    for s in samples:
+        assert _strip_reasoning(s) == strip_reasoning(s)
+
+
+# --------------------------------------------------------------------------- #
+# B2 -- deterministic map-reduce
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+async def b2_root_client(fake_root_server):
+    """A real `ServerClient` pointed at `FakeRootServer`, injected as B2's
+    `root_client` -- exactly how a real bench run injects a `ServerClient`
+    built against `servers.root.port`. `arms.py` never constructs its own
+    (the dependency rule: it may not import `rlm.dispatcher`)."""
+    from rlm.dispatcher import ServerClient
+
+    client = ServerClient(fake_root_server.base_url, timeout=5.0)
+    yield client
+    await client.aclose()
+
+
+class _PerChunkDispatcher(CannedDispatcher):
+    """Answers each B2 leaf summary call with a reply DERIVED from the
+    prompt (via `reply_for`), or an empty string when `empty=True`, so a test
+    can verify the reduce step's ordering/content from the dispatcher's own
+    record instead of trusting it. Also spies on `set_corpus`."""
+
+    def __init__(self, reply_for=None, *, empty: bool = False) -> None:
+        super().__init__()
+        self.reply_for = reply_for
+        self.empty = empty
+        self.prompts: list[str] = []
+        self.set_corpus_calls: list[Any] = []
+
+    def set_corpus(self, chunks) -> None:
+        self.set_corpus_calls.append(chunks)
+        self._inner.set_corpus(chunks)
+
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None) -> str:
+        from rlm.dispatcher import compose_leaf_user
+
+        self.prompts.append(prompt)
+        composed = compose_leaf_user(prompt, chunk)
+        key = f"{role}:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
+        reply = "" if self.empty else (self.reply_for(prompt) if self.reply_for
+                                        else "SUMMARY")
+        self._inner._fixtures[key] = reply
+        return await self._inner.query(prompt, role=role, call_id=call_id,
+                                        chunk=chunk)
+
+
+class _SlotAwarePerChunkDispatcher(_PerChunkDispatcher):
+    """A dispatcher whose `query` DECLARES `slot_id` -- B2 must never pass
+    it (unlike B1/B3, it runs on C4's never-reuse slot discipline and lets
+    C4 assign)."""
+
+    def __init__(self, *a, **kw) -> None:
+        super().__init__(*a, **kw)
+        self.slot_ids: list[int | None] = []
+
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None, slot_id: int | None = None) -> str:
+        self.slot_ids.append(slot_id)
+        return await super().query(prompt, role=role, call_id=call_id, chunk=chunk)
+
+
+def _reply_by_marker(prompt: str) -> str:
+    if "AAAA" in prompt:
+        return "SUMMARY-A"
+    if "BBBB" in prompt:
+        return "SUMMARY-B"
+    if "CCCC" in prompt:
+        return "SUMMARY-C"
+    return "SUMMARY-?"
+
+
+#: C2's partition chunker (size_tokens=10, snap off) cuts this 94-char corpus
+#: into EXACTLY three windows -- [37, 37, 20] chars -- verified directly
+#: against `rlm.chunker.split` before being relied on here, the same
+#: discipline `test_b3_runs_r13s_detector_on_an_unselected_chunk` documents.
+_B2_CORPUS = "A" * 37 + "B" * 37 + "C" * 20
+_B2_CHUNKS = ["A" * 37, "B" * 37, "C" * 20]
+
+
+def _b2_task(**over) -> Task:
+    kw = {"task_id": "b2-t1", "text": "What is the answer?",
+          "context": _B2_CORPUS, "answer": "FINAL", "checker": "exact"}
+    kw.update(over)
+    return Task(**kw)
+
+
+def _b2_cfg(bench_cfg, **over):
+    return bench_cfg(chunk={"size_tokens": 10, "stride_tokens": 10,
+                             "snap_to_boundary": False}, **over)
+
+
+async def _run_b2(cfg: Config, task: Task, dispatcher, root_client, **kw):
+    env = _ArmEnv(cfg)
+    result = await env.run(
+        lambda tl: run_b2(task, cfg, dispatcher=dispatcher, root_client=root_client,
+                           trace=tl, registry=cfg.prompt_registry(),
+                           bench_extra=BENCH_EXTRA, **kw))
+    return result, env
+
+
+# -- summary budget formula (pure, no dispatcher needed) --------------------- #
+
+
+def test_b2_summary_n_predict_is_sized_to_fit_the_root_window(bench_cfg):
+    cfg = bench_cfg()
+    assert cfg.scaffold.root.window_tokens == 32768
+    assert b2_summary_n_predict(cfg, 302) == 86
+
+
+def test_b2_summary_n_predict_floors_at_16(bench_cfg):
+    cfg = bench_cfg()
+    assert b2_summary_n_predict(cfg, 100_000) == 16
+
+
+def test_b2_summary_n_predict_caps_at_leaf_max_predict(bench_cfg):
+    cfg = bench_cfg()
+    assert cfg.scaffold.budgets.max_predict.leaf == 512
+    assert b2_summary_n_predict(cfg, 1) == 512
+
+
+# -- serial map -> reduce ----------------------------------------------------- #
+
+
+async def test_b2_serial_map_then_reduce_logs_three_leaf_steps_then_a_root_step(
+        bench_cfg, fake_root_server, b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    task = _b2_task()
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["FINAL"]
+
+    res, env = await _run_b2(cfg, task, disp, b2_root_client)
+
+    assert isinstance(res, ArmResult)
+    assert res.outcome == Outcome.SUCCESS and res.reason is None
+    assert res.answer == "FINAL"
+
+    assert len(env.steps) == 4
+    assert [s["step_idx"] for s in env.steps] == [0, 1, 2, 3]
+    leaf_steps, root_step = env.steps[:3], env.steps[3]
+    assert all(s["actor"] == "leaf" and s["action_type"] == "llm_call"
+               and s["status"] == "ok" for s in leaf_steps)
+    assert root_step["actor"] == "root" and root_step["action_type"] == "llm_call"
+    assert root_step["status"] == "ok"
+
+    head = cfg.prompt_registry().render_baseline("b2_leaf_summary")
+    assert disp.prompts == [f"{head}\n\n{c}" for c in _B2_CHUNKS]
+
+    root_prompt = fake_root_server.last_completion_prompt
+    assert "1. SUMMARY-A" in root_prompt
+    assert "2. SUMMARY-B" in root_prompt
+    assert "3. SUMMARY-C" in root_prompt
+    assert (root_prompt.index("SUMMARY-A") < root_prompt.index("SUMMARY-B")
+            < root_prompt.index("SUMMARY-C"))
+    assert task.text in root_prompt
+
+    snap = env.episode["config_snapshot"]
+    assert snap["bench"]["arm"] == "b2"
+    assert snap["bench"]["run_id"] == "r-1" and snap["bench"]["seed"] == 1
+    assert snap["bench"]["n_chunks"] == 3
+    assert isinstance(snap["bench"]["summary_n_predict"], int)
+    assert "baselines.b2_leaf_summary.file" in snap["prompt_hashes"]
+    assert "baselines.b2_root_final.file" in snap["prompt_hashes"]
+
+    # the root's answer blob is the episode's final answer
+    assert env.blob(root_step["observation_full_ref"]) == b"FINAL"
+    assert env.episode["final_answer_ref"] == root_step["observation_full_ref"]
+
+
+async def test_b2_calls_set_corpus_with_the_chunk_list(bench_cfg, fake_root_server,
+                                                          b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["FINAL"]
+
+    await _run_b2(cfg, _b2_task(), disp, b2_root_client)
+
+    assert disp.set_corpus_calls == [_B2_CHUNKS]
+
+
+async def test_b2_never_pins_a_slot(bench_cfg, fake_root_server, b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    disp = _SlotAwarePerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["FINAL"]
+
+    res, _env = await _run_b2(cfg, _b2_task(), disp, b2_root_client)
+    assert res.outcome == Outcome.SUCCESS
+    assert disp.slot_ids == [None, None, None]
+
+
+async def test_b2_empty_summary_becomes_the_no_summary_literal(
+        bench_cfg, fake_root_server, b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(empty=True)
+    fake_root_server.script = ["FINAL"]
+
+    res, env = await _run_b2(cfg, _b2_task(), disp, b2_root_client)
+
+    assert res.outcome == Outcome.SUCCESS
+    root_prompt = fake_root_server.last_completion_prompt
+    assert root_prompt.count(NO_SUMMARY) == 3
+    # the arm never crashes on an empty summary -- every leaf step still ok
+    assert all(s["status"] == "ok" for s in env.steps[:3])
+
+
+async def test_b2_root_call_strips_reasoning_before_scoring(
+        bench_cfg, fake_root_server, b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["<think>\nlet me think\n</think>\nFINAL"]
+
+    res, _env = await _run_b2(cfg, _b2_task(), disp, b2_root_client)
+
+    assert res.outcome == Outcome.SUCCESS
+    assert res.answer == "FINAL"
+
+
+# -- budget / outcome mapping ------------------------------------------------- #
+
+
+async def test_b2_max_subcalls_breach_is_budget_kill(bench_cfg, fake_root_server,
+                                                        b2_root_client):
+    cfg = _b2_cfg(bench_cfg, max_subcalls=2)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["FINAL"]
+
+    res, env = await _run_b2(cfg, _b2_task(), disp, b2_root_client)
+
+    assert res.outcome == Outcome.BUDGET_KILL and res.reason == "max_subcalls"
+    assert env.episode["outcome"] == "budget_kill"
+    assert env.episode["outcome_reason"] == "max_subcalls"
+    # two chunks were admitted and dispatched before the third breached; the
+    # map never finished, so the root call never ran
+    assert len(env.steps) == 2
+    assert all(s["actor"] == "leaf" for s in env.steps)
+
+
+async def test_b2_checker_pass_is_success(bench_cfg, fake_root_server, b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["FINAL"]
+
+    res, env = await _run_b2(cfg, _b2_task(answer="FINAL"), disp, b2_root_client)
+    assert res.outcome == Outcome.SUCCESS and res.reason is None
+    assert env.episode["outcome"] == "success"
+
+
+async def test_b2_checker_fail_is_fail_checker_failed(bench_cfg, fake_root_server,
+                                                         b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["WRONG"]
+
+    res, env = await _run_b2(cfg, _b2_task(answer="FINAL"), disp, b2_root_client)
+    assert res.outcome == Outcome.FAIL and res.reason == CHECKER_FAILED
+    assert res.answer == "WRONG"
+    assert env.episode["outcome"] == "fail"
+    assert env.episode["outcome_reason"] == "checker_failed"
+
+
+async def test_b2_records_the_scaffold_provenance_columns(bench_cfg, fake_root_server,
+                                                             b2_root_client):
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["FINAL"]
+
+    _res, env = await _run_b2(cfg, _b2_task(), disp, b2_root_client,
+                               scaffold_instance_id="4242", scaffold_git_sha="deadbeef")
+    assert env.episode["scaffold_instance_id"] == "4242"
+    assert env.episode["scaffold_git_sha"] == "deadbeef"
