@@ -1,0 +1,8 @@
+{
+  "task_id": "needle-01",
+  "text": "Exactly one record in this register states the custody key of record for the Yeldlammermere Tithe Barn. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/needle-01.txt",
+  "category": "needle",
+  "answer": "7c5e297d-7246-0bf0-ae35-4fff27c2d93e",
+  "checker": "uuid_exact"
+}

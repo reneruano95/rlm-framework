@@ -1,0 +1,8 @@
+{
+  "task_id": "needle-07",
+  "text": "Exactly one record in this register states the custody key of record for the Brillcrowecleave Muniment Room. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/needle-07.txt",
+  "category": "needle",
+  "answer": "9ce5efc2-0616-da2d-beb7-c374918b8b57",
+  "checker": "uuid_exact"
+}

@@ -1,0 +1,8 @@
+{
+  "task_id": "needle-06",
+  "text": "Exactly one record in this register states the custody key of record for the Yeldfallowleigh Ledgerhouse. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/needle-06.txt",
+  "category": "needle",
+  "answer": "fa6358e8-c3f5-f3a6-4c72-d77bc05a0df0",
+  "checker": "uuid_exact"
+}

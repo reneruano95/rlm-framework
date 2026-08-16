@@ -302,3 +302,124 @@ def foreign_identifier_overlap(corpus: AggregationCorpus,
 __all__ = ["AggregationCorpus", "build", "regex_at_chance",
            "foreign_identifier_overlap", "MAX_AGG_TOKENS", "MAX_SUBCALLS",
            "coined_name"]
+
+
+# --------------------------------------------------------------------------- #
+# The other category shapes. Same vocabulary and same record grammar as the
+# aggregation corpus, so a model cannot tell the categories apart by style --
+# only the QUESTION differs, which is what makes the per-category table in §8's
+# report mean something.
+
+
+@dataclass
+class NeedleCorpus:
+    text: str
+    entity: str
+    key: str
+    needle_offset: int
+    seed: int
+    measured_tokens: int
+    counter_name: str
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+
+
+def build_needle(seed: int, target_tokens: int,
+                 count: Callable[[str], int], counter_name: str,
+                 position: float = 0.68) -> NeedleCorpus:
+    """One unique custody key, planted at a fraction of the way through.
+
+    §8 lets needle tasks keep the 200K-1M range because "a needle does not
+    require full coverage -- finding it by REPL prescan and targeted windows is
+    not sampling, it is the thesis". So this corpus is deliberately LARGER than
+    an aggregation one and is not bound by the 130K cap.
+
+    The needle is unique by construction: its entity appears exactly once, and
+    the key is a UUID drawn from this corpus's own stream, so `uuid_exact` can
+    grade it and a leak from anywhere else scores as a miss rather than a pass.
+    """
+    rng = random.Random(seed)
+    entity = organisation(rng)
+    key = "%08x-%04x-%04x-%04x-%012x" % (
+        rng.getrandbits(32), rng.getrandbits(16), rng.getrandbits(16),
+        rng.getrandbits(16), rng.getrandbits(48))
+    needle = (f"\n[ENT-{900000 + seed}] {entity}\n"
+              f"Status: SEALED\n"
+              f"Custody key of record: {key}.\n"
+              f"Notes: this key is issued once and is not reproduced elsewhere.\n")
+
+    parts: list[str] = []
+    idx = 0
+    while count("".join(parts)) < target_tokens:
+        label: Label = "withheld" if rng.random() < 0.45 else "released"
+        parts.append("\n" + _record(rng, 200000 + idx, label))
+        idx += 1
+    body = "".join(parts)
+    cut = int(len(body) * position)
+    cut = body.find("\n\n[", cut)          # snap to a record boundary
+    if cut < 0:
+        cut = len(body)
+    text = (body[:cut] + "\n" + needle + body[cut:]).lstrip("\n")
+    if text.count(entity) != 1:
+        raise AssertionError(f"needle entity {entity!r} is not unique in the "
+                             f"corpus ({text.count(entity)} occurrences)")
+    return NeedleCorpus(text=text, entity=entity, key=key,
+                        needle_offset=text.find(key), seed=seed,
+                        measured_tokens=count(text), counter_name=counter_name)
+
+
+@dataclass
+class SynthesisCorpus:
+    docs: list[str]
+    answer: str                  # the organisation present in EVERY document
+    n_docs: int
+    seed: int
+    measured_tokens: int
+    counter_name: str
+
+    @property
+    def text(self) -> str:
+        return "\n\n=== DOCUMENT BREAK ===\n\n".join(self.docs)
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+
+
+def build_synthesis(seed: int, n_docs: int, tokens_per_doc: int,
+                    count: Callable[[str], int],
+                    counter_name: str) -> SynthesisCorpus:
+    """Several documents; the answer is the one organisation appearing in ALL.
+
+    §8 asks for "multi-document synthesis with checkable claims", and the check
+    has to be programmatic. An intersection is: no single document contains the
+    answer, every document is needed, and the ground truth is a name that
+    `name_exact` grades. A root that reads one document and guesses cannot pass,
+    and a root that reads all of them can.
+    """
+    rng = random.Random(seed)
+    shared = organisation(rng)
+    docs: list[str] = []
+    for d in range(n_docs):
+        parts = [f"REGISTER {d + 1} of {n_docs}\n"]
+        idx = 0
+        while count("".join(parts)) < tokens_per_doc:
+            label: Label = "withheld" if rng.random() < 0.45 else "released"
+            parts.append("\n" + _record(rng, 300000 + d * 10000 + idx, label))
+            idx += 1
+        # The shared organisation appears once per document, at a varying depth,
+        # so it cannot be found by position.
+        at = rng.randrange(2, max(3, len(parts)))
+        parts.insert(at, f"\n[ENT-{800000 + d}] {shared}\nStatus: OPEN\n"
+                         f"Disposition: entered on this register.\n")
+        docs.append("".join(parts))
+    corpus = SynthesisCorpus(docs=docs, answer=shared, n_docs=n_docs, seed=seed,
+                             measured_tokens=0, counter_name=counter_name)
+    corpus.measured_tokens = count(corpus.text)
+    for d in docs:
+        if d.count(shared) != 1:
+            raise AssertionError("the shared organisation must appear exactly "
+                                 "once per document")
+    return corpus

@@ -1,0 +1,8 @@
+{
+  "task_id": "needle-03",
+  "text": "Exactly one record in this register states the custody key of record for the Voskvergegriff Warrant Office. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/needle-03.txt",
+  "category": "needle",
+  "answer": "7b619e8f-8ab5-9ada-a860-a4049f4bcc61",
+  "checker": "uuid_exact"
+}

@@ -1,2 +1,12 @@
 *.md text eol=lf
 .gitattributes text eol=lf
+
+# The frozen benchmark. `bench/manifest.json` records a sha256 for every corpus
+# and the freeze rests on those hashes, so these files must round-trip through
+# git byte-for-byte. Without this, git's autocrlf would rewrite every newline on
+# checkout, every recorded hash would stop matching, and
+# tests/test_bench_manifest.py would fail on a clean clone for a reason that has
+# nothing to do with the benchmark.
+bench/corpora/** -text
+bench/tasks/** text eol=lf
+bench/manifest.json text eol=lf

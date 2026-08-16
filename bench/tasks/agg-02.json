@@ -1,0 +1,8 @@
+{
+  "task_id": "agg-02",
+  "text": "Count the records in this register whose Status line reads SEALED. Reply with the integer only, nothing else.",
+  "context_path": "../corpora/agg-02.txt",
+  "category": "aggregation",
+  "answer": "597",
+  "checker": "int_exact"
+}

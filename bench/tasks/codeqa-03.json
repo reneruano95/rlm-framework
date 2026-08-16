@@ -1,0 +1,8 @@
+{
+  "task_id": "codeqa-03",
+  "text": "This corpus is a Python repository, each file introduced by a line '=== FILE: <path> ==='. Exactly one file defines the function `leak_verdict`. Give that file's path exactly as the '=== FILE:' line writes it, and nothing else.",
+  "context_path": "../corpora/code-bundle.txt",
+  "category": "code_qa",
+  "answer": "rlm/dispatcher.py",
+  "checker": "name_exact"
+}

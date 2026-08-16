@@ -1,0 +1,8 @@
+{
+  "task_id": "needle-05",
+  "text": "Exactly one record in this register states the custody key of record for the Glinkestreltofts Warrant Office. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/needle-05.txt",
+  "category": "needle",
+  "answer": "09ab1cec-9600-a244-35dc-82c63476ef40",
+  "checker": "uuid_exact"
+}

@@ -1,0 +1,8 @@
+{
+  "task_id": "needle-08",
+  "text": "Exactly one record in this register states the custody key of record for the Cynetarndorne Assay Office. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/needle-08.txt",
+  "category": "needle",
+  "answer": "3756c418-b12e-e05e-8154-a62650b4b885",
+  "checker": "uuid_exact"
+}

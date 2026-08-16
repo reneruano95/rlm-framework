@@ -1,0 +1,8 @@
+{
+  "task_id": "needle-04",
+  "text": "Exactly one record in this register states the custody key of record for the Irmlammergriff Ledgerhouse. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/needle-04.txt",
+  "category": "needle",
+  "answer": "da64bcda-6ebb-90b0-c229-999c677b1a7e",
+  "checker": "uuid_exact"
+}

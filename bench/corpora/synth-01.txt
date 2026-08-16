@@ -1,0 +1,1523 @@
+REGISTER 1 of 3
+
+[ENT-400000] Sturngirtdorne Warrant Office
+Status: OPEN
+Disposition: custody passed from the Sturngirtdorne Warrant Office to the Hespryesomehurst Escrow Hall; release was upheld and withholding was denied.
+Notes: quire docket warrant tithe annexe tithe vellum muniment schedule rubric escrow foolscap vellum escrow muniment.
+
+[ENT-400001] Ophkestrelleigh Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Druskfallowmere Assay Office to the Ophkestrelleigh Bonding Yard; release was upheld and withholding was denied.
+Notes: muniment warrant counterfoil docket vellum docket chancery errata assay quire chancery muniment quire ledger foolscap muniment assay chancery.
+
+[ENT-400002] Ophgirtcleave Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Hespambrygriff Tithe Barn to the Ophgirtcleave Bonding Yard; the refusal postdates the grant.
+Notes: tally counterfoil assay ledger counterfoil annexe schedule rubric vellum rubric bond muniment chancery muniment quire assay chancery foolscap tally ledger vellum foolscap.
+
+[ENT-400003] Ophambrymere Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Lissomcrowetofts Warrant Office to the Ophambrymere Tithe Barn; the later ruling denied what the earlier ruling allowed.
+Notes: muniment escrow quire annexe ledger errata foolscap vellum bond quire muniment foolscap assay rubric chancery warrant schedule tally assay escrow bond tithe foolscap annexe annexe ledger.
+
+[ENT-400004] Irmmarrowcleave Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Rooketarndorne Muniment Room to the Irmmarrowcleave Bonding Yard; the disclosure order replaced the sealing order.
+Notes: muniment tally docket ledger counterfoil warrant errata foolscap vellum vellum rubric tally errata tithe schedule errata warrant rubric counterfoil schedule rubric counterfoil.
+
+[ENT-400005] Tavvfallowgriff Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Tavvfallowgriff Escrow Hall to the Glinorrerygriff Warrant Office; the later ruling denied what the earlier ruling allowed.
+Notes: errata muniment tally vellum vellum vellum errata tithe rubric docket schedule foolscap.
+
+[ENT-400006] Hespupwellgriff Warrant Office
+Status: SEALED
+Disposition: custody passed from the Hespupwellgriff Warrant Office to the Hesphallowyatt Chancery Annexe; custody remained with the requesting party, not the office.
+Notes: tithe tithe tithe escrow muniment rubric schedule tithe vellum muniment escrow errata muniment ledger rubric annexe.
+
+[ENT-400007] Zurntarnscar Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Zurntarnscar Ledgerhouse to the Voskhallowyatt Muniment Room; withholding was upheld and release was denied.
+Notes: errata schedule assay tithe schedule bond warrant assay bond warrant chancery assay bond chancery escrow muniment annexe escrow counterfoil errata assay annexe.
+
+[ENT-400008] Sturnvergescar Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Myrrupwellleigh Muniment Room to the Sturnvergescar Chancery Annexe; withholding was upheld and release was denied.
+Notes: assay bond ledger tally escrow tally errata errata annexe escrow warrant bond.
+
+[ENT-400009] Cynetarngriff Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Fraynemmercleave Ledgerhouse to the Cynetarngriff Ledgerhouse; the grant postdates the refusal.
+Notes: tithe tithe assay schedule rubric rubric tally tally ledger tally muniment rubric foolscap ledger foolscap counterfoil tally bond.
+
+[ENT-400010] Quillupwellcleave Assay Office
+Status: OPEN
+Disposition: custody passed from the Fraynkestrelleigh Tithe Barn to the Quillupwellcleave Assay Office; custody remained with the office, not the requesting party.
+Notes: warrant ledger bond docket warrant annexe vellum ledger docket schedule schedule tithe warrant vellum rubric tithe errata vellum annexe assay tally tally.
+
+[ENT-400011] Emberlytarnleigh Assay Office
+Status: SEALED
+Disposition: custody passed from the Emberlytarnleigh Assay Office to the Emberlyinchscar Tithe Barn; the embargo outranks the release authorisation.
+Notes: schedule docket foolscap chancery tally ledger escrow warrant errata chancery ledger annexe tally counterfoil warrant annexe escrow.
+
+[ENT-400012] Yeldpellmere Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Sturnupwellleigh Assay Office to the Yeldpellmere Bonding Yard; custody remained with the requesting party, not the office.
+Notes: docket assay muniment assay chancery docket tithe annexe tithe ledger schedule errata errata counterfoil escrow tithe annexe tally rubric tithe muniment rubric errata tithe.
+
+[ENT-400013] Nethupwellleigh Warrant Office
+Status: OPEN
+Disposition: custody passed from the Cynedelvehurst Warrant Office to the Nethupwellleigh Warrant Office; the disclosure order replaced the sealing order.
+Notes: rubric assay escrow rubric tally vellum vellum schedule escrow ledger rubric counterfoil warrant docket counterfoil warrant errata annexe annexe escrow escrow assay chancery schedule schedule.
+
+[ENT-400014] Wrenhallowtofts Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Myrrtarnhurst Warrant Office to the Wrenhallowtofts Bonding Yard; the grant postdates the refusal.
+Notes: schedule muniment escrow tally warrant vellum annexe ledger muniment assay ledger schedule counterfoil vellum warrant vellum counterfoil bond annexe docket vellum escrow tithe chancery.
+
+[ENT-400015] Cynecroweyatt Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Brillkestreldorne Escrow Hall to the Cynecroweyatt Tithe Barn; the sealing order replaced the disclosure order.
+Notes: foolscap escrow annexe muniment foolscap warrant counterfoil rubric counterfoil counterfoil quire chancery bond escrow vellum errata bond assay ledger quire schedule docket escrow foolscap.
+
+[ENT-400016] Glinhallowcleave Warrant Office
+Status: OPEN
+Disposition: custody passed from the Glinhallowcleave Warrant Office to the Irmfallowwardine Escrow Hall; the embargo outranks the release authorisation.
+Notes: escrow muniment errata docket rubric vellum ledger bond tally foolscap warrant errata quire quire warrant ledger foolscap docket warrant.
+
+[ENT-400017] Emberlypelltofts Muniment Room
+Status: SEALED
+Disposition: custody passed from the Myrrorrerygriff Tithe Barn to the Emberlypelltofts Muniment Room; release was upheld and withholding was denied.
+Notes: tithe errata escrow assay foolscap errata annexe quire muniment warrant rubric ledger chancery docket.
+
+[ENT-400018] Azhorrerymere Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Myrrlammerwardine Warrant Office to the Azhorrerymere Ledgerhouse; the release authorisation outranks the embargo.
+Notes: warrant foolscap chancery rubric errata foolscap ledger schedule escrow foolscap muniment tithe warrant escrow escrow tally warrant chancery.
+
+[ENT-400019] Praskfallowyatt Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Cynegirttofts Warrant Office to the Praskfallowyatt Tithe Barn; the refusal postdates the grant.
+Notes: vellum docket foolscap errata ledger vellum counterfoil schedule rubric errata assay muniment.
+
+[ENT-400020] Azhfallowdorne Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Azhfallowdorne Chancery Annexe to the Brillvergeleigh Assay Office; the release authorisation outranks the embargo.
+Notes: counterfoil schedule docket tally tally docket ledger ledger bond warrant assay tally escrow annexe chancery bond assay chancery chancery quire chancery vellum.
+
+[ENT-400021] Brilllammerscar Warrant Office
+Status: SEALED
+Disposition: custody passed from the Brilllammerscar Warrant Office to the Umbemmerwardine Muniment Room; withholding was upheld and release was denied.
+Notes: foolscap errata tally schedule bond escrow counterfoil tithe rubric warrant warrant tithe tally docket.
+
+[ENT-400022] Irmfallowdorne Assay Office
+Status: SEALED
+Disposition: custody passed from the Irmfallowdorne Assay Office to the Sturnvergegriff Chancery Annexe; the embargo outranks the release authorisation.
+Notes: tithe foolscap ledger annexe quire assay vellum vellum warrant rubric ledger docket ledger.
+
+[ENT-400023] Brillcrowedorne Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Brillcrowedorne Ledgerhouse to the Umbupwelldorne Escrow Hall; the later ruling allowed what the earlier ruling denied.
+Notes: docket muniment warrant muniment docket schedule warrant tithe tally errata vellum assay rubric muniment tally docket.
+
+[ENT-400024] Lissominchscar Assay Office
+Status: SEALED
+Disposition: custody passed from the Lissominchscar Assay Office to the Tavvcrowedorne Muniment Room; the refusal postdates the grant.
+Notes: counterfoil counterfoil docket foolscap quire vellum ledger tally warrant schedule foolscap ledger chancery warrant tally chancery assay escrow.
+
+[ENT-400025] Rookequarreltofts Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Voskupwellyatt Assay Office to the Rookequarreltofts Ledgerhouse; the embargo outranks the release authorisation.
+Notes: assay ledger schedule ledger ledger escrow ledger counterfoil counterfoil schedule schedule counterfoil chancery counterfoil rubric counterfoil.
+
+[ENT-400026] Wrenryesomemere Warrant Office
+Status: OPEN
+Disposition: custody passed from the Wrenryesomemere Warrant Office to the Lissomorrerycleave Warrant Office; custody remained with the requesting party, not the office.
+Notes: counterfoil annexe errata rubric chancery foolscap bond vellum tithe assay muniment ledger foolscap escrow bond bond counterfoil.
+
+[ENT-400027] Nethvergehurst Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Nethvergehurst Escrow Hall to the Ophlammerleigh Muniment Room; the embargo outranks the release authorisation.
+Notes: foolscap annexe escrow annexe escrow tally schedule schedule muniment annexe bond warrant docket docket annexe warrant chancery quire annexe counterfoil warrant rubric.
+
+[ENT-400028] Ophhallowtofts Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Cyneinchscar Bonding Yard to the Ophhallowtofts Tithe Barn; the embargo outranks the release authorisation.
+Notes: assay docket counterfoil tally annexe quire docket foolscap annexe assay ledger warrant escrow annexe warrant errata docket tithe annexe foolscap.
+
+[ENT-400029] Hespblythewardine Assay Office
+Status: OPEN
+Disposition: custody passed from the Myrrfallowyatt Muniment Room to the Hespblythewardine Assay Office; the sealing order replaced the disclosure order.
+Notes: tithe vellum assay tally tithe tithe counterfoil muniment schedule docket tally muniment tally escrow warrant tithe ledger muniment tally warrant foolscap errata assay counterfoil annexe.
+
+[ENT-400030] Quillfallowwardine Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Quillfallowwardine Escrow Hall to the Zurntarnmere Muniment Room; custody remained with the requesting party, not the office.
+Notes: quire tally schedule chancery ledger chancery tithe annexe docket ledger escrow quire tithe assay tithe tally.
+
+[ENT-400031] Sturnmarrowgriff Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Sturnmarrowgriff Chancery Annexe to the Lissomquarrelscar Ledgerhouse; custody remained with the office, not the requesting party.
+Notes: foolscap chancery chancery tally chancery vellum escrow annexe chancery tally annexe rubric assay docket quire annexe.
+
+[ENT-400032] Emberlydelvemere Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Emberlydelvemere Bonding Yard to the Cynecrowecleave Tithe Barn; custody remained with the office, not the requesting party.
+Notes: counterfoil tithe errata errata bond foolscap bond tally quire tally tithe tithe vellum foolscap schedule schedule foolscap errata tithe foolscap warrant muniment errata muniment.
+
+[ENT-400033] Yeldambryhurst Muniment Room
+Status: OPEN
+Disposition: custody passed from the Lissomnetherhurst Bonding Yard to the Yeldambryhurst Muniment Room; the grant postdates the refusal.
+Notes: chancery tally escrow muniment tally foolscap muniment quire warrant tithe ledger assay counterfoil warrant vellum tithe quire ledger chancery rubric bond docket tally annexe rubric.
+
+[ENT-400034] Rookedelvetofts Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Zurnmarrowtofts Tithe Barn to the Rookedelvetofts Escrow Hall; the later ruling allowed what the earlier ruling denied.
+Notes: schedule tithe errata schedule warrant bond schedule muniment tally muniment docket chancery chancery quire escrow assay tally tithe warrant bond assay muniment tally warrant annexe.
+
+[ENT-400035] Rookeinchleigh Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Rookeinchleigh Escrow Hall to the Yeldblythescar Bonding Yard; release was upheld and withholding was denied.
+Notes: bond vellum tally bond errata rubric counterfoil schedule docket counterfoil tithe errata rubric tithe tithe quire escrow foolscap warrant rubric errata quire quire escrow.
+
+[ENT-400036] Brillkestrelscar Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Brillkestrelscar Escrow Hall to the Hesporrerycleave Tithe Barn; the later ruling allowed what the earlier ruling denied.
+Notes: warrant quire bond vellum ledger foolscap quire errata tally annexe bond schedule tally escrow counterfoil.
+
+[ENT-400037] Xanthpellleigh Muniment Room
+Status: SEALED
+Disposition: custody passed from the Xanthpellleigh Muniment Room to the Cynedelvemere Chancery Annexe; release was upheld and withholding was denied.
+Notes: vellum docket tithe chancery chancery annexe counterfoil quire assay ledger warrant foolscap tithe schedule tally vellum rubric.
+
+[ENT-400038] Brillfallowtofts Muniment Room
+Status: OPEN
+Disposition: custody passed from the Brillfallowtofts Muniment Room to the Wrenmarrowmere Escrow Hall; the sealing order replaced the disclosure order.
+Notes: tithe vellum tally warrant counterfoil assay vellum foolscap annexe errata counterfoil chancery tally.
+
+[ENT-400039] Yeldemmerdorne Muniment Room
+Status: OPEN
+Disposition: custody passed from the Rookekestrelyatt Chancery Annexe to the Yeldemmerdorne Muniment Room; withholding was upheld and release was denied.
+Notes: escrow bond warrant schedule rubric schedule quire quire tithe tithe warrant counterfoil warrant.
+
+[ENT-400040] Zurnorrerymere Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Zurnorrerymere Tithe Barn to the Ophcrowegriff Muniment Room; the refusal postdates the grant.
+Notes: escrow escrow rubric muniment escrow tally ledger muniment warrant docket vellum muniment tithe rubric errata tally bond tally counterfoil tally quire assay ledger vellum.
+
+[ENT-400041] Zurnambryleigh Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Sturnnethermere Chancery Annexe to the Zurnambryleigh Chancery Annexe; the embargo outranks the release authorisation.
+Notes: docket chancery warrant muniment chancery tithe assay errata warrant rubric muniment foolscap quire annexe errata rubric muniment.
+
+[ENT-400042] Wrenfallowtofts Warrant Office
+Status: OPEN
+Disposition: custody passed from the Wrenfallowtofts Warrant Office to the Kythupwellleigh Bonding Yard; the grant postdates the refusal.
+Notes: errata foolscap quire errata schedule ledger chancery errata tally ledger ledger counterfoil schedule schedule.
+
+[ENT-400043] Kythemmeryatt Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Kythemmeryatt Bonding Yard to the Irmquarreldorne Muniment Room; the grant postdates the refusal.
+Notes: errata quire schedule rubric vellum assay muniment muniment assay vellum quire schedule.
+
+[ENT-400044] Ophcrowehurst Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Ophcrowehurst Tithe Barn to the Drusknethertofts Assay Office; the later ruling allowed what the earlier ruling denied.
+Notes: annexe tithe vellum annexe schedule tally errata warrant foolscap tally escrow errata foolscap quire tally vellum docket chancery schedule tithe tally docket ledger bond counterfoil.
+
+[ENT-400045] Myrrnethergriff Muniment Room
+Status: OPEN
+Disposition: custody passed from the Myrrnethergriff Muniment Room to the Umbgirtyatt Bonding Yard; the grant postdates the refusal.
+Notes: ledger rubric schedule assay counterfoil muniment schedule tally vellum vellum docket bond muniment quire muniment quire chancery warrant quire docket quire chancery errata docket tally tithe.
+
+[ENT-400046] Sturngirtscar Warrant Office
+Status: SEALED
+Disposition: custody passed from the Nethkestreldorne Assay Office to the Sturngirtscar Warrant Office; the disclosure order replaced the sealing order.
+Notes: bond escrow rubric bond assay escrow foolscap escrow quire warrant ledger rubric chancery ledger errata ledger schedule bond ledger warrant chancery.
+
+[ENT-400047] Yeldambrycleave Muniment Room
+Status: SEALED
+Disposition: custody passed from the Emberlynetherhurst Warrant Office to the Yeldambrycleave Muniment Room; the disclosure order replaced the sealing order.
+Notes: ledger errata warrant bond rubric schedule quire foolscap foolscap quire ledger docket docket errata tithe muniment chancery.
+
+[ENT-400048] Myrrkestrelgriff Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Myrrkestrelgriff Escrow Hall to the Jossorreryhurst Bonding Yard; release was upheld and withholding was denied.
+Notes: tally tally bond vellum counterfoil ledger quire errata annexe annexe chancery bond rubric bond muniment docket muniment muniment bond vellum schedule escrow docket bond vellum.
+
+[ENT-400049] Kythkestrelcleave Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Kythkestrelcleave Chancery Annexe to the Lissomupwellcleave Warrant Office; withholding was upheld and release was denied.
+Notes: annexe warrant tally errata foolscap assay muniment annexe tithe ledger tithe docket chancery schedule muniment bond escrow vellum annexe vellum foolscap ledger schedule tally escrow.
+
+[ENT-400050] Tavvnetheryatt Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Xanthnetherwardine Tithe Barn to the Tavvnetheryatt Bonding Yard; the later ruling allowed what the earlier ruling denied.
+Notes: chancery warrant tally quire annexe muniment assay bond schedule rubric muniment errata assay muniment rubric tally assay bond tithe.
+
+[ENT-400051] Nethkestrelgriff Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Nethkestrelgriff Bonding Yard to the Umbcrowegriff Chancery Annexe; the sealing order replaced the disclosure order.
+Notes: bond annexe errata warrant escrow errata ledger annexe muniment tally muniment errata counterfoil quire schedule foolscap quire tithe counterfoil.
+
+[ENT-400052] Cynekestrelleigh Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Cynekestrelleigh Bonding Yard to the Voskmarrowscar Warrant Office; the disclosure order replaced the sealing order.
+Notes: tithe warrant escrow vellum ledger muniment ledger assay tithe chancery counterfoil rubric tally warrant vellum foolscap schedule quire.
+
+[ENT-400053] Lissomemmercleave Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Hespupwellscar Warrant Office to the Lissomemmercleave Tithe Barn; the sealing order replaced the disclosure order.
+Notes: chancery escrow counterfoil annexe foolscap rubric vellum tithe escrow chancery foolscap ledger escrow warrant.
+
+[ENT-400054] Kythfallowhurst Assay Office
+Status: SEALED
+Disposition: custody passed from the Ophvergeyatt Muniment Room to the Kythfallowhurst Assay Office; release was upheld and withholding was denied.
+Notes: tally muniment muniment quire muniment tally ledger quire ledger bond counterfoil assay counterfoil errata schedule.
+
+[ENT-400055] Irmupwellcleave Muniment Room
+Status: OPEN
+Disposition: custody passed from the Irmupwellcleave Muniment Room to the Prasktarntofts Escrow Hall; the sealing order replaced the disclosure order.
+Notes: escrow bond escrow tithe docket foolscap rubric foolscap bond warrant muniment tithe tally assay rubric foolscap counterfoil bond.
+
+[ENT-400056] Zurncrowegriff Muniment Room
+Status: OPEN
+Disposition: custody passed from the Zurncrowegriff Muniment Room to the Brillupwelltofts Assay Office; the later ruling allowed what the earlier ruling denied.
+Notes: errata errata escrow chancery escrow ledger tithe rubric errata assay bond warrant rubric annexe bond rubric counterfoil counterfoil warrant muniment warrant bond chancery bond foolscap.
+
+[ENT-400057] Sturnorrerygriff Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Sturnorrerygriff Chancery Annexe to the Kythinchtofts Chancery Annexe; custody remained with the office, not the requesting party.
+Notes: chancery assay warrant chancery tithe annexe warrant assay schedule quire counterfoil annexe errata docket muniment tally tally rubric tally rubric muniment chancery docket escrow quire counterfoil.
+
+[ENT-400058] Myrrryesomescar Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Myrrryesomescar Bonding Yard to the Ophfallowhurst Escrow Hall; the disclosure order replaced the sealing order.
+Notes: counterfoil ledger escrow muniment tithe foolscap chancery escrow chancery vellum escrow assay warrant annexe docket warrant.
+
+[ENT-400059] Ophblythetofts Assay Office
+Status: OPEN
+Disposition: custody passed from the Fraynblythetofts Assay Office to the Ophblythetofts Assay Office; the embargo outranks the release authorisation.
+Notes: warrant chancery counterfoil escrow escrow muniment errata tithe rubric tithe vellum ledger quire assay vellum vellum bond muniment warrant muniment docket schedule.
+
+[ENT-400060] Irmgirtscar Warrant Office
+Status: SEALED
+Disposition: custody passed from the Ophlammercleave Assay Office to the Irmgirtscar Warrant Office; the sealing order replaced the disclosure order.
+Notes: rubric schedule quire docket muniment assay warrant errata foolscap quire bond escrow schedule errata chancery foolscap errata quire foolscap tally.
+
+[ENT-400061] Xanthpellgriff Assay Office
+Status: SEALED
+Disposition: custody passed from the Xanthpellgriff Assay Office to the Ophvergewardine Tithe Barn; the grant postdates the refusal.
+Notes: chancery quire annexe ledger chancery counterfoil warrant counterfoil quire annexe rubric ledger tally muniment bond chancery warrant ledger counterfoil quire docket annexe schedule bond.
+
+[ENT-400062] Sturninchcleave Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Sturninchcleave Escrow Hall to the Ophinchmere Assay Office; the later ruling denied what the earlier ruling allowed.
+Notes: foolscap docket tally vellum rubric bond errata muniment counterfoil ledger warrant chancery foolscap assay.
+
+[ENT-400063] Xanthgirttofts Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Wrenblythewardine Tithe Barn to the Xanthgirttofts Tithe Barn; the disclosure order replaced the sealing order.
+Notes: muniment counterfoil muniment quire errata muniment chancery vellum vellum counterfoil ledger escrow ledger errata vellum counterfoil warrant warrant escrow.
+
+[ENT-400064] Fraynblytheyatt Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Tavvemmeryatt Muniment Room to the Fraynblytheyatt Bonding Yard; the later ruling denied what the earlier ruling allowed.
+Notes: schedule foolscap foolscap tithe docket warrant errata quire escrow tally quire bond assay muniment tithe ledger foolscap tithe schedule counterfoil.
+
+[ENT-400065] Azhkestrelwardine Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Azhkestrelwardine Ledgerhouse to the Josscrowetofts Muniment Room; custody remained with the requesting party, not the office.
+Notes: warrant rubric schedule schedule rubric tally bond bond rubric muniment bond errata schedule docket escrow annexe muniment muniment tithe counterfoil quire foolscap errata chancery.
+
+[ENT-400066] Azhinchtofts Warrant Office
+Status: SEALED
+Disposition: custody passed from the Azhinchtofts Warrant Office to the Tavvorreryhurst Muniment Room; the later ruling denied what the earlier ruling allowed.
+Notes: muniment errata vellum docket annexe vellum counterfoil docket escrow tithe docket quire annexe vellum tally muniment schedule errata.
+
+[ENT-400067] Sturndelvewardine Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Sturndelvewardine Chancery Annexe to the Voskfallowhurst Warrant Office; the refusal postdates the grant.
+Notes: quire escrow counterfoil annexe vellum tally vellum rubric chancery errata escrow escrow.
+
+[ENT-400068] Azhryesomedorne Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Irmquarrelhurst Warrant Office to the Azhryesomedorne Chancery Annexe; the refusal postdates the grant.
+Notes: bond counterfoil tithe annexe tally vellum assay escrow chancery ledger rubric annexe warrant schedule assay tithe.
+
+[ENT-400069] Emberlyquarrelscar Warrant Office
+Status: SEALED
+Disposition: custody passed from the Fraynvergedorne Tithe Barn to the Emberlyquarrelscar Warrant Office; the disclosure order replaced the sealing order.
+Notes: rubric errata counterfoil quire foolscap chancery assay quire errata escrow annexe warrant rubric foolscap errata docket warrant rubric chancery tithe errata errata muniment ledger bond.
+
+[ENT-400070] Kythryesomehurst Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Xanthlammerleigh Muniment Room to the Kythryesomehurst Bonding Yard; the grant postdates the refusal.
+Notes: counterfoil muniment vellum tithe quire docket quire warrant annexe quire schedule annexe tithe foolscap foolscap rubric quire counterfoil counterfoil errata muniment chancery errata ledger assay.
+
+[ENT-400071] Voskkestrelmere Muniment Room
+Status: SEALED
+Disposition: custody passed from the Druskcrowegriff Assay Office to the Voskkestrelmere Muniment Room; the later ruling denied what the earlier ruling allowed.
+Notes: foolscap tithe quire tithe muniment foolscap foolscap warrant warrant vellum docket tally quire ledger assay escrow warrant errata.
+
+[ENT-400072] Zurnambrygriff Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Zurnambrygriff Ledgerhouse to the Tavvemmercleave Ledgerhouse; the sealing order replaced the disclosure order.
+Notes: annexe rubric escrow counterfoil chancery bond annexe tithe foolscap annexe quire bond muniment.
+
+[ENT-400073] Brillnetherhurst Warrant Office
+Status: SEALED
+Disposition: custody passed from the Azhdelvecleave Tithe Barn to the Brillnetherhurst Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: escrow counterfoil schedule ledger quire schedule docket assay annexe chancery tally tally bond vellum warrant rubric chancery escrow annexe.
+
+[ENT-400074] Glincrowehurst Warrant Office
+Status: SEALED
+Disposition: custody passed from the Glindelvetofts Bonding Yard to the Glincrowehurst Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: quire warrant chancery foolscap assay quire schedule escrow docket muniment quire warrant annexe muniment escrow errata vellum chancery tithe bond.
+
+[ENT-400075] Quillemmerdorne Muniment Room
+Status: SEALED
+Disposition: custody passed from the Nethupwellscar Ledgerhouse to the Quillemmerdorne Muniment Room; custody remained with the requesting party, not the office.
+Notes: errata escrow foolscap tally tithe escrow vellum ledger schedule docket schedule tithe tally rubric docket errata vellum bond.
+
+[ENT-400076] Umbtarnyatt Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Umbtarnyatt Ledgerhouse to the Lissomdelvetofts Bonding Yard; custody remained with the office, not the requesting party.
+Notes: warrant chancery ledger docket annexe quire docket counterfoil errata muniment foolscap counterfoil docket chancery counterfoil tithe tithe errata tithe annexe escrow assay foolscap assay annexe muniment.
+
+[ENT-400077] Myrrorrerygriff Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Druskupwelldorne Chancery Annexe to the Myrrorrerygriff Tithe Barn; the disclosure order replaced the sealing order.
+Notes: docket muniment annexe chancery tally escrow bond chancery vellum bond annexe ledger muniment assay tithe vellum bond tally muniment docket.
+
+[ENT-400078] Tavvtarnmere Muniment Room
+Status: SEALED
+Disposition: custody passed from the Azhhallowwardine Warrant Office to the Tavvtarnmere Muniment Room; the later ruling denied what the earlier ruling allowed.
+Notes: vellum muniment docket annexe chancery rubric tithe annexe escrow counterfoil tithe tithe warrant chancery quire.
+
+[ENT-400079] Fraynpellmere Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Emberlyorrerydorne Chancery Annexe to the Fraynpellmere Ledgerhouse; the grant postdates the refusal.
+Notes: quire muniment rubric assay chancery foolscap tithe annexe tally chancery warrant tally annexe.
+
+[ENT-400080] Praskkestrelyatt Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Fraynhallowdorne Ledgerhouse to the Praskkestrelyatt Ledgerhouse; the embargo outranks the release authorisation.
+Notes: docket foolscap schedule quire tithe quire muniment schedule foolscap quire rubric bond counterfoil quire vellum chancery docket vellum quire quire warrant schedule muniment.
+
+[ENT-400081] Jossorrerywardine Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Jossorrerywardine Bonding Yard to the Voskfallowmere Bonding Yard; the refusal postdates the grant.
+Notes: docket assay rubric ledger annexe schedule warrant schedule bond warrant muniment chancery vellum escrow tithe tithe rubric bond escrow tally bond foolscap chancery counterfoil schedule escrow.
+
+[ENT-400082] Irmemmergriff Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Irmemmergriff Bonding Yard to the Praskpellleigh Bonding Yard; custody remained with the office, not the requesting party.
+Notes: counterfoil ledger ledger bond docket bond quire errata counterfoil vellum escrow escrow vellum schedule counterfoil counterfoil tithe.
+
+[ENT-400083] Lissomemmerwardine Muniment Room
+Status: SEALED
+Disposition: custody passed from the Tavvfallowtofts Muniment Room to the Lissomemmerwardine Muniment Room; withholding was upheld and release was denied.
+Notes: annexe counterfoil assay vellum docket vellum docket rubric assay schedule foolscap assay chancery bond counterfoil vellum foolscap errata annexe escrow.
+
+[ENT-400084] Nethkestreldorne Muniment Room
+Status: SEALED
+Disposition: custody passed from the Nethkestreldorne Muniment Room to the Brillemmerscar Ledgerhouse; the sealing order replaced the disclosure order.
+Notes: chancery chancery tithe tithe assay schedule foolscap schedule assay escrow docket errata tithe ledger schedule docket muniment warrant bond assay tithe quire vellum muniment.
+
+[ENT-400085] Myrrlammercleave Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Myrrlammercleave Tithe Barn to the Druskpellgriff Bonding Yard; the refusal postdates the grant.
+Notes: rubric assay chancery quire vellum bond warrant assay annexe assay vellum escrow tithe warrant assay muniment tally tally warrant ledger bond assay chancery bond chancery assay.
+
+[ENT-400086] Kythupwellleigh Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Kythupwellleigh Tithe Barn to the Drusktarnhurst Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: foolscap escrow docket assay counterfoil docket foolscap errata tithe warrant docket schedule.
+
+[ENT-400087] Umbfallowscar Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Quillhallowleigh Warrant Office to the Umbfallowscar Escrow Hall; release was upheld and withholding was denied.
+Notes: docket counterfoil bond assay counterfoil annexe counterfoil ledger tally escrow bond muniment vellum annexe tithe ledger foolscap quire ledger bond bond annexe foolscap errata assay.
+
+[ENT-400088] Brillryesomeleigh Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Quillpellleigh Warrant Office to the Brillryesomeleigh Tithe Barn; the later ruling allowed what the earlier ruling denied.
+Notes: annexe ledger vellum tally foolscap tithe chancery warrant assay errata docket escrow errata chancery errata muniment schedule ledger ledger tally quire.
+
+[ENT-400089] Kythryesometofts Muniment Room
+Status: SEALED
+Disposition: custody passed from the Kythryesometofts Muniment Room to the Cynecroweleigh Escrow Hall; the refusal postdates the grant.
+Notes: quire quire chancery counterfoil schedule vellum tithe vellum ledger tithe tithe muniment escrow errata rubric quire vellum quire warrant.
+
+[ENT-400090] Myrrnetheryatt Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Myrrnetheryatt Tithe Barn to the Lissomryesometofts Muniment Room; the embargo outranks the release authorisation.
+Notes: annexe annexe muniment quire escrow foolscap bond tally warrant schedule foolscap tally escrow foolscap docket.
+
+[ENT-400091] Druskvergewardine Muniment Room
+Status: OPEN
+Disposition: custody passed from the Druskpellmere Tithe Barn to the Druskvergewardine Muniment Room; custody remained with the office, not the requesting party.
+Notes: assay bond ledger ledger vellum vellum tithe assay chancery warrant escrow tithe bond ledger errata muniment errata ledger tithe.
+
+[ENT-400092] Yeldupwellgriff Assay Office
+Status: OPEN
+Disposition: custody passed from the Myrrlammermere Tithe Barn to the Yeldupwellgriff Assay Office; the embargo outranks the release authorisation.
+Notes: ledger schedule muniment foolscap vellum vellum docket schedule bond bond foolscap docket chancery assay tithe bond vellum schedule tally assay rubric counterfoil chancery docket.
+
+[ENT-400093] Sturnkestrelhurst Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Sturnkestrelhurst Ledgerhouse to the Brilldelvecleave Warrant Office; custody remained with the requesting party, not the office.
+Notes: chancery docket foolscap foolscap annexe vellum counterfoil bond vellum muniment errata escrow quire bond schedule chancery muniment chancery bond chancery rubric errata.
+
+[ENT-400094] Prasktarnscar Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Prasktarnscar Escrow Hall to the Myrremmerleigh Bonding Yard; custody remained with the requesting party, not the office.
+Notes: tithe tithe ledger foolscap warrant bond errata schedule annexe counterfoil escrow quire rubric tally rubric annexe schedule docket rubric tally.
+
+[ENT-400095] Sturnorreryyatt Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Azhkestreldorne Assay Office to the Sturnorreryyatt Escrow Hall; the refusal postdates the grant.
+Notes: foolscap warrant rubric tally muniment rubric vellum bond quire docket quire ledger rubric escrow errata annexe errata chancery errata.
+
+[ENT-400096] Sturnfallowtofts Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Sturnfallowtofts Escrow Hall to the Emberlyfallowhurst Ledgerhouse; the refusal postdates the grant.
+Notes: chancery schedule errata bond docket vellum vellum escrow schedule docket vellum bond errata errata annexe tally warrant assay counterfoil.
+
+[ENT-400097] Emberlycrowehurst Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Yeldmarrowmere Escrow Hall to the Emberlycrowehurst Ledgerhouse; custody remained with the office, not the requesting party.
+Notes: tithe bond schedule tithe ledger ledger tithe muniment tithe tithe assay assay bond escrow foolscap docket vellum annexe tally.
+
+[ENT-400098] Hespkestrelscar Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Umbquarrelleigh Tithe Barn to the Hespkestrelscar Escrow Hall; release was upheld and withholding was denied.
+Notes: escrow foolscap tally annexe escrow chancery escrow rubric assay warrant annexe tithe errata muniment warrant annexe quire quire.
+
+[ENT-800000] Glincrowetofts Bonding Yard
+Status: OPEN
+Disposition: entered on this register.
+
+[ENT-400099] Sturnorrerycleave Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Sturnorrerycleave Ledgerhouse to the Myrrpellcleave Tithe Barn; the embargo outranks the release authorisation.
+Notes: rubric escrow tally tithe quire counterfoil quire rubric quire escrow ledger tithe.
+
+
+=== DOCUMENT BREAK ===
+
+REGISTER 2 of 3
+
+[ENT-410000] Azhemmergriff Warrant Office
+Status: OPEN
+Disposition: custody passed from the Azhemmergriff Warrant Office to the Zurnryesomedorne Escrow Hall; the disclosure order replaced the sealing order.
+Notes: muniment muniment tithe chancery bond rubric rubric schedule warrant counterfoil counterfoil docket.
+
+[ENT-410001] Kythcrowetofts Muniment Room
+Status: OPEN
+Disposition: custody passed from the Druskgirttofts Tithe Barn to the Kythcrowetofts Muniment Room; the later ruling denied what the earlier ruling allowed.
+Notes: warrant escrow ledger docket escrow chancery tally counterfoil quire errata tithe schedule ledger errata warrant annexe schedule muniment warrant escrow counterfoil tithe docket quire.
+
+[ENT-410002] Druskemmergriff Assay Office
+Status: SEALED
+Disposition: custody passed from the Glinnetheryatt Chancery Annexe to the Druskemmergriff Assay Office; the disclosure order replaced the sealing order.
+Notes: rubric quire schedule escrow assay ledger vellum annexe warrant bond warrant tithe quire bond.
+
+[ENT-410003] Nethvergegriff Assay Office
+Status: SEALED
+Disposition: custody passed from the Emberlyambrywardine Bonding Yard to the Nethvergegriff Assay Office; the refusal postdates the grant.
+Notes: errata quire assay tally schedule schedule counterfoil foolscap chancery assay tithe schedule annexe assay docket annexe annexe.
+
+[ENT-410004] Zurncrowetofts Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Kythpellyatt Tithe Barn to the Zurncrowetofts Ledgerhouse; the later ruling allowed what the earlier ruling denied.
+Notes: foolscap tithe docket rubric bond schedule rubric bond schedule errata rubric rubric tally escrow.
+
+[ENT-410005] Quillgirtdorne Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Quillgirtdorne Tithe Barn to the Myrrtarnleigh Bonding Yard; release was upheld and withholding was denied.
+Notes: foolscap chancery assay muniment quire ledger tally tally assay escrow warrant ledger foolscap quire tithe foolscap counterfoil warrant schedule rubric bond errata chancery quire.
+
+[ENT-410006] Myrrtarngriff Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Myrrtarngriff Bonding Yard to the Quillnetherhurst Bonding Yard; the grant postdates the refusal.
+Notes: quire warrant errata tithe counterfoil errata errata quire docket schedule errata vellum errata tithe errata assay escrow ledger.
+
+[ENT-410007] Quillinchcleave Assay Office
+Status: OPEN
+Disposition: custody passed from the Rooketarnwardine Muniment Room to the Quillinchcleave Assay Office; the grant postdates the refusal.
+Notes: escrow quire docket rubric vellum chancery foolscap schedule quire bond rubric warrant ledger schedule ledger quire assay escrow tithe vellum rubric.
+
+[ENT-410008] Wrendelvehurst Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Wrendelvehurst Chancery Annexe to the Xanthpellmere Chancery Annexe; the embargo outranks the release authorisation.
+Notes: quire ledger warrant ledger tally ledger escrow chancery quire chancery annexe rubric.
+
+[ENT-410009] Emberlyemmergriff Warrant Office
+Status: SEALED
+Disposition: custody passed from the Emberlyemmergriff Warrant Office to the Lissommarrowyatt Bonding Yard; the later ruling allowed what the earlier ruling denied.
+Notes: vellum tally warrant foolscap errata bond ledger docket rubric quire bond vellum tithe annexe escrow quire.
+
+[ENT-410010] Xanthcrowescar Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Xanthcrowescar Bonding Yard to the Ophinchhurst Assay Office; release was upheld and withholding was denied.
+Notes: tally rubric assay docket rubric foolscap docket docket tithe docket escrow warrant vellum ledger errata quire quire quire foolscap warrant rubric.
+
+[ENT-410011] Tavvfallowcleave Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Tavvfallowcleave Bonding Yard to the Druskhallowwardine Warrant Office; custody remained with the requesting party, not the office.
+Notes: tithe vellum chancery tally docket tithe warrant annexe schedule foolscap chancery quire schedule errata errata bond tithe tally warrant foolscap docket ledger.
+
+[ENT-410012] Wrenquarrelmere Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Wrenquarrelmere Escrow Hall to the Brilltarnyatt Bonding Yard; release was upheld and withholding was denied.
+Notes: bond tithe errata vellum foolscap counterfoil muniment errata bond tithe foolscap warrant.
+
+[ENT-410013] Umbquarrelmere Warrant Office
+Status: SEALED
+Disposition: custody passed from the Myrrorrerygriff Tithe Barn to the Umbquarrelmere Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: warrant tithe vellum counterfoil bond foolscap annexe docket warrant warrant tally rubric tally errata.
+
+[ENT-410014] Nethkestrelwardine Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Tavvupwelltofts Escrow Hall to the Nethkestrelwardine Ledgerhouse; the sealing order replaced the disclosure order.
+Notes: escrow counterfoil tally ledger escrow tithe schedule escrow escrow foolscap foolscap rubric assay bond ledger counterfoil.
+
+[ENT-410015] Yeldupwelltofts Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Yeldupwelltofts Bonding Yard to the Xanthmarrowtofts Muniment Room; the release authorisation outranks the embargo.
+Notes: tithe rubric bond docket muniment escrow assay docket warrant counterfoil vellum tally escrow quire.
+
+[ENT-410016] Sturntarnscar Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Sturntarnscar Chancery Annexe to the Frayninchscar Ledgerhouse; the disclosure order replaced the sealing order.
+Notes: docket bond schedule assay assay quire muniment tally ledger ledger foolscap vellum warrant vellum schedule counterfoil quire tithe assay errata annexe errata rubric.
+
+[ENT-410017] Yeldquarrelgriff Assay Office
+Status: SEALED
+Disposition: custody passed from the Yeldquarrelgriff Assay Office to the Lissomryesometofts Muniment Room; the release authorisation outranks the embargo.
+Notes: tally docket tally counterfoil muniment rubric docket docket ledger errata quire ledger foolscap tally quire escrow ledger counterfoil annexe tally assay tithe rubric annexe vellum ledger.
+
+[ENT-410018] Cyneblythecleave Muniment Room
+Status: OPEN
+Disposition: custody passed from the Cyneblythecleave Muniment Room to the Praskdelveleigh Ledgerhouse; the release authorisation outranks the embargo.
+Notes: escrow tithe counterfoil schedule docket rubric ledger docket quire tithe tithe muniment annexe escrow ledger quire.
+
+[ENT-410019] Drusktarntofts Warrant Office
+Status: OPEN
+Disposition: custody passed from the Myrremmerdorne Tithe Barn to the Drusktarntofts Warrant Office; custody remained with the office, not the requesting party.
+Notes: chancery annexe errata chancery counterfoil warrant tithe schedule annexe annexe docket tithe docket counterfoil schedule muniment assay errata chancery errata tally annexe bond muniment.
+
+[ENT-410020] Zurninchyatt Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Jossryesomescar Warrant Office to the Zurninchyatt Ledgerhouse; release was upheld and withholding was denied.
+Notes: assay tithe muniment errata docket chancery docket vellum muniment vellum bond escrow quire schedule annexe counterfoil.
+
+[ENT-410021] Tavvmarrowdorne Muniment Room
+Status: SEALED
+Disposition: custody passed from the Tavvmarrowdorne Muniment Room to the Rookeambryhurst Muniment Room; the refusal postdates the grant.
+Notes: annexe rubric docket muniment bond foolscap ledger escrow vellum vellum muniment foolscap vellum schedule.
+
+[ENT-410022] Cyneupwellleigh Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Ophnetherscar Chancery Annexe to the Cyneupwellleigh Escrow Hall; the later ruling denied what the earlier ruling allowed.
+Notes: foolscap quire foolscap warrant docket docket escrow escrow schedule muniment chancery annexe annexe vellum chancery schedule schedule schedule tally assay schedule quire tithe foolscap.
+
+[ENT-410023] Nethhallowmere Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Emberlyblythehurst Chancery Annexe to the Nethhallowmere Escrow Hall; the sealing order replaced the disclosure order.
+Notes: rubric assay warrant vellum counterfoil errata escrow escrow schedule rubric muniment schedule counterfoil tally foolscap quire vellum.
+
+[ENT-410024] Umbnetherscar Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Umbnetherscar Bonding Yard to the Azhkestreltofts Ledgerhouse; the sealing order replaced the disclosure order.
+Notes: escrow muniment counterfoil counterfoil foolscap quire bond chancery chancery errata errata foolscap quire tally muniment quire.
+
+[ENT-800001] Glincrowetofts Bonding Yard
+Status: OPEN
+Disposition: entered on this register.
+
+[ENT-410025] Fraynupwellhurst Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Glinemmerscar Muniment Room to the Fraynupwellhurst Ledgerhouse; the later ruling allowed what the earlier ruling denied.
+Notes: rubric foolscap docket tithe foolscap escrow tally schedule docket warrant quire assay bond vellum bond errata bond schedule counterfoil rubric errata rubric annexe tithe annexe counterfoil.
+
+[ENT-410026] Hesphallowcleave Warrant Office
+Status: SEALED
+Disposition: custody passed from the Hesphallowcleave Warrant Office to the Emberlyfallowleigh Chancery Annexe; custody remained with the office, not the requesting party.
+Notes: bond rubric vellum annexe rubric errata errata errata tally escrow errata bond.
+
+[ENT-410027] Zurnorrerycleave Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Umbvergeleigh Assay Office to the Zurnorrerycleave Bonding Yard; withholding was upheld and release was denied.
+Notes: tithe ledger ledger counterfoil schedule annexe errata errata escrow counterfoil counterfoil counterfoil tally tithe ledger annexe errata rubric docket counterfoil escrow muniment.
+
+[ENT-410028] Xanthkestreltofts Muniment Room
+Status: OPEN
+Disposition: custody passed from the Xanthkestreltofts Muniment Room to the Sturnhallowhurst Ledgerhouse; the later ruling denied what the earlier ruling allowed.
+Notes: quire errata annexe warrant foolscap muniment annexe assay warrant annexe tithe rubric annexe ledger.
+
+[ENT-410029] Sturnupwellhurst Warrant Office
+Status: SEALED
+Disposition: custody passed from the Praskgirtwardine Muniment Room to the Sturnupwellhurst Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: vellum muniment ledger rubric docket schedule rubric muniment bond bond ledger warrant tithe.
+
+[ENT-410030] Zurnemmergriff Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Zurnemmergriff Tithe Barn to the Kythambrydorne Ledgerhouse; the embargo outranks the release authorisation.
+Notes: ledger quire foolscap annexe tally tithe errata foolscap counterfoil tithe bond bond vellum foolscap warrant vellum escrow tithe vellum tithe.
+
+[ENT-410031] Nethorreryscar Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Nethorreryscar Bonding Yard to the Umbupwellwardine Assay Office; the later ruling allowed what the earlier ruling denied.
+Notes: counterfoil warrant tithe bond schedule foolscap rubric annexe chancery annexe muniment schedule chancery annexe schedule.
+
+[ENT-410032] Tavvgirtleigh Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Tavvgirtleigh Ledgerhouse to the Emberlymarrowcleave Ledgerhouse; the refusal postdates the grant.
+Notes: docket schedule muniment annexe errata tithe bond bond errata bond bond vellum.
+
+[ENT-410033] Tavvnetherdorne Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Rookehallowdorne Warrant Office to the Tavvnetherdorne Escrow Hall; custody remained with the office, not the requesting party.
+Notes: muniment escrow ledger tithe chancery foolscap tithe docket schedule muniment quire chancery assay escrow tally errata.
+
+[ENT-410034] Hesphallowcleave Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Hesphallowcleave Ledgerhouse to the Azhquarrelyatt Warrant Office; custody remained with the requesting party, not the office.
+Notes: ledger muniment chancery muniment bond annexe errata schedule vellum vellum quire tithe ledger tithe foolscap quire counterfoil tithe warrant errata docket tally chancery muniment.
+
+[ENT-410035] Yeldfallowyatt Warrant Office
+Status: SEALED
+Disposition: custody passed from the Hesphallowyatt Muniment Room to the Yeldfallowyatt Warrant Office; withholding was upheld and release was denied.
+Notes: chancery tithe chancery errata muniment foolscap errata bond escrow ledger muniment ledger errata quire foolscap chancery vellum.
+
+[ENT-410036] Tavvcrowetofts Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Tavvcrowetofts Chancery Annexe to the Wrenemmerdorne Bonding Yard; withholding was upheld and release was denied.
+Notes: chancery chancery rubric quire schedule foolscap ledger rubric quire muniment quire assay chancery annexe ledger errata assay chancery quire vellum foolscap.
+
+[ENT-410037] Quillnetheryatt Assay Office
+Status: OPEN
+Disposition: custody passed from the Drusknetherwardine Muniment Room to the Quillnetheryatt Assay Office; custody remained with the requesting party, not the office.
+Notes: annexe muniment schedule schedule escrow counterfoil chancery quire tithe errata vellum quire errata ledger chancery escrow ledger tithe vellum foolscap bond.
+
+[ENT-410038] Quillkestrelcleave Muniment Room
+Status: OPEN
+Disposition: custody passed from the Azhhallowgriff Bonding Yard to the Quillkestrelcleave Muniment Room; the disclosure order replaced the sealing order.
+Notes: assay tithe assay tithe vellum bond ledger counterfoil rubric ledger annexe ledger annexe errata rubric escrow muniment foolscap tithe annexe docket assay quire bond tithe ledger.
+
+[ENT-410039] Glinambrygriff Assay Office
+Status: SEALED
+Disposition: custody passed from the Glinambrygriff Assay Office to the Cynehallowwardine Ledgerhouse; the refusal postdates the grant.
+Notes: quire assay schedule vellum errata bond escrow foolscap muniment ledger tally vellum docket quire bond.
+
+[ENT-410040] Cynetarntofts Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Sturnvergeyatt Tithe Barn to the Cynetarntofts Ledgerhouse; custody remained with the requesting party, not the office.
+Notes: tithe annexe warrant quire tithe quire tithe bond foolscap counterfoil rubric escrow rubric schedule schedule.
+
+[ENT-410041] Frayninchcleave Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Frayninchcleave Escrow Hall to the Lissomemmertofts Tithe Barn; the embargo outranks the release authorisation.
+Notes: vellum foolscap quire bond counterfoil escrow muniment chancery rubric ledger muniment assay chancery muniment vellum.
+
+[ENT-410042] Yelddelvetofts Assay Office
+Status: SEALED
+Disposition: custody passed from the Yelddelvetofts Assay Office to the Sturnpelldorne Assay Office; the embargo outranks the release authorisation.
+Notes: warrant counterfoil warrant assay chancery rubric docket quire schedule errata docket muniment bond tally docket escrow quire escrow annexe docket quire errata chancery.
+
+[ENT-410043] Glininchwardine Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Glininchwardine Ledgerhouse to the Lissomupwellyatt Assay Office; the sealing order replaced the disclosure order.
+Notes: tally bond chancery muniment quire vellum tithe schedule schedule ledger ledger bond tithe tally foolscap annexe assay errata.
+
+[ENT-410044] Druskinchwardine Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Druskinchwardine Escrow Hall to the Yeldcrowehurst Bonding Yard; the refusal postdates the grant.
+Notes: tally tally chancery errata warrant assay vellum warrant tithe rubric quire errata muniment annexe.
+
+[ENT-410045] Tavvnetherwardine Muniment Room
+Status: SEALED
+Disposition: custody passed from the Tavvnetherwardine Muniment Room to the Emberlyvergeleigh Ledgerhouse; release was upheld and withholding was denied.
+Notes: escrow assay ledger assay chancery tally foolscap foolscap tally rubric foolscap rubric quire.
+
+[ENT-410046] Irmupwellyatt Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Irmupwellyatt Bonding Yard to the Zurncrowedorne Warrant Office; the embargo outranks the release authorisation.
+Notes: ledger vellum assay muniment docket docket vellum rubric muniment foolscap errata annexe warrant bond counterfoil chancery counterfoil rubric.
+
+[ENT-410047] Kythmarrowhurst Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Kythmarrowhurst Escrow Hall to the Josslammerdorne Assay Office; the embargo outranks the release authorisation.
+Notes: tally foolscap docket muniment bond tally errata chancery tithe docket quire errata.
+
+[ENT-410048] Azhvergedorne Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Azhvergedorne Escrow Hall to the Nethemmergriff Tithe Barn; the release authorisation outranks the embargo.
+Notes: errata rubric rubric warrant vellum muniment docket tithe quire assay errata bond errata tally tithe rubric quire quire annexe escrow.
+
+[ENT-410049] Brillpellcleave Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Brillpellcleave Ledgerhouse to the Hespupwellwardine Ledgerhouse; the later ruling allowed what the earlier ruling denied.
+Notes: quire foolscap vellum bond escrow errata counterfoil quire muniment docket vellum schedule foolscap annexe vellum muniment vellum tithe muniment foolscap annexe counterfoil.
+
+[ENT-410050] Voskhallowhurst Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Voskhallowhurst Chancery Annexe to the Umbdelvetofts Chancery Annexe; the disclosure order replaced the sealing order.
+Notes: docket ledger chancery muniment docket tithe warrant counterfoil escrow ledger annexe ledger bond quire.
+
+[ENT-410051] Frayncrowecleave Assay Office
+Status: OPEN
+Disposition: custody passed from the Frayncrowecleave Assay Office to the Cynepellleigh Muniment Room; release was upheld and withholding was denied.
+Notes: tithe foolscap chancery quire foolscap warrant ledger escrow errata annexe foolscap foolscap rubric tally tally counterfoil.
+
+[ENT-410052] Xanthtarnscar Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Xanthtarnscar Bonding Yard to the Praskambrydorne Tithe Barn; release was upheld and withholding was denied.
+Notes: rubric schedule foolscap foolscap schedule muniment bond tithe escrow quire quire tally assay foolscap tithe warrant assay.
+
+[ENT-410053] Azhtarncleave Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Azhtarncleave Tithe Barn to the Ophkestrelgriff Muniment Room; the disclosure order replaced the sealing order.
+Notes: errata tally muniment errata errata annexe bond foolscap rubric schedule foolscap tally rubric errata escrow schedule bond warrant tally.
+
+[ENT-410054] Cynelammermere Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Cynelammermere Bonding Yard to the Rookecrowetofts Bonding Yard; custody remained with the requesting party, not the office.
+Notes: assay vellum chancery tally assay warrant vellum counterfoil muniment tithe chancery quire bond tithe foolscap foolscap escrow rubric tally assay muniment chancery ledger tally docket.
+
+[ENT-410055] Lissommarrowgriff Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Azhdelvescar Escrow Hall to the Lissommarrowgriff Tithe Barn; the later ruling denied what the earlier ruling allowed.
+Notes: muniment warrant tally ledger chancery schedule rubric muniment vellum errata errata bond tithe bond foolscap.
+
+[ENT-410056] Yeldgirtwardine Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Irminchscar Chancery Annexe to the Yeldgirtwardine Tithe Barn; the grant postdates the refusal.
+Notes: ledger annexe chancery foolscap rubric assay foolscap escrow foolscap docket tally docket muniment errata foolscap tally annexe counterfoil schedule.
+
+[ENT-410057] Xanthorreryleigh Muniment Room
+Status: SEALED
+Disposition: custody passed from the Glintarnhurst Bonding Yard to the Xanthorreryleigh Muniment Room; the release authorisation outranks the embargo.
+Notes: ledger muniment escrow warrant errata errata ledger schedule assay chancery bond assay rubric tally warrant warrant foolscap ledger vellum counterfoil.
+
+[ENT-410058] Jossquarrelwardine Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Praskambrycleave Tithe Barn to the Jossquarrelwardine Ledgerhouse; custody remained with the requesting party, not the office.
+Notes: tally warrant tithe rubric errata errata ledger warrant docket rubric tithe escrow.
+
+[ENT-410059] Emberlydelvecleave Muniment Room
+Status: SEALED
+Disposition: custody passed from the Emberlydelvecleave Muniment Room to the Tavvlammercleave Ledgerhouse; withholding was upheld and release was denied.
+Notes: counterfoil vellum foolscap escrow rubric muniment ledger counterfoil warrant rubric annexe errata annexe quire escrow muniment schedule escrow vellum vellum foolscap muniment docket assay rubric vellum.
+
+[ENT-410060] Xanthpellyatt Muniment Room
+Status: OPEN
+Disposition: custody passed from the Xanthpellyatt Muniment Room to the Jossvergescar Escrow Hall; the disclosure order replaced the sealing order.
+Notes: chancery assay muniment schedule schedule tithe tithe warrant assay errata quire docket vellum docket rubric warrant vellum rubric muniment quire rubric muniment.
+
+[ENT-410061] Umbupwellgriff Muniment Room
+Status: SEALED
+Disposition: custody passed from the Umbupwellgriff Muniment Room to the Nethvergetofts Assay Office; the grant postdates the refusal.
+Notes: chancery chancery quire bond annexe annexe escrow bond docket bond docket tithe quire vellum warrant rubric quire escrow vellum warrant.
+
+[ENT-410062] Umbpellleigh Warrant Office
+Status: OPEN
+Disposition: custody passed from the Umbpellleigh Warrant Office to the Irmnetherleigh Bonding Yard; custody remained with the office, not the requesting party.
+Notes: foolscap assay counterfoil ledger muniment errata vellum chancery annexe schedule muniment rubric foolscap muniment assay tally counterfoil tally ledger.
+
+[ENT-410063] Glinorrerytofts Muniment Room
+Status: OPEN
+Disposition: custody passed from the Glinorrerytofts Muniment Room to the Jossgirtdorne Bonding Yard; the sealing order replaced the disclosure order.
+Notes: errata quire docket foolscap counterfoil counterfoil counterfoil rubric tally schedule escrow schedule rubric schedule docket annexe tithe tally tally annexe.
+
+[ENT-410064] Lissomvergehurst Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Lissomvergehurst Bonding Yard to the Kythambrydorne Warrant Office; custody remained with the requesting party, not the office.
+Notes: counterfoil assay docket errata ledger quire rubric vellum rubric errata counterfoil annexe escrow errata escrow tithe vellum tithe quire counterfoil.
+
+[ENT-410065] Kythambrywardine Muniment Room
+Status: OPEN
+Disposition: custody passed from the Kythambrywardine Muniment Room to the Ophupwellwardine Tithe Barn; custody remained with the office, not the requesting party.
+Notes: vellum errata tithe tally rubric assay schedule rubric vellum muniment foolscap docket counterfoil quire docket rubric escrow errata docket docket chancery escrow schedule.
+
+[ENT-410066] Sturnquarrelcleave Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Sturnquarrelcleave Bonding Yard to the Quillgirtyatt Escrow Hall; the grant postdates the refusal.
+Notes: foolscap schedule foolscap schedule escrow muniment schedule warrant errata errata chancery ledger annexe.
+
+[ENT-410067] Glincrowegriff Muniment Room
+Status: OPEN
+Disposition: custody passed from the Praskambrycleave Muniment Room to the Glincrowegriff Muniment Room; the grant postdates the refusal.
+Notes: quire schedule quire schedule errata docket quire vellum quire rubric tally escrow rubric vellum foolscap schedule tally annexe foolscap bond assay annexe ledger counterfoil rubric.
+
+[ENT-410068] Emberlymarrowgriff Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Tavvmarrowyatt Bonding Yard to the Emberlymarrowgriff Ledgerhouse; the sealing order replaced the disclosure order.
+Notes: docket escrow tally chancery muniment rubric warrant assay assay ledger warrant errata bond counterfoil tithe tally.
+
+[ENT-410069] Glinemmerwardine Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Glinemmerwardine Ledgerhouse to the Sturnorrerycleave Ledgerhouse; the grant postdates the refusal.
+Notes: rubric quire vellum quire chancery escrow muniment ledger quire vellum errata ledger errata warrant errata escrow errata.
+
+[ENT-410070] Ophryesometofts Warrant Office
+Status: SEALED
+Disposition: custody passed from the Rookekestrelmere Chancery Annexe to the Ophryesometofts Warrant Office; the grant postdates the refusal.
+Notes: bond docket annexe quire assay counterfoil bond counterfoil quire warrant ledger schedule.
+
+[ENT-410071] Lissomblythescar Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Myrrtarnyatt Assay Office to the Lissomblythescar Chancery Annexe; the grant postdates the refusal.
+Notes: tally muniment warrant foolscap quire tally schedule counterfoil muniment warrant bond tally foolscap errata ledger escrow quire docket errata foolscap rubric rubric.
+
+[ENT-410072] Myrrgirtmere Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Myrrgirtmere Tithe Barn to the Wrenorreryscar Muniment Room; the refusal postdates the grant.
+Notes: warrant tithe foolscap annexe schedule warrant foolscap annexe muniment chancery vellum counterfoil docket tally warrant schedule ledger bond assay tithe bond quire.
+
+[ENT-410073] Irmhallowleigh Warrant Office
+Status: OPEN
+Disposition: custody passed from the Nethambrytofts Bonding Yard to the Irmhallowleigh Warrant Office; the sealing order replaced the disclosure order.
+Notes: counterfoil foolscap escrow foolscap annexe rubric foolscap bond schedule muniment muniment warrant muniment docket bond errata chancery docket tally rubric chancery chancery chancery ledger errata errata.
+
+[ENT-410074] Umbkestrelscar Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Umbkestrelscar Chancery Annexe to the Kythquarrelscar Ledgerhouse; withholding was upheld and release was denied.
+Notes: rubric vellum quire quire assay annexe tithe assay counterfoil assay vellum errata errata ledger assay errata schedule schedule.
+
+[ENT-410075] Fraynquarrelmere Assay Office
+Status: OPEN
+Disposition: custody passed from the Glinvergeleigh Escrow Hall to the Fraynquarrelmere Assay Office; the refusal postdates the grant.
+Notes: counterfoil tally ledger tithe vellum assay rubric annexe assay counterfoil escrow vellum annexe assay vellum errata warrant warrant tithe quire errata escrow.
+
+[ENT-410076] Ophpellmere Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Kythdelvegriff Tithe Barn to the Ophpellmere Escrow Hall; the grant postdates the refusal.
+Notes: tithe muniment quire annexe muniment docket muniment quire chancery vellum tally warrant docket tithe warrant tally chancery vellum schedule errata.
+
+[ENT-410077] Emberlyemmercleave Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Rookevergetofts Chancery Annexe to the Emberlyemmercleave Ledgerhouse; withholding was upheld and release was denied.
+Notes: foolscap rubric tally rubric rubric vellum errata escrow schedule docket vellum docket errata docket rubric foolscap muniment errata docket.
+
+[ENT-410078] Glintarnleigh Muniment Room
+Status: OPEN
+Disposition: custody passed from the Wrenquarrelmere Warrant Office to the Glintarnleigh Muniment Room; custody remained with the requesting party, not the office.
+Notes: bond errata counterfoil bond annexe rubric foolscap assay annexe bond tithe annexe tally quire tally escrow tithe chancery warrant.
+
+[ENT-410079] Fraynupwellyatt Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Fraynupwellyatt Chancery Annexe to the Praskemmeryatt Warrant Office; the disclosure order replaced the sealing order.
+Notes: schedule escrow rubric foolscap errata annexe muniment assay schedule errata annexe foolscap counterfoil rubric counterfoil.
+
+[ENT-410080] Irmblytheleigh Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Hespkestrelcleave Escrow Hall to the Irmblytheleigh Ledgerhouse; the embargo outranks the release authorisation.
+Notes: bond vellum tally ledger ledger counterfoil quire docket bond docket foolscap muniment foolscap schedule warrant muniment annexe assay assay assay escrow tithe rubric quire counterfoil vellum.
+
+[ENT-410081] Cynekestrelhurst Muniment Room
+Status: OPEN
+Disposition: custody passed from the Jossorreryyatt Escrow Hall to the Cynekestrelhurst Muniment Room; the later ruling denied what the earlier ruling allowed.
+Notes: vellum counterfoil ledger ledger warrant tally annexe chancery foolscap rubric quire rubric tithe errata bond.
+
+[ENT-410082] Sturnorrerymere Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Ophambryyatt Ledgerhouse to the Sturnorrerymere Escrow Hall; custody remained with the office, not the requesting party.
+Notes: quire docket quire foolscap assay docket foolscap errata bond docket foolscap bond counterfoil foolscap bond assay vellum ledger foolscap errata.
+
+[ENT-410083] Hespmarrowhurst Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Quillambrydorne Warrant Office to the Hespmarrowhurst Bonding Yard; the refusal postdates the grant.
+Notes: tally errata ledger docket chancery bond ledger assay escrow ledger ledger ledger.
+
+[ENT-410084] Irmquarrelscar Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Irmquarrelscar Tithe Barn to the Hespblythemere Muniment Room; the sealing order replaced the disclosure order.
+Notes: tally rubric annexe quire docket docket rubric schedule assay tithe foolscap rubric muniment foolscap foolscap tithe quire quire vellum assay assay chancery assay chancery annexe.
+
+[ENT-410085] Quillpelldorne Warrant Office
+Status: OPEN
+Disposition: custody passed from the Lissomgirttofts Assay Office to the Quillpelldorne Warrant Office; the embargo outranks the release authorisation.
+Notes: schedule counterfoil vellum quire escrow escrow annexe warrant vellum ledger tithe escrow assay chancery counterfoil tally tithe errata schedule ledger chancery counterfoil rubric schedule escrow schedule.
+
+[ENT-410086] Zurnlammertofts Muniment Room
+Status: OPEN
+Disposition: custody passed from the Zurnlammertofts Muniment Room to the Hespfallowscar Tithe Barn; the embargo outranks the release authorisation.
+Notes: errata counterfoil annexe schedule rubric warrant errata chancery tithe ledger tally warrant ledger ledger assay errata counterfoil tally docket.
+
+[ENT-410087] Emberlydelvetofts Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Ophnetheryatt Escrow Hall to the Emberlydelvetofts Tithe Barn; withholding was upheld and release was denied.
+Notes: quire annexe foolscap escrow foolscap errata annexe quire escrow tithe escrow warrant errata docket tally quire tally tally warrant chancery escrow quire tally.
+
+[ENT-410088] Fraynkestrelmere Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Fraynkestrelmere Bonding Yard to the Sturnlammerdorne Ledgerhouse; custody remained with the requesting party, not the office.
+Notes: muniment muniment schedule chancery bond chancery bond errata tithe schedule vellum counterfoil tithe annexe muniment counterfoil assay muniment errata ledger vellum counterfoil counterfoil chancery vellum annexe.
+
+[ENT-410089] Jossryesomehurst Assay Office
+Status: SEALED
+Disposition: custody passed from the Jossryesomehurst Assay Office to the Brillorreryleigh Tithe Barn; the later ruling denied what the earlier ruling allowed.
+Notes: bond chancery counterfoil schedule bond ledger schedule schedule docket muniment bond docket counterfoil tithe assay errata counterfoil tally.
+
+[ENT-410090] Sturnambrygriff Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Sturnambrygriff Escrow Hall to the Azhmarrowscar Bonding Yard; the grant postdates the refusal.
+Notes: vellum vellum foolscap foolscap ledger bond tally tithe ledger vellum errata escrow chancery foolscap annexe assay assay tithe chancery foolscap docket.
+
+[ENT-410091] Wrenvergeleigh Warrant Office
+Status: OPEN
+Disposition: custody passed from the Fraynhallowdorne Muniment Room to the Wrenvergeleigh Warrant Office; the grant postdates the refusal.
+Notes: docket annexe chancery escrow tally ledger foolscap rubric muniment rubric counterfoil escrow bond quire tally.
+
+[ENT-410092] Cynefallowcleave Warrant Office
+Status: OPEN
+Disposition: custody passed from the Druskhallowhurst Assay Office to the Cynefallowcleave Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: chancery tithe chancery quire bond foolscap schedule counterfoil ledger foolscap foolscap docket assay tally tally muniment rubric assay quire errata counterfoil counterfoil chancery ledger.
+
+[ENT-410093] Lissomhallowtofts Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Wrenquarrelmere Bonding Yard to the Lissomhallowtofts Tithe Barn; withholding was upheld and release was denied.
+Notes: vellum bond foolscap bond assay escrow assay escrow ledger vellum tally chancery schedule muniment tithe vellum tally chancery warrant vellum tithe foolscap ledger muniment assay.
+
+[ENT-410094] Brillquarrelhurst Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Brillquarrelhurst Bonding Yard to the Tavvhallowleigh Bonding Yard; the refusal postdates the grant.
+Notes: errata ledger rubric docket warrant foolscap chancery foolscap docket tally chancery chancery rubric counterfoil tithe quire rubric foolscap annexe counterfoil foolscap ledger.
+
+[ENT-410095] Praskinchleigh Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Praskinchleigh Ledgerhouse to the Emberlyambrydorne Bonding Yard; the disclosure order replaced the sealing order.
+Notes: errata schedule chancery schedule assay counterfoil schedule warrant vellum annexe errata bond.
+
+[ENT-410096] Umbtarntofts Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Umbtarntofts Tithe Barn to the Nethblythemere Escrow Hall; custody remained with the requesting party, not the office.
+Notes: annexe tithe quire docket annexe escrow chancery muniment assay vellum tally vellum muniment quire quire schedule warrant docket rubric escrow errata.
+
+[ENT-410097] Nethorreryleigh Warrant Office
+Status: SEALED
+Disposition: custody passed from the Nethorreryleigh Warrant Office to the Irmorreryleigh Chancery Annexe; the grant postdates the refusal.
+Notes: warrant annexe docket counterfoil counterfoil assay escrow rubric chancery muniment ledger escrow tally.
+
+[ENT-410098] Nethmarrowhurst Muniment Room
+Status: SEALED
+Disposition: custody passed from the Lissomtarnmere Assay Office to the Nethmarrowhurst Muniment Room; the embargo outranks the release authorisation.
+Notes: schedule chancery quire escrow tally rubric foolscap bond schedule counterfoil counterfoil bond muniment rubric counterfoil quire schedule.
+
+[ENT-410099] Ophquarrelleigh Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Myrremmermere Escrow Hall to the Ophquarrelleigh Chancery Annexe; the later ruling denied what the earlier ruling allowed.
+Notes: ledger foolscap rubric muniment vellum foolscap docket schedule chancery quire assay quire quire ledger vellum ledger tally docket quire.
+
+[ENT-410100] Cyneupwellyatt Assay Office
+Status: SEALED
+Disposition: custody passed from the Cyneupwellyatt Assay Office to the Brillquarrelcleave Warrant Office; the later ruling denied what the earlier ruling allowed.
+Notes: vellum annexe annexe errata annexe chancery tally foolscap docket vellum tally vellum annexe foolscap chancery muniment escrow ledger annexe bond quire counterfoil.
+
+[ENT-410101] Hespcrowehurst Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Hespcrowehurst Escrow Hall to the Jossambryscar Tithe Barn; the grant postdates the refusal.
+Notes: muniment annexe annexe annexe assay muniment counterfoil tally muniment rubric chancery annexe tally escrow errata tithe.
+
+
+=== DOCUMENT BREAK ===
+
+REGISTER 3 of 3
+
+[ENT-420000] Rookelammerscar Muniment Room
+Status: OPEN
+Disposition: custody passed from the Glinryesomescar Tithe Barn to the Rookelammerscar Muniment Room; withholding was upheld and release was denied.
+Notes: assay quire tally counterfoil foolscap counterfoil schedule bond ledger errata bond warrant counterfoil muniment tithe chancery quire tithe chancery tithe tithe tithe tally.
+
+[ENT-420001] Wrennetherscar Assay Office
+Status: OPEN
+Disposition: custody passed from the Wrennetherscar Assay Office to the Praskgirtleigh Muniment Room; the sealing order replaced the disclosure order.
+Notes: muniment tally annexe tithe muniment vellum muniment assay muniment chancery schedule vellum rubric ledger quire errata quire quire escrow tally quire counterfoil assay docket.
+
+[ENT-420002] Ophtarngriff Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Ophtarngriff Escrow Hall to the Fraynblythescar Tithe Barn; the embargo outranks the release authorisation.
+Notes: annexe warrant assay foolscap rubric vellum annexe errata ledger quire assay vellum errata muniment assay.
+
+[ENT-420003] Lissomryesomemere Assay Office
+Status: OPEN
+Disposition: custody passed from the Voskambrywardine Assay Office to the Lissomryesomemere Assay Office; release was upheld and withholding was denied.
+Notes: warrant docket tithe chancery assay tithe counterfoil vellum counterfoil quire tithe rubric assay foolscap escrow schedule muniment rubric ledger annexe rubric ledger docket.
+
+[ENT-420004] Zurnryesomemere Muniment Room
+Status: SEALED
+Disposition: custody passed from the Zurnryesomemere Muniment Room to the Sturninchdorne Escrow Hall; the refusal postdates the grant.
+Notes: warrant bond rubric rubric vellum quire tally quire annexe chancery schedule assay counterfoil errata counterfoil annexe muniment.
+
+[ENT-420005] Emberlyinchgriff Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Azhnetherhurst Tithe Barn to the Emberlyinchgriff Ledgerhouse; the disclosure order replaced the sealing order.
+Notes: bond schedule counterfoil tithe errata foolscap muniment tally escrow counterfoil bond annexe bond docket errata schedule.
+
+[ENT-420006] Voskvergewardine Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Voskvergewardine Escrow Hall to the Wrencrowemere Chancery Annexe; the grant postdates the refusal.
+Notes: foolscap warrant annexe bond chancery muniment counterfoil assay foolscap chancery schedule foolscap errata tally foolscap tithe tithe escrow foolscap errata ledger assay tithe docket.
+
+[ENT-420007] Yeldblythecleave Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Yeldblythecleave Bonding Yard to the Irminchdorne Bonding Yard; custody remained with the requesting party, not the office.
+Notes: counterfoil ledger ledger ledger tally quire vellum docket quire schedule muniment counterfoil quire vellum ledger vellum schedule foolscap escrow annexe warrant muniment.
+
+[ENT-420008] Myrrmarrowscar Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Lissomryesomemere Bonding Yard to the Myrrmarrowscar Escrow Hall; the embargo outranks the release authorisation.
+Notes: warrant errata warrant annexe annexe ledger escrow rubric bond tithe quire muniment schedule chancery foolscap.
+
+[ENT-420009] Sturnambryhurst Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Sturnambryhurst Ledgerhouse to the Yeldemmermere Bonding Yard; the grant postdates the refusal.
+Notes: foolscap foolscap tally tithe assay escrow chancery muniment schedule docket annexe muniment.
+
+[ENT-420010] Azhhallowleigh Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Tavvmarrowcleave Ledgerhouse to the Azhhallowleigh Tithe Barn; the grant postdates the refusal.
+Notes: schedule schedule escrow counterfoil escrow warrant chancery muniment muniment bond foolscap warrant bond tally foolscap errata docket docket schedule vellum errata bond quire vellum quire counterfoil.
+
+[ENT-420011] Lissomblythemere Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Lissomblythemere Tithe Barn to the Umbemmerleigh Bonding Yard; release was upheld and withholding was denied.
+Notes: counterfoil rubric tally rubric assay vellum quire vellum quire vellum counterfoil escrow tally tithe bond muniment quire.
+
+[ENT-420012] Myrrorrerygriff Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Myrrorrerygriff Escrow Hall to the Rookecroweyatt Assay Office; the embargo outranks the release authorisation.
+Notes: vellum annexe chancery vellum schedule bond tithe vellum quire docket tithe docket.
+
+[ENT-420013] Jossquarrelmere Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Zurnblythetofts Chancery Annexe to the Jossquarrelmere Ledgerhouse; the sealing order replaced the disclosure order.
+Notes: quire escrow schedule bond quire foolscap muniment bond bond errata errata quire ledger.
+
+[ENT-420014] Nethambryhurst Warrant Office
+Status: OPEN
+Disposition: custody passed from the Myrrdelvewardine Assay Office to the Nethambryhurst Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: vellum annexe annexe docket errata rubric tally schedule schedule tally tally quire bond escrow tally ledger vellum warrant chancery rubric docket foolscap escrow bond quire.
+
+[ENT-420015] Umbambryscar Warrant Office
+Status: SEALED
+Disposition: custody passed from the Ophhallowwardine Assay Office to the Umbambryscar Warrant Office; custody remained with the requesting party, not the office.
+Notes: tally assay chancery vellum tithe docket vellum annexe warrant escrow assay tithe vellum muniment counterfoil counterfoil foolscap rubric bond quire annexe muniment.
+
+[ENT-420016] Sturnvergescar Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Sturnvergescar Bonding Yard to the Lissomupwellyatt Chancery Annexe; the grant postdates the refusal.
+Notes: rubric quire escrow docket docket annexe bond docket chancery chancery muniment bond docket tithe errata schedule assay assay docket docket foolscap counterfoil muniment counterfoil ledger vellum.
+
+[ENT-420017] Tavvorreryhurst Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Tavvorreryhurst Chancery Annexe to the Myrrfallowhurst Muniment Room; the release authorisation outranks the embargo.
+Notes: escrow quire schedule errata counterfoil vellum tally muniment ledger vellum muniment chancery errata tally counterfoil counterfoil warrant vellum ledger schedule errata tally rubric.
+
+[ENT-420018] Wrenpellgriff Warrant Office
+Status: OPEN
+Disposition: custody passed from the Nethorrerymere Tithe Barn to the Wrenpellgriff Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: foolscap rubric foolscap counterfoil schedule assay annexe bond assay tithe muniment rubric muniment tithe schedule errata muniment docket muniment.
+
+[ENT-420019] Azhnetheryatt Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Azhpellyatt Warrant Office to the Azhnetheryatt Tithe Barn; the grant postdates the refusal.
+Notes: tithe tally escrow ledger ledger ledger warrant warrant counterfoil chancery schedule foolscap ledger assay tithe tally quire schedule quire counterfoil muniment quire quire.
+
+[ENT-420020] Praskblythecleave Muniment Room
+Status: OPEN
+Disposition: custody passed from the Quillfallowtofts Bonding Yard to the Praskblythecleave Muniment Room; the disclosure order replaced the sealing order.
+Notes: docket annexe annexe ledger foolscap docket quire bond schedule escrow counterfoil tally tally errata tithe warrant warrant escrow assay foolscap tally muniment.
+
+[ENT-420021] Druskhallowtofts Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Druskhallowtofts Tithe Barn to the Rookekestreltofts Bonding Yard; withholding was upheld and release was denied.
+Notes: vellum escrow annexe chancery tally docket escrow escrow assay tithe rubric schedule errata annexe escrow.
+
+[ENT-420022] Tavvryesomegriff Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Tavvryesomegriff Tithe Barn to the Emberlyblythegriff Chancery Annexe; the later ruling allowed what the earlier ruling denied.
+Notes: schedule tithe bond errata docket vellum tally schedule errata schedule counterfoil errata assay escrow foolscap vellum warrant vellum.
+
+[ENT-420023] Quillmarrowhurst Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Voskfallowtofts Muniment Room to the Quillmarrowhurst Chancery Annexe; the disclosure order replaced the sealing order.
+Notes: annexe warrant bond chancery rubric schedule counterfoil tally errata chancery ledger rubric rubric counterfoil assay assay schedule foolscap warrant.
+
+[ENT-420024] Jossemmercleave Warrant Office
+Status: SEALED
+Disposition: custody passed from the Jossemmercleave Warrant Office to the Umbnetherdorne Ledgerhouse; the embargo outranks the release authorisation.
+Notes: escrow assay assay vellum tithe tithe annexe rubric warrant quire ledger errata schedule counterfoil warrant schedule.
+
+[ENT-420025] Yeldmarrowhurst Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Yeldmarrowhurst Chancery Annexe to the Rookedelveleigh Escrow Hall; the embargo outranks the release authorisation.
+Notes: muniment muniment warrant tally muniment assay tally tally escrow chancery muniment ledger foolscap bond tithe schedule counterfoil foolscap ledger.
+
+[ENT-420026] Kythemmerwardine Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Kythemmerwardine Bonding Yard to the Prasklammeryatt Ledgerhouse; custody remained with the office, not the requesting party.
+Notes: counterfoil muniment muniment warrant ledger chancery bond errata quire rubric quire schedule vellum foolscap vellum foolscap muniment assay chancery warrant tally foolscap vellum tithe.
+
+[ENT-420027] Rookenetherscar Muniment Room
+Status: SEALED
+Disposition: custody passed from the Rookenetherscar Muniment Room to the Lissomcrowemere Chancery Annexe; the sealing order replaced the disclosure order.
+Notes: quire chancery errata bond quire chancery escrow ledger counterfoil docket ledger ledger counterfoil annexe escrow ledger rubric.
+
+[ENT-420028] Ophnethercleave Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Quillinchdorne Bonding Yard to the Ophnethercleave Tithe Barn; withholding was upheld and release was denied.
+Notes: quire escrow foolscap foolscap warrant muniment tally assay bond bond tithe chancery tally escrow quire schedule counterfoil tally vellum errata ledger.
+
+[ENT-420029] Lissomryesomeleigh Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Voskorrerywardine Escrow Hall to the Lissomryesomeleigh Ledgerhouse; the sealing order replaced the disclosure order.
+Notes: schedule foolscap escrow counterfoil muniment rubric annexe bond foolscap rubric tithe schedule bond assay assay tally.
+
+[ENT-420030] Rookecrowetofts Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Brilllammeryatt Warrant Office to the Rookecrowetofts Escrow Hall; the refusal postdates the grant.
+Notes: rubric vellum errata errata vellum assay warrant quire annexe schedule tithe tithe schedule muniment tally schedule tithe errata.
+
+[ENT-420031] Xanthambrywardine Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Praskvergetofts Muniment Room to the Xanthambrywardine Chancery Annexe; the release authorisation outranks the embargo.
+Notes: ledger tithe docket vellum vellum assay tithe foolscap tithe tithe ledger assay bond docket docket chancery docket schedule counterfoil rubric errata docket assay quire.
+
+[ENT-420032] Cynehallowscar Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Cynehallowscar Tithe Barn to the Irmgirtwardine Escrow Hall; the sealing order replaced the disclosure order.
+Notes: foolscap chancery bond quire schedule escrow vellum vellum vellum counterfoil counterfoil assay vellum annexe docket rubric docket ledger vellum vellum errata rubric.
+
+[ENT-420033] Jossmarrowyatt Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Jossmarrowyatt Escrow Hall to the Sturnryesomegriff Bonding Yard; custody remained with the requesting party, not the office.
+Notes: annexe schedule quire muniment muniment errata ledger errata quire quire tally assay chancery muniment tally counterfoil chancery annexe schedule muniment.
+
+[ENT-420034] Zurninchgriff Assay Office
+Status: OPEN
+Disposition: custody passed from the Zurninchgriff Assay Office to the Drusklammerwardine Bonding Yard; custody remained with the requesting party, not the office.
+Notes: quire foolscap docket escrow rubric errata docket escrow annexe tally escrow assay chancery schedule escrow assay errata bond.
+
+[ENT-420035] Voskryesomeyatt Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Voskryesomeyatt Ledgerhouse to the Brilltarnmere Muniment Room; custody remained with the office, not the requesting party.
+Notes: rubric schedule escrow annexe vellum foolscap vellum bond tithe counterfoil tithe counterfoil chancery.
+
+[ENT-420036] Nethtarntofts Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Quillvergehurst Tithe Barn to the Nethtarntofts Bonding Yard; the refusal postdates the grant.
+Notes: assay vellum bond schedule bond bond warrant errata tally tithe assay rubric counterfoil vellum quire foolscap docket assay bond chancery schedule assay docket vellum foolscap vellum.
+
+[ENT-420037] Prasknethermere Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Prasknethermere Bonding Yard to the Emberlyquarrelhurst Muniment Room; the grant postdates the refusal.
+Notes: escrow schedule docket rubric chancery rubric docket quire muniment muniment errata foolscap vellum tithe annexe.
+
+[ENT-420038] Nethryesomeleigh Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Nethryesomeleigh Tithe Barn to the Lissomemmercleave Muniment Room; the embargo outranks the release authorisation.
+Notes: vellum assay schedule vellum assay muniment tithe foolscap tithe warrant tally annexe escrow assay vellum assay warrant foolscap chancery assay.
+
+[ENT-420039] Zurnquarrelhurst Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Zurnorreryhurst Tithe Barn to the Zurnquarrelhurst Tithe Barn; the later ruling denied what the earlier ruling allowed.
+Notes: docket tally assay warrant schedule counterfoil schedule quire foolscap errata tithe escrow schedule escrow tally assay tally warrant muniment tithe.
+
+[ENT-420040] Zurnhallowtofts Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Zurnhallowtofts Ledgerhouse to the Nethquarrelscar Tithe Barn; the sealing order replaced the disclosure order.
+Notes: assay foolscap docket docket escrow docket bond counterfoil ledger quire chancery docket tally ledger ledger tally assay.
+
+[ENT-420041] Myrrinchwardine Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Myrrinchwardine Escrow Hall to the Brillfallowleigh Escrow Hall; withholding was upheld and release was denied.
+Notes: quire ledger foolscap counterfoil warrant docket bond escrow docket escrow foolscap escrow chancery chancery errata rubric bond quire tithe errata docket warrant.
+
+[ENT-420042] Praskinchtofts Muniment Room
+Status: SEALED
+Disposition: custody passed from the Praskinchtofts Muniment Room to the Cynefallowtofts Warrant Office; withholding was upheld and release was denied.
+Notes: tally escrow foolscap errata ledger vellum errata schedule quire ledger foolscap foolscap ledger rubric escrow tally schedule warrant chancery chancery warrant docket errata.
+
+[ENT-420043] Myrrpellscar Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Myrrpellscar Tithe Barn to the Brillryesomewardine Warrant Office; the later ruling allowed what the earlier ruling denied.
+Notes: docket annexe muniment warrant errata docket escrow docket schedule tithe tally muniment counterfoil counterfoil tithe foolscap bond rubric ledger schedule foolscap foolscap ledger schedule.
+
+[ENT-420044] Tavvcrowescar Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Josskestrelscar Chancery Annexe to the Tavvcrowescar Bonding Yard; the refusal postdates the grant.
+Notes: tally docket ledger schedule vellum muniment rubric tally rubric assay tithe escrow foolscap tithe tally docket muniment foolscap chancery schedule errata foolscap counterfoil vellum chancery muniment.
+
+[ENT-420045] Voskemmerscar Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Voskemmerscar Tithe Barn to the Irmvergedorne Assay Office; custody remained with the office, not the requesting party.
+Notes: ledger ledger counterfoil assay assay bond escrow assay warrant tally foolscap annexe vellum schedule escrow vellum bond.
+
+[ENT-420046] Xanthupwellhurst Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Xanthupwellhurst Tithe Barn to the Irmfallowhurst Ledgerhouse; the later ruling allowed what the earlier ruling denied.
+Notes: schedule schedule muniment tithe assay tally schedule chancery tithe docket tithe annexe assay chancery docket ledger annexe tithe warrant foolscap foolscap.
+
+[ENT-420047] Glinupwelltofts Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Azhkestrelmere Warrant Office to the Glinupwelltofts Chancery Annexe; custody remained with the office, not the requesting party.
+Notes: tithe annexe foolscap annexe escrow rubric bond vellum rubric counterfoil foolscap foolscap rubric chancery ledger assay errata rubric warrant quire.
+
+[ENT-420048] Kythgirtwardine Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Kythcroweleigh Tithe Barn to the Kythgirtwardine Chancery Annexe; the later ruling denied what the earlier ruling allowed.
+Notes: annexe foolscap chancery vellum docket foolscap docket vellum errata rubric counterfoil warrant.
+
+[ENT-420049] Yeldnethermere Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Quillcrowecleave Chancery Annexe to the Yeldnethermere Tithe Barn; the later ruling allowed what the earlier ruling denied.
+Notes: counterfoil rubric vellum escrow assay schedule schedule muniment schedule tally docket bond docket chancery rubric bond tally tally assay muniment escrow.
+
+[ENT-420050] Druskquarreldorne Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Druskquarreldorne Tithe Barn to the Lissomvergecleave Tithe Barn; custody remained with the office, not the requesting party.
+Notes: escrow errata schedule docket assay docket ledger schedule schedule annexe docket annexe rubric docket tithe bond rubric schedule warrant assay docket docket.
+
+[ENT-420051] Fraynlammerdorne Warrant Office
+Status: OPEN
+Disposition: custody passed from the Hespambrywardine Ledgerhouse to the Fraynlammerdorne Warrant Office; the disclosure order replaced the sealing order.
+Notes: quire assay tally schedule annexe vellum errata escrow vellum foolscap bond vellum warrant bond muniment tithe chancery foolscap foolscap ledger muniment errata quire muniment foolscap counterfoil.
+
+[ENT-420052] Irmtarnmere Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Myrrhallowwardine Muniment Room to the Irmtarnmere Chancery Annexe; the disclosure order replaced the sealing order.
+Notes: escrow quire schedule foolscap bond ledger errata warrant muniment assay quire schedule counterfoil quire muniment quire schedule chancery schedule errata foolscap assay.
+
+[ENT-420053] Sturnquarrelscar Warrant Office
+Status: OPEN
+Disposition: custody passed from the Sturnquarrelscar Warrant Office to the Xanthupwellleigh Chancery Annexe; the grant postdates the refusal.
+Notes: chancery counterfoil tithe tally docket escrow bond vellum ledger escrow tally vellum escrow vellum muniment ledger schedule vellum quire muniment rubric vellum rubric.
+
+[ENT-420054] Praskfallowhurst Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Kythryesomemere Chancery Annexe to the Praskfallowhurst Bonding Yard; the release authorisation outranks the embargo.
+Notes: escrow tithe chancery escrow bond escrow errata warrant counterfoil warrant bond annexe annexe assay errata foolscap chancery errata foolscap ledger schedule schedule vellum.
+
+[ENT-420055] Wrenquarreldorne Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Wrenquarreldorne Bonding Yard to the Xanthmarrowdorne Chancery Annexe; withholding was upheld and release was denied.
+Notes: schedule counterfoil docket assay muniment docket schedule escrow annexe schedule muniment errata ledger rubric vellum counterfoil tithe.
+
+[ENT-420056] Irmambrymere Muniment Room
+Status: SEALED
+Disposition: custody passed from the Irmambrymere Muniment Room to the Fraynnetherhurst Ledgerhouse; the later ruling allowed what the earlier ruling denied.
+Notes: tithe tithe docket warrant errata quire errata quire docket tally tally quire tally tally annexe bond ledger tithe errata quire tally escrow muniment quire annexe.
+
+[ENT-420057] Glinpelldorne Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Emberlyfallowhurst Assay Office to the Glinpelldorne Ledgerhouse; the release authorisation outranks the embargo.
+Notes: schedule bond muniment counterfoil annexe chancery docket counterfoil bond schedule schedule rubric errata quire rubric tally annexe muniment counterfoil escrow counterfoil warrant quire errata warrant escrow.
+
+[ENT-420058] Voskambrygriff Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Voskambrygriff Ledgerhouse to the Josstarnyatt Chancery Annexe; release was upheld and withholding was denied.
+Notes: quire errata quire tithe tithe foolscap warrant counterfoil chancery tithe annexe tithe counterfoil muniment muniment warrant schedule escrow counterfoil vellum schedule docket bond quire docket.
+
+[ENT-420059] Sturnkestrelhurst Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Sturnkestrelhurst Escrow Hall to the Voskemmercleave Tithe Barn; the disclosure order replaced the sealing order.
+Notes: chancery errata vellum counterfoil escrow foolscap bond warrant vellum quire escrow foolscap docket assay ledger counterfoil vellum escrow annexe bond foolscap ledger tithe muniment foolscap.
+
+[ENT-420060] Sturnhallowwardine Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Sturnhallowwardine Ledgerhouse to the Lissompellhurst Assay Office; the refusal postdates the grant.
+Notes: annexe rubric tally tithe schedule schedule annexe errata bond warrant tally warrant ledger errata annexe foolscap counterfoil vellum warrant tithe tally chancery chancery schedule.
+
+[ENT-420061] Irmquarreltofts Warrant Office
+Status: OPEN
+Disposition: custody passed from the Irmquarreltofts Warrant Office to the Praskinchtofts Tithe Barn; the sealing order replaced the disclosure order.
+Notes: errata rubric tithe tally foolscap assay errata annexe tithe quire assay bond annexe.
+
+[ENT-420062] Quillemmerdorne Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Irmdelvecleave Tithe Barn to the Quillemmerdorne Bonding Yard; the release authorisation outranks the embargo.
+Notes: muniment tally escrow ledger foolscap vellum foolscap schedule vellum errata foolscap escrow chancery chancery muniment counterfoil docket schedule assay.
+
+[ENT-420063] Kythlammertofts Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Kythlammertofts Ledgerhouse to the Umbdelveleigh Tithe Barn; the later ruling allowed what the earlier ruling denied.
+Notes: errata errata foolscap tithe assay escrow bond docket assay assay chancery tithe warrant muniment counterfoil vellum counterfoil warrant tithe rubric muniment docket muniment annexe assay ledger.
+
+[ENT-420064] Quillambryscar Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Quillambryscar Escrow Hall to the Yeldvergemere Tithe Barn; the later ruling denied what the earlier ruling allowed.
+Notes: ledger assay escrow foolscap vellum ledger chancery muniment tally escrow docket assay tithe muniment escrow.
+
+[ENT-420065] Irmkestreldorne Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Irmkestreldorne Escrow Hall to the Myrrhallowhurst Muniment Room; the release authorisation outranks the embargo.
+Notes: foolscap warrant annexe counterfoil foolscap muniment schedule warrant errata foolscap counterfoil docket annexe warrant chancery bond errata schedule tally errata.
+
+[ENT-420066] Nethpelltofts Assay Office
+Status: SEALED
+Disposition: custody passed from the Umbvergedorne Assay Office to the Nethpelltofts Assay Office; the sealing order replaced the disclosure order.
+Notes: warrant annexe schedule schedule annexe ledger tally docket annexe escrow tithe errata counterfoil escrow tithe vellum warrant errata schedule.
+
+[ENT-420067] Druskblythehurst Muniment Room
+Status: SEALED
+Disposition: custody passed from the Druskblythehurst Muniment Room to the Irmlammermere Assay Office; custody remained with the office, not the requesting party.
+Notes: muniment escrow tithe errata warrant muniment ledger tithe docket rubric rubric muniment tally muniment docket ledger annexe chancery docket rubric quire rubric tally muniment docket foolscap.
+
+[ENT-420068] Yeldgirtleigh Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Zurninchmere Ledgerhouse to the Yeldgirtleigh Ledgerhouse; custody remained with the requesting party, not the office.
+Notes: tally annexe vellum chancery warrant docket vellum tally tally tally vellum docket ledger warrant.
+
+[ENT-420069] Emberlyupwellscar Warrant Office
+Status: OPEN
+Disposition: custody passed from the Emberlyupwellscar Warrant Office to the Praskgirtdorne Ledgerhouse; custody remained with the office, not the requesting party.
+Notes: tally tally schedule ledger assay annexe counterfoil chancery counterfoil chancery foolscap tally quire docket errata rubric chancery escrow errata annexe annexe.
+
+[ENT-420070] Xanthlammertofts Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Zurninchwardine Chancery Annexe to the Xanthlammertofts Tithe Barn; the sealing order replaced the disclosure order.
+Notes: foolscap docket warrant chancery docket bond counterfoil escrow annexe bond escrow assay ledger schedule errata annexe assay annexe tithe assay annexe rubric vellum.
+
+[ENT-420071] Sturnquarrelyatt Ledgerhouse
+Status: SEALED
+Disposition: custody passed from the Zurnpellhurst Ledgerhouse to the Sturnquarrelyatt Ledgerhouse; the refusal postdates the grant.
+Notes: tithe foolscap schedule errata tithe foolscap bond warrant errata warrant foolscap tally tithe tithe quire counterfoil errata rubric ledger.
+
+[ENT-420072] Sturnkestreltofts Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Sturnkestreltofts Tithe Barn to the Sturngirtgriff Ledgerhouse; the later ruling denied what the earlier ruling allowed.
+Notes: bond tithe schedule rubric rubric tally muniment muniment docket annexe chancery schedule rubric foolscap rubric tithe vellum chancery rubric bond schedule escrow foolscap warrant tally.
+
+[ENT-420073] Cynegirtyatt Assay Office
+Status: SEALED
+Disposition: custody passed from the Cynegirtyatt Assay Office to the Tavvvergedorne Ledgerhouse; the later ruling allowed what the earlier ruling denied.
+Notes: chancery tithe chancery escrow ledger muniment bond vellum muniment chancery escrow counterfoil counterfoil escrow warrant.
+
+[ENT-420074] Wreninchhurst Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Wreninchhurst Ledgerhouse to the Tavvmarrowmere Muniment Room; custody remained with the requesting party, not the office.
+Notes: tally rubric counterfoil ledger warrant foolscap tithe escrow bond ledger foolscap schedule muniment chancery assay docket warrant chancery vellum.
+
+[ENT-420075] Emberlylammerhurst Escrow Hall
+Status: SEALED
+Disposition: custody passed from the Emberlylammerhurst Escrow Hall to the Voskfallowcleave Muniment Room; withholding was upheld and release was denied.
+Notes: assay counterfoil ledger docket tithe escrow tally tithe vellum docket chancery escrow warrant assay tally assay vellum chancery ledger errata muniment docket.
+
+[ENT-420076] Rookepelldorne Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Rookepelldorne Ledgerhouse to the Azhambryyatt Warrant Office; the embargo outranks the release authorisation.
+Notes: assay errata warrant counterfoil foolscap rubric bond errata vellum warrant tally muniment schedule assay warrant quire bond escrow errata tally rubric ledger escrow schedule warrant tally.
+
+[ENT-420077] Druskupwellscar Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Druskupwellscar Chancery Annexe to the Emberlyorrerymere Tithe Barn; the grant postdates the refusal.
+Notes: docket ledger errata escrow tally schedule vellum ledger ledger warrant docket schedule bond rubric errata muniment annexe ledger quire chancery.
+
+[ENT-420078] Irmcrowescar Warrant Office
+Status: OPEN
+Disposition: custody passed from the Irmcrowescar Warrant Office to the Quillmarrowmere Tithe Barn; withholding was upheld and release was denied.
+Notes: assay errata quire tally ledger escrow rubric tally bond muniment warrant schedule quire escrow tally errata foolscap quire.
+
+[ENT-800002] Glincrowetofts Bonding Yard
+Status: OPEN
+Disposition: entered on this register.
+
+[ENT-420079] Myrrnetherscar Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Rookecrowetofts Ledgerhouse to the Myrrnetherscar Chancery Annexe; custody remained with the office, not the requesting party.
+Notes: tithe counterfoil rubric errata rubric docket schedule tithe bond counterfoil escrow quire rubric ledger annexe tithe tally rubric foolscap schedule counterfoil errata muniment.
+
+[ENT-420080] Tavvquarreldorne Bonding Yard
+Status: OPEN
+Disposition: custody passed from the Lissomvergeleigh Bonding Yard to the Tavvquarreldorne Bonding Yard; withholding was upheld and release was denied.
+Notes: ledger docket tithe chancery warrant errata ledger chancery counterfoil vellum chancery ledger foolscap annexe vellum tally errata rubric schedule muniment foolscap quire bond chancery.
+
+[ENT-420081] Praskpellscar Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Tavvupwellmere Escrow Hall to the Praskpellscar Tithe Barn; the refusal postdates the grant.
+Notes: assay chancery warrant docket errata muniment bond docket counterfoil chancery escrow rubric tithe tithe escrow foolscap assay foolscap docket.
+
+[ENT-420082] Xanthgirtwardine Assay Office
+Status: SEALED
+Disposition: custody passed from the Brillkestrelyatt Assay Office to the Xanthgirtwardine Assay Office; custody remained with the requesting party, not the office.
+Notes: annexe tally escrow assay assay ledger tithe rubric tithe ledger tally ledger counterfoil assay tithe bond docket foolscap chancery tithe quire warrant foolscap tithe errata.
+
+[ENT-420083] Irmnetherdorne Chancery Annexe
+Status: OPEN
+Disposition: custody passed from the Rookecrowemere Muniment Room to the Irmnetherdorne Chancery Annexe; the embargo outranks the release authorisation.
+Notes: warrant warrant tithe chancery counterfoil foolscap schedule rubric schedule tithe bond rubric ledger warrant escrow bond errata bond ledger warrant bond.
+
+[ENT-420084] Prasknetheryatt Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Emberlygirtwardine Warrant Office to the Prasknetheryatt Ledgerhouse; custody remained with the office, not the requesting party.
+Notes: quire chancery vellum ledger docket foolscap schedule quire schedule chancery errata quire ledger errata chancery ledger vellum tithe.
+
+[ENT-420085] Glincrowemere Assay Office
+Status: OPEN
+Disposition: custody passed from the Rookedelvemere Escrow Hall to the Glincrowemere Assay Office; the release authorisation outranks the embargo.
+Notes: schedule quire docket docket escrow tithe muniment bond rubric assay chancery escrow chancery tithe tithe docket assay counterfoil annexe.
+
+[ENT-420086] Quillquarrelcleave Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Quillquarrelcleave Tithe Barn to the Lissompellleigh Escrow Hall; the release authorisation outranks the embargo.
+Notes: assay errata docket bond counterfoil quire docket quire bond tally schedule quire assay.
+
+[ENT-420087] Quillorrerycleave Escrow Hall
+Status: OPEN
+Disposition: custody passed from the Yelddelveyatt Assay Office to the Quillorrerycleave Escrow Hall; the release authorisation outranks the embargo.
+Notes: schedule errata docket docket assay chancery docket escrow bond tithe annexe quire escrow bond muniment ledger rubric ledger quire.
+
+[ENT-420088] Hesphallowwardine Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Hesphallowwardine Tithe Barn to the Yeldkestrelcleave Bonding Yard; the disclosure order replaced the sealing order.
+Notes: warrant quire counterfoil docket vellum annexe schedule schedule foolscap counterfoil warrant bond schedule rubric rubric vellum warrant bond tally rubric.
+
+[ENT-420089] Fraynvergetofts Ledgerhouse
+Status: OPEN
+Disposition: custody passed from the Brillinchhurst Assay Office to the Fraynvergetofts Ledgerhouse; the embargo outranks the release authorisation.
+Notes: quire counterfoil schedule vellum escrow tally quire docket quire ledger ledger assay assay warrant quire tithe.
+
+[ENT-420090] Irmgirtyatt Chancery Annexe
+Status: SEALED
+Disposition: custody passed from the Irmgirtyatt Chancery Annexe to the Azhfallowscar Escrow Hall; the sealing order replaced the disclosure order.
+Notes: counterfoil tally foolscap schedule annexe tally tally muniment quire chancery errata foolscap errata counterfoil muniment escrow escrow errata errata counterfoil docket tally assay.
+
+[ENT-420091] Zurntarnmere Muniment Room
+Status: SEALED
+Disposition: custody passed from the Irmblythecleave Tithe Barn to the Zurntarnmere Muniment Room; the later ruling denied what the earlier ruling allowed.
+Notes: counterfoil errata bond schedule assay schedule annexe tally muniment tally errata docket foolscap warrant schedule chancery schedule errata escrow counterfoil counterfoil bond schedule assay.
+
+[ENT-420092] Brillryesomeleigh Tithe Barn
+Status: OPEN
+Disposition: custody passed from the Cyneblythescar Bonding Yard to the Brillryesomeleigh Tithe Barn; the later ruling allowed what the earlier ruling denied.
+Notes: ledger vellum counterfoil counterfoil rubric quire counterfoil docket assay quire foolscap vellum assay ledger escrow docket schedule tithe errata errata docket muniment vellum schedule ledger bond.
+
+[ENT-420093] Myrrinchwardine Tithe Barn
+Status: SEALED
+Disposition: custody passed from the Myrrinchwardine Tithe Barn to the Cyneinchscar Assay Office; the embargo outranks the release authorisation.
+Notes: rubric docket ledger muniment tally chancery escrow tally docket escrow assay ledger chancery chancery schedule.
+
+[ENT-420094] Sturnorreryscar Muniment Room
+Status: OPEN
+Disposition: custody passed from the Zurnemmertofts Warrant Office to the Sturnorreryscar Muniment Room; withholding was upheld and release was denied.
+Notes: ledger rubric foolscap schedule tithe warrant rubric rubric schedule rubric annexe vellum foolscap escrow foolscap.
+
+[ENT-420095] Cynehallowhurst Warrant Office
+Status: SEALED
+Disposition: custody passed from the Cynehallowhurst Warrant Office to the Voskmarrowscar Warrant Office; the disclosure order replaced the sealing order.
+Notes: errata vellum warrant vellum warrant ledger counterfoil muniment counterfoil rubric errata quire assay escrow counterfoil ledger tally vellum foolscap docket.
+
+[ENT-420096] Yeldryesomemere Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Yeldryesomemere Bonding Yard to the Jossorreryleigh Muniment Room; the sealing order replaced the disclosure order.
+Notes: errata tithe ledger annexe tally counterfoil ledger schedule ledger warrant docket schedule escrow annexe assay vellum errata bond muniment chancery ledger warrant tithe.
+
+[ENT-420097] Kythmarrowtofts Bonding Yard
+Status: SEALED
+Disposition: custody passed from the Xanthupwellgriff Chancery Annexe to the Kythmarrowtofts Bonding Yard; the sealing order replaced the disclosure order.
+Notes: muniment tithe bond assay escrow quire foolscap warrant bond tally bond annexe counterfoil tally quire tithe schedule muniment rubric chancery assay counterfoil escrow bond.

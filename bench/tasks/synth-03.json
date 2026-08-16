@@ -1,0 +1,8 @@
+{
+  "task_id": "synth-03",
+  "text": "This corpus contains 5 registers separated by '=== DOCUMENT BREAK ==='. Exactly one organisation is entered on EVERY register. Name it. Reply with the organisation's full name and nothing else.",
+  "context_path": "../corpora/synth-03.txt",
+  "category": "synthesis",
+  "answer": "Praskcrowegriff Muniment Room",
+  "checker": "name_exact"
+}
