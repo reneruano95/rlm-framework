@@ -25,8 +25,10 @@ from rlm.arms import (
     ArmEpisode,
     ArmResult,
     bench_slot_capacity,
+    bm25_select,
     outcome_for_error,
     run_b1,
+    run_b3,
     truncate_head_tail,
 )
 from rlm.config import Config
@@ -111,7 +113,8 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
     """
 
     def build(*, bench_ctx: int | None = None, bench_parallel: int | None = None,
-              drop_bench_leaf: bool = False, max_wall_clock_s: int | None = None) -> Config:
+              drop_bench_leaf: bool = False, max_wall_clock_s: int | None = None,
+              chunk: dict | None = None) -> Config:
         raw = copy.deepcopy(minimal_cfg_dict)
         prompts = raw["scaffold"]["prompts"]
         prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
@@ -135,6 +138,8 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
                 raw["servers"]["bench_leaf"]["parallel"] = bench_parallel
         if max_wall_clock_s is not None:
             raw["scaffold"]["budgets"]["max_wall_clock_s"] = max_wall_clock_s
+        if chunk is not None:
+            raw["scaffold"]["chunk"].update(chunk)
         return Config.model_validate(raw)
 
     return build
@@ -186,6 +191,15 @@ async def _run_b1(cfg: Config, task: Task, dispatcher, **kw):
     env = _ArmEnv(cfg)
     result = await env.run(
         lambda tl: run_b1(task, cfg, dispatcher=dispatcher, trace=tl,
+                           registry=cfg.prompt_registry(), bench_extra=BENCH_EXTRA,
+                           **kw))
+    return result, env
+
+
+async def _run_b3(cfg: Config, task: Task, dispatcher, **kw):
+    env = _ArmEnv(cfg)
+    result = await env.run(
+        lambda tl: run_b3(task, cfg, dispatcher=dispatcher, trace=tl,
                            registry=cfg.prompt_registry(), bench_extra=BENCH_EXTRA,
                            **kw))
     return result, env
@@ -508,6 +522,230 @@ async def test_bench_slot_capacity_is_ctx_over_parallel(bench_cfg):
     assert bench_slot_capacity(cfg) == 524288 // 2
     with pytest.raises(ConfigError, match="bench_leaf"):
         bench_slot_capacity(bench_cfg(drop_bench_leaf=True))
+
+
+# --------------------------------------------------------------------------- #
+# bm25_select -- §8's pre-registered B3 selection rule
+# --------------------------------------------------------------------------- #
+
+
+def test_bm25_select_ranks_the_rare_term_chunk_first():
+    """A chunk sharing no term with the question scores NULL in DuckDB's FTS
+    and is excluded from `ranked` entirely -- absent, not merely last."""
+    chunks = ["the quick brown fox jumps over the lazy dog",
+              "zylophonic quasar emits an unusual signature",
+              "another ordinary sentence with common words"]
+    question = "what does the zylophonic quasar do"
+    selected, record = bm25_select(chunks, question, budget_tokens=1000,
+                                    token_counts=[10, 10, 10])
+    assert record["ranked"] == [1]
+    assert selected == [1]
+    assert record["selected"] == [1]
+    assert record["budget_tokens"] == 1000
+    assert record["fts"] is True
+
+
+def test_bm25_select_restores_original_order_even_when_rank_order_differs():
+    """Chunk 2 outranks chunk 0 (more occurrences of the matched term), but
+    both fit the budget, so the returned selection must come back in ORIGINAL
+    corpus order -- not BM25 rank order -- for the prompt to stay coherent."""
+    chunks = ["needle appears once here",
+              "no relevant terms in this filler sentence",
+              "needle needle needle needle"]
+    selected, record = bm25_select(chunks, "needle", budget_tokens=1000,
+                                    token_counts=[5, 5, 5])
+    assert record["ranked"] == [2, 0]          # rank order: 2 scores higher
+    assert selected == [0, 2]                  # return order: original
+    assert record["selected"] == [0, 2]
+
+
+def test_bm25_select_stops_at_the_first_chunk_that_does_not_fit():
+    """The pre-registered rule is STOP, not skip-and-continue: chunk 1 is
+    ranked second and does not fit, so chunk 2 -- ranked third but small
+    enough to fit -- must NOT be picked up after it."""
+    chunks = ["needle needle needle", "needle needle", "needle"]
+    selected, record = bm25_select(chunks, "needle", budget_tokens=10,
+                                    token_counts=[5, 100, 5])
+    assert record["ranked"] == [0, 1, 2]
+    assert selected == [0]                     # NOT [0, 2]
+    assert record["selected"] == [0]
+
+
+def test_bm25_select_is_deterministic_across_two_calls():
+    chunks = ["needle appears once here",
+              "no relevant terms in this filler sentence",
+              "needle needle needle needle"]
+    a = bm25_select(chunks, "needle", budget_tokens=1000, token_counts=[5, 5, 5])
+    b = bm25_select(chunks, "needle", budget_tokens=1000, token_counts=[5, 5, 5])
+    assert a == b
+
+
+def test_bm25_select_refuses_mismatched_chunks_and_token_counts():
+    with pytest.raises(ValueError, match="token_counts"):
+        bm25_select(["a", "b"], "q", budget_tokens=10, token_counts=[1])
+
+
+# --------------------------------------------------------------------------- #
+# B3
+# --------------------------------------------------------------------------- #
+
+
+async def test_b3_success_logs_episode_and_step(bench_cfg):
+    cfg = bench_cfg()
+    task = _task()
+    disp = _ScriptedDispatcher("ANSWER")
+    res, env = await _run_b3(cfg, task, disp)
+
+    assert isinstance(res, ArmResult)
+    assert res.outcome == Outcome.SUCCESS and res.reason is None
+    assert res.answer == "ANSWER"
+
+    row = env.episode
+    assert row is not None
+    assert row["episode_id"] == res.episode_id
+    assert row["outcome"] == "success"
+    assert row["task_id"] == "b1-t1" and row["task_hash"] == task.task_hash
+    assert row["dry_run"] is True          # scaffold.dispatcher == "mock"
+    assert row["sandbox_pid"] is None      # a baseline arm runs no sandbox
+    assert row["benchmark_version"] == cfg.benchmark.version
+
+    snap = row["config_snapshot"]
+    assert snap["bench"]["arm"] == "b3"
+    assert snap["bench"]["run_id"] == "r-1" and snap["bench"]["seed"] == 1
+    assert snap["bench"]["block"] == 0
+    assert snap["bench"]["slot_id"] == 1                # B3's pre-registered pin
+    assert snap["bench"]["slot_id_applied"] is False     # MockDispatcher cannot pin
+    # bm25_select's record, written verbatim into the bench snapshot
+    assert snap["bench"]["fts"] is True
+    assert snap["bench"]["ranked"] == [0]
+    assert snap["bench"]["selected"] == [0]
+    assert isinstance(snap["bench"]["budget_tokens"], int)
+    assert snap["bench"]["budget_tokens"] > 0
+    # the pinned bytes each arm actually ran (§8's no-overfit audit)
+    assert "baselines.b3_single_shot.file" in snap["prompt_hashes"]
+    assert snap["task"]["text"] == task.text
+
+    assert len(env.steps) == 1
+    step = env.steps[0]
+    assert step["actor"] == "leaf" and step["action_type"] == "llm_call"
+    assert step["status"] == "ok" and step["depth"] == 1
+    assert step["step_idx"] == 0 and step["episode_id"] == res.episode_id
+    assert step["call_id"] is not None
+    assert step["leak_detected"] is False      # R13 checked, and clean -- not NULL
+
+    # the prompt is head + selected chunk(s) (original order) + question
+    prompt = disp.prompts[0]
+    head = cfg.prompt_registry().render_baseline("b3_single_shot")
+    assert prompt == f"{head}\n\n{task.context}\n\n{task.text}"
+    assert step["action_payload"] == prompt
+
+    # the answer is stored, and the episode's final_answer_ref names that blob
+    assert env.blob(step["observation_full_ref"]) == b"ANSWER"
+    assert row["final_answer_ref"] == step["observation_full_ref"]
+
+
+async def test_b3_records_the_scaffold_provenance_columns(bench_cfg):
+    cfg = bench_cfg()
+    res, env = await _run_b3(cfg, _task(), _ScriptedDispatcher(),
+                              scaffold_instance_id="4242",
+                              scaffold_git_sha="deadbeef")
+    assert env.episode["scaffold_instance_id"] == "4242"
+    assert env.episode["scaffold_git_sha"] == "deadbeef"
+
+
+async def test_b3_runs_r13s_detector_on_an_unselected_chunk(bench_cfg):
+    """§8 (v0.2.6): R13's detector runs on every leaf call, indexed against
+    EVERY chunk C2 produced -- not just the one(s) `bm25_select` kept. Chunk
+    A (below) shares no term with the question and is therefore never sent;
+    chunk B is on-topic and is the whole prompt. An answer that reproduces
+    chunk A's identifier could only have come from cross-slot leakage -- the
+    same story `run_b1`'s truncated-middle test tells for B1's overflow
+    policy, told here for B3's selection rule instead.
+
+    `size_tokens=50` (`4*50-3 = 197` chars) is chosen so C2's char-count
+    binary search (content-agnostic under `MockDispatcher`'s `(len+3)//4`)
+    cuts EXACTLY at the end of chunk A, regardless of chunk B's content --
+    verified directly against `rlm.chunker.split` before being relied on here.
+    """
+    cfg = bench_cfg(chunk={"size_tokens": 50, "stride_tokens": 50,
+                            "snap_to_boundary": False})
+    chunk_a = (f"archive record about old relics references item {LEAKED_KEY} "
+               "filed long ago").ljust(197, "q")
+    chunk_b = ("the target phrase asked about right now is TARGETPHRASE and "
+               "that is the whole point of this second passage")
+    corpus = chunk_a + chunk_b
+    task = _task(context=corpus, text="What is the target phrase?",
+                 answer=LEAKED_KEY, checker="uuid_exact")
+    res, env = await _run_b3(cfg, task, _ScriptedDispatcher(LEAKED_KEY))
+
+    assert res.outcome == Outcome.SUCCESS
+    step = env.steps[0]
+    prompt = step["action_payload"]
+    assert LEAKED_KEY not in prompt            # chunk A really was never sent
+    assert "TARGETPHRASE" in prompt            # chunk B is what got sent
+    assert step["leak_detected"] is True
+    assert LEAKED_KEY in step["leak_detail"]
+
+    bench = env.episode["config_snapshot"]["bench"]
+    assert bench["ranked"] == [1]              # chunk A never even matched
+    assert bench["selected"] == [1]
+
+
+async def test_b3_checker_fail_is_fail_checker_failed(bench_cfg):
+    cfg = bench_cfg()
+    res, env = await _run_b3(cfg, _task(), _ScriptedDispatcher("NOT THE ANSWER"))
+    assert res.outcome == Outcome.FAIL and res.reason == CHECKER_FAILED
+    assert res.answer == "NOT THE ANSWER"
+    assert env.episode["outcome"] == "fail"
+    assert env.episode["outcome_reason"] == "checker_failed"
+
+
+async def test_b3_dispatcher_failure_is_error_server_unreachable(bench_cfg):
+    cfg = bench_cfg()
+    res, env = await _run_b3(cfg, _task(), _ScriptedDispatcher(fail=True))
+    assert res.outcome == Outcome.ERROR and res.reason == SERVER_UNREACHABLE
+    assert res.answer is None
+    assert env.episode["outcome"] == "error"
+    assert env.episode["final_answer_ref"] is None
+
+
+async def test_b3_refuses_a_config_with_no_bench_leaf_profile(bench_cfg):
+    cfg = bench_cfg(drop_bench_leaf=True)
+    tl = TraceLogger(cfg.trace.db_path, cfg.trace.blob_root)
+    await tl.start()
+    try:
+        with pytest.raises(ConfigError, match="bench_leaf"):
+            await run_b3(_task(), cfg, dispatcher=_ScriptedDispatcher(), trace=tl,
+                          registry=cfg.prompt_registry(), bench_extra=BENCH_EXTRA)
+    finally:
+        await tl.aclose()
+
+
+async def test_b3_opens_no_episode_when_the_prompt_cannot_be_built(bench_cfg):
+    cfg = bench_cfg(drop_bench_leaf=True)
+    env = _ArmEnv(cfg)
+    with pytest.raises(ConfigError):
+        await env.run(lambda tl: run_b3(
+            _task(), cfg, dispatcher=_ScriptedDispatcher(), trace=tl,
+            registry=cfg.prompt_registry(), bench_extra=BENCH_EXTRA))
+    assert env.episode is None
+
+
+async def test_b3_passes_the_slot_pin_through_when_the_dispatcher_takes_it(bench_cfg):
+    cfg = bench_cfg()
+    disp = _SlotAwareDispatcher("ANSWER")
+    res, env = await _run_b3(cfg, _task(), disp)
+    assert res.outcome == Outcome.SUCCESS
+    assert disp.slot_ids == [1]                # B3's pre-registered pin (slot 1)
+    assert env.episode["config_snapshot"]["bench"]["slot_id_applied"] is True
+
+
+async def test_b3_records_the_slot_pin_as_UNAPPLIED_when_it_is_dropped(bench_cfg):
+    cfg = bench_cfg()
+    res, env = await _run_b3(cfg, _task(), _ScriptedDispatcher(), slot_id=7)
+    assert env.steps[0]["slot_id"] is None
+    bench = env.episode["config_snapshot"]["bench"]
+    assert bench["slot_id"] == 7 and bench["slot_id_applied"] is False
 
 
 # --------------------------------------------------------------------------- #

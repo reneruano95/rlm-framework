@@ -1,7 +1,7 @@
 """§8's baseline arms — the controls RLM is measured against (ARCHITECTURE.md §8).
 
-Three arms live here (B1 now; B3 and B2 land beside it), and they exist so the
-S4 verdict can say what the scaffold is worth **relative to something**:
+Three arms live here (B1 and B3 now; B2 lands beside them), and they exist so
+the S4 verdict can say what the scaffold is worth **relative to something**:
 
   * **B1** — the leaf model, single shot, its full native window. "Does raw long
     context beat the scaffold?"
@@ -63,17 +63,39 @@ otherwise be re-decided after seeing results:
     `error/server_unreachable`, i.e. as a server fault, for what is really an
     arithmetic slip. The loop costs at most three `/tokenize` round trips and
     removes that failure mode.
+
+**B3'S SELECTION RULE IS PRE-REGISTERED (§8), AND DELIBERATELY THE DUMBEST ONE
+THAT IS STILL DETERMINISTIC.** `bm25_select` ranks C2's chunks by BM25 score,
+descending, ties broken to the lower chunk index; then greedily takes chunks in
+that order while the running token sum still fits the 80%-of-slot budget; then
+STOPS at the first chunk that does not fit. It does NOT skip that chunk and try
+the next-best one that might still fit — a skip-and-continue rule is a knob (how
+many chunks does it look past? by what margin?) and every knob is a place S4's
+verdict could have been tuned toward a result after seeing one. Stopping at the
+first miss has no such knob. The consequence is priced in on purpose: a single
+large chunk ranked just above the cutoff can waste budget that several smaller,
+lower-ranked chunks would have filled, and B3 is measured with that inefficiency
+left in rather than optimised away. The record `bm25_select` returns —
+`{"ranked", "selected", "budget_tokens", "fts": True}` — is what makes the rule
+auditable after the fact: `selected` is reconstructable as a prefix-by-fit of
+`ranked` against the same token counts, so a result cannot silently have used a
+smarter rule than the one pre-registered here. `run_b3` writes it into
+`config_snapshot["bench"]` verbatim (§8).
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import duckdb
+
 from rlm import trace as tracemod
 from rlm.budget import BudgetEnforcer
 from rlm.budget import Budgets as BudgetLimits
+from rlm.chunker import ChunkConfig, split
 from rlm.config import Config, PromptRegistry, config_snapshot
 from rlm.context import DOCUMENT_SEPARATOR, load_context
 from rlm.errors import (
@@ -104,8 +126,10 @@ __all__ = [
     "ArmEpisode",
     "ArmResult",
     "bench_slot_capacity",
+    "bm25_select",
     "outcome_for_error",
     "run_b1",
+    "run_b3",
     "truncate_head_tail",
 ]
 
@@ -605,6 +629,193 @@ async def run_b1(task: "Task", cfg: Config, *, dispatcher: Any, trace: Any,
         ep.open_episode(arm_snapshot={"slot_id": slot_id,
                                        "slot_id_applied": ep.can_pin_slot(),
                                        "b1_truncation": truncation},
+                         tokenized_task_len=corpus_tokens)
+        try:
+            answer = await ep.call_leaf(prompt, slot_id=slot_id)
+        except (BudgetBreach, DispatchError) as exc:
+            return ep.close(*outcome_for_error(exc))
+        except BaseException:
+            # Never orphan the row (§6). The exception still propagates: a bug
+            # in an arm must not be scoreable as an ordinary `error` episode.
+            ep.close(Outcome.ERROR, ARM_ERROR)
+            raise
+        return ep.finish(answer)
+    finally:
+        # D21: the trace is durable before the caller reads or exports it. The
+        # TraceLogger itself belongs to the bench run, not to one episode, so it
+        # is drained here and closed there.
+        await trace.drain()
+
+
+# --------------------------------------------------------------------------- #
+# B3 -- deterministic BM25-RAG single shot over C2's chunk windows
+# --------------------------------------------------------------------------- #
+
+
+class _ChunkTokenCounter:
+    """`rlm.episode`'s `_TokenCounter`, copied rather than imported.
+
+    C2's `split()` is synchronous (it imports no LLM client, by the dependency
+    rule §5) while `/tokenize` is an HTTP call, so it runs off-loop on a worker
+    thread and each count is marshalled back onto the calling coroutine's event
+    loop. `arms.py` cannot import `rlm.episode` (the module docstring's "THIS
+    MODULE NEVER IMPORTS C4"), so this is the same three lines a second time
+    rather than a shared helper that would put C4 one import away.
+    """
+
+    def __init__(self, dispatcher: Any, loop: asyncio.AbstractEventLoop) -> None:
+        self._dispatcher = dispatcher
+        self._loop = loop
+
+    def __call__(self, text: str) -> int:
+        if not text:
+            return 0
+        future = asyncio.run_coroutine_threadsafe(
+            self._dispatcher.count_tokens(text, role="leaf"), self._loop)
+        return future.result()
+
+
+def _bm25_rank(chunks: list[str], question: str) -> list[int]:
+    """BM25 rank of `chunks` against `question`, descending score, ties broken
+    to the lower chunk index -- both done IN SQL (`ORDER BY s DESC, id ASC`) so
+    the tie-break is not a second, possibly-different sort in Python.
+
+    One in-memory DuckDB connection PER CALL, per §8's Step 1 pre-flight note:
+    the index is cheap to build fresh (`PRAGMA create_fts_index`, once per leaf
+    call at benchmark corpus sizes) and a shared connection across calls would
+    let one episode's index leak into another's. Chunks with no matching term
+    score NULL and are excluded by `WHERE s IS NOT NULL` -- absent from
+    `ranked` entirely, not merely ranked last, which is what lets a corpus with
+    no lexical overlap to the question select nothing rather than something
+    arbitrary.
+    """
+    if not chunks:
+        return []
+    con = duckdb.connect()
+    try:
+        con.execute("INSTALL fts; LOAD fts")
+        con.execute("CREATE TABLE chunks(id INTEGER, body TEXT)")
+        con.executemany("INSERT INTO chunks VALUES (?, ?)",
+                         list(enumerate(chunks)))
+        con.execute("PRAGMA create_fts_index('chunks', 'id', 'body')")
+        rows = con.execute(
+            "SELECT id, fts_main_chunks.match_bm25(id, ?) AS s "
+            "FROM chunks WHERE s IS NOT NULL ORDER BY s DESC, id ASC",
+            [question]).fetchall()
+    finally:
+        con.close()
+    return [row[0] for row in rows]
+
+
+def bm25_select(chunks: list[str], question: str, *, budget_tokens: int,
+                 token_counts: list[int]) -> tuple[list[int], dict]:
+    """§8's pre-registered B3 selection rule (see the module docstring for the
+    "why no skip-and-continue" ruling): BM25 rank desc / ties to the lower
+    index, greedy-take while the running token sum fits `budget_tokens`, STOP
+    at the first chunk that does not fit.
+
+    Returns `(selected, record)`. `selected` is the chosen chunk indices in
+    ORIGINAL corpus order -- what a caller assembles the prompt from, since a
+    RAG prompt built in rank order would scramble the document's own sequence
+    for no benefit the model could use. `record` is
+    `{"ranked": [...], "selected": [...], "budget_tokens": int, "fts": True}`,
+    exactly what `run_b3` writes into `config_snapshot["bench"]`: `ranked` is
+    every chunk that matched at all, in the order the rule walked them, and
+    `record["selected"]` is the same set `selected` returns (kept equal on
+    purpose, so the snapshot needs no recomputation to show what was actually
+    sent).
+    """
+    if len(chunks) != len(token_counts):
+        raise ValueError(
+            f"bm25_select: {len(chunks)} chunks but {len(token_counts)} "
+            "token_counts -- exactly one count per chunk is required")
+    ranked = _bm25_rank(chunks, question)
+    selected: list[int] = []
+    total = 0
+    for idx in ranked:
+        cost = token_counts[idx]
+        if total + cost > budget_tokens:
+            break  # the pre-registered stop -- no skip-and-continue
+        selected.append(idx)
+        total += cost
+    selected.sort()
+    record = {"ranked": ranked, "selected": list(selected),
+              "budget_tokens": budget_tokens, "fts": True}
+    return selected, record
+
+
+async def _b3_prompt(task: "Task", cfg: Config, *, dispatcher: Any,
+                      registry: PromptRegistry) -> tuple[str, dict, int, list[str]]:
+    """Assemble B3's one prompt: C2's chunker VERBATIM (same config geometry,
+    same snap rule as `rlm/episode.py:~808` -- B2/B3 sharing C2 verbatim is a
+    §8 pre-registration), then `bm25_select`'s greedy pick restored to original
+    order.
+
+    Runs BEFORE the episode row is opened, for the same reason `_b1_prompt`
+    does: a refusal here (no bench profile, an unreadable corpus, an
+    unreachable tokenizer) must not leave a NULL-outcome row for crash
+    recovery to tombstone.
+    """
+    head = registry.render_baseline("b3_single_shot")
+    capacity = bench_slot_capacity(cfg)
+    corpus = load_context(task.context)
+    corpus_tokens = await dispatcher.count_tokens(corpus, role="leaf")
+    loop = asyncio.get_running_loop()
+    counter = _ChunkTokenCounter(dispatcher, loop)
+    chunk_cfg = ChunkConfig(size_tokens=cfg.scaffold.chunk.size_tokens,
+                             overhead_tokens=cfg.scaffold.chunk.overhead_tokens,
+                             snap_to_boundary=cfg.scaffold.chunk.snap_to_boundary,
+                             snap_tolerance=cfg.scaffold.chunk.snap_tolerance,
+                             stride_tokens=cfg.scaffold.chunk.stride_tokens)
+    chunks = await asyncio.to_thread(split, corpus, chunk_cfg, counter)
+    overhead = await dispatcher.count_tokens(head + task.text, role="leaf")
+    # §8's fit budget: 80% of the slot -- RAG's headroom against the retrieved
+    # set overshooting, since (unlike B1) there is no post-hoc verify loop here
+    # -- less the instruction + question, less the room the answer must decode
+    # into, less slack for the separators and the chat template's markup.
+    budget = (int(0.8 * capacity) - overhead
+              - cfg.scaffold.budgets.max_predict.leaf - FIT_SLACK_TOKENS)
+    token_counts = [await dispatcher.count_tokens(c, role="leaf") for c in chunks]
+    selected, record = bm25_select(chunks, task.text, budget_tokens=budget,
+                                    token_counts=token_counts)
+    body = "\n\n".join(chunks[i] for i in selected)
+    prompt = f"{head}\n\n{body}\n\n{task.text}"
+    return prompt, record, corpus_tokens, chunks
+
+
+async def run_b3(task: "Task", cfg: Config, *, dispatcher: Any, trace: Any,
+                  registry: PromptRegistry, bench_extra: dict[str, Any],
+                  slot_id: int = 1, scaffold_instance_id: str = "",
+                  scaffold_git_sha: str = "") -> ArmResult:
+    """§8's B3: deterministic BM25-RAG, one shot, over C2's chunk windows.
+
+    `slot_id` defaults to 1 -- §8's v0.2.6 correction pins B1 to slot 0 and B3
+    to slot 1 of the bench relaunch profile, so the two single-shot arms never
+    land on the same slot of one process (`run_b1`'s docstring has the R13
+    story: two documents, one slot, is R13's smallest reproducing case). It is
+    passed to the dispatcher when the dispatcher can pin, and the snapshot
+    records BOTH the requested slot and whether it was applied, exactly as B1
+    does, for the same reason: an unapplied pin recorded as if it had been
+    would silently void the obligation.
+    """
+    ep = ArmEpisode(task, cfg, dispatcher=dispatcher, trace=trace,
+                     registry=registry, arm="b3", bench_extra=bench_extra,
+                     scaffold_instance_id=scaffold_instance_id,
+                     scaffold_git_sha=scaffold_git_sha)
+    ep.start_clock()
+    try:
+        prompt, record, corpus_tokens, chunks = await _b3_prompt(
+            task, cfg, dispatcher=dispatcher, registry=registry)
+        # R13's detector, indexed against EVERY chunk C2 produced, not just the
+        # ones `bm25_select` kept. Indexing only the selected subset would make
+        # the check vacuous for exactly the same reason B1's full-corpus index
+        # is: an identifier the model produced from an UNSELECTED chunk is a
+        # hit -- text this call never sent -- and that hit is invisible to an
+        # index that only knows what was sent.
+        ep.set_corpus(chunks)
+        ep.open_episode(arm_snapshot={"slot_id": slot_id,
+                                       "slot_id_applied": ep.can_pin_slot(),
+                                       **record},
                          tokenized_task_len=corpus_tokens)
         try:
             answer = await ep.call_leaf(prompt, slot_id=slot_id)
