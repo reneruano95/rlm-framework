@@ -3,6 +3,6 @@
   "text": "Count the records in this register whose Status line reads SEALED. Reply with the integer only, nothing else.",
   "context_path": "../corpora/agg-01.txt",
   "category": "aggregation",
-  "answer": "592",
+  "answer": "541",
   "checker": "int_exact"
 }

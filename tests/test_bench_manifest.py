@@ -91,3 +91,32 @@ def test_a_broken_manifest_is_rejected_rather_than_reported(manifest):
             break
     with pytest.raises(AssertionError, match="not regex-defeating"):
         m2.validate()
+
+
+def test_the_frozen_benchmark_passes_the_preconditions_that_gate_a_freeze(manifest):
+    """§8's preconditions "must pass before freeze". This asserts the STRICT
+    form -- the one that refuses a manifest whose closed-book probe has not been
+    run, or any of whose tasks was answered correctly without its corpus.
+
+    A task answerable from memory does not inflate every arm equally: B1 and B3
+    answer in one call from parametric knowledge while RLM and B2 spend hundreds
+    of leaf calls reading a corpus they did not need, so the benchmark would
+    report the scaffold losing on cost while tying on quality."""
+    manifest.validate(require_closed_book=True)
+    for e in manifest.tasks:
+        cb = e.closed_book or {}
+        assert cb.get("seeds") == 3 and set(cb.get("models", [])) == {"root", "leaf"}
+        assert cb.get("passed_without_corpus") == 0
+
+
+def test_config_pins_the_frozen_version(manifest):
+    """config.yaml's `benchmark.version` names this manifest; S4's
+    config_snapshot records it, so an episode can be traced back to the exact
+    task set it was scored against."""
+    from pathlib import Path
+    import yaml
+    cfg = yaml.safe_load((REPO / "config.yaml").read_text(encoding="utf-8"))
+    assert str(cfg["benchmark"]["version"]) == manifest.benchmark_version
+    assert manifest.token_counter.startswith("leaf:"), (
+        "a frozen benchmark must be counted with the real tokenizer; the "
+        "offline proxy is vocabulary-specific and this vocabulary is new")

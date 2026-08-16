@@ -3,6 +3,6 @@
   "text": "A record is WITHHELD when custody passed TO the organisation named in that record's own header, and RELEASED when custody passed FROM it. Count the WITHHELD records. Reply with the integer only, nothing else.",
   "context_path": "../corpora/agg-05.txt",
   "category": "aggregation",
-  "answer": "660",
+  "answer": "600",
   "checker": "int_exact"
 }

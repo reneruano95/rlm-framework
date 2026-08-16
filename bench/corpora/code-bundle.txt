@@ -1,4 +1,4 @@
-REPOSITORY rlm-halo-framework AT COMMIT 2e07884069b2ad99ff2e76a4fb9713ee7bd3d709
+REPOSITORY rlm-halo-framework AT COMMIT 45597d43ec7c5824ca137ffe7b1ff863e3529029
 
 === FILE: rlm/bridge.py ===
 """The C1/C4 bridge: the single channel between the scaffold and the

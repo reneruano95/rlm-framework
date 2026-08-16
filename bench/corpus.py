@@ -215,17 +215,36 @@ def build(seed: int, target_tokens: int,
     labels: list[Label] = []
     sealed = 0
     idx = 0
-    while True:
+    running = 0
+    # Counted INCREMENTALLY: count each new record, keep a running sum, and
+    # reconcile once at the end. Re-counting the whole accumulated text every
+    # iteration is O(n^2) in both calls and bytes -- against the real leaf
+    # tokenizer that is ~1,500 HTTP round trips per corpus, each shipping up to
+    # half a megabyte, which is the difference between a build that takes a
+    # minute and one that takes an hour.
+    #
+    # A running sum can drift from the true count by tokenizer boundary
+    # effects, so the exact count is taken once below and whole records are
+    # dropped until it fits. Dropping RECORDS rather than trimming text is what
+    # keeps the corpus and the ANSWER consistent: the ground truth is derived
+    # from the records that survive, not from the ones that were generated.
+    while running < target_tokens:
         label: Label = "withheld" if rng.random() < 0.45 else "released"
-        rec = _record(rng, idx, label)
-        candidate = "".join(parts) + "\n" + rec
-        if count(candidate) > target_tokens:
+        rec = "\n" + _record(rng, idx, label)
+        n = count(rec)
+        if running + n > target_tokens:
             break
-        parts.append("\n" + rec)
+        parts.append(rec)
         labels.append(label)
         sealed += "Status: SEALED" in rec
+        running += n
         idx += 1
     text = "".join(parts).lstrip("\n")
+    while parts and count(text) > target_tokens:
+        dropped = parts.pop()
+        labels.pop()
+        sealed -= "Status: SEALED" in dropped
+        text = "".join(parts).lstrip("\n")
     return AggregationCorpus(
         text=text, n_records=len(labels), sealed_count=sealed,
         withheld_count=sum(1 for x in labels if x == "withheld"),
@@ -352,9 +371,12 @@ def build_needle(seed: int, target_tokens: int,
 
     parts: list[str] = []
     idx = 0
-    while count("".join(parts)) < target_tokens:
+    running = 0
+    while running < target_tokens:          # incremental -- see build()
         label: Label = "withheld" if rng.random() < 0.45 else "released"
-        parts.append("\n" + _record(rng, 200000 + idx, label))
+        rec = "\n" + _record(rng, 200000 + idx, label)
+        running += count(rec)
+        parts.append(rec)
         idx += 1
     body = "".join(parts)
     cut = int(len(body) * position)
@@ -405,9 +427,12 @@ def build_synthesis(seed: int, n_docs: int, tokens_per_doc: int,
     for d in range(n_docs):
         parts = [f"REGISTER {d + 1} of {n_docs}\n"]
         idx = 0
-        while count("".join(parts)) < tokens_per_doc:
+        running = 0
+        while running < tokens_per_doc:     # incremental -- see build()
             label: Label = "withheld" if rng.random() < 0.45 else "released"
-            parts.append("\n" + _record(rng, 300000 + d * 10000 + idx, label))
+            rec = "\n" + _record(rng, 300000 + d * 10000 + idx, label)
+            running += count(rec)
+            parts.append(rec)
             idx += 1
         # The shared organisation appears once per document, at a varying depth,
         # so it cannot be found by position.

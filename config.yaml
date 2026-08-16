@@ -360,5 +360,16 @@ trace:
   blob_root: traces/blobs
   export_every_episode: true
 
-benchmark: { version: null, seeds: [1, 2, 3] }
+# FROZEN 2026-08-15 (§8: "Frozen and versioned at the end of S2"). `version`
+# names `bench/manifest.json`, whose own sha256 is the freeze hash — one number
+# that moves if any task, corpus hash, checker or precondition result changes:
+#   571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91
+# Built with the REAL leaf tokenizer (`leaf:/tokenize`), not the offline
+# 4-chars-per-token proxy: the proxy is vocabulary-specific and this vocabulary
+# is new, so an approx-counted build is a draft and is versioned "v1-draft".
+# Both §8 preconditions that gate the freeze have passed: the closed-book probe
+# (30 tasks x 2 models x 3 seeds, 0/6 everywhere — no task is answerable without
+# its corpus) and the checker near-miss suites (>=3 per checker, in
+# rlm/checkers.py beside the implementations).
+benchmark: { version: v1, seeds: [1, 2, 3] }
 power_sampling: { enabled: false }
