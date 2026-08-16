@@ -29,6 +29,10 @@ ISOLATED = [
     # "programmatically verifiable".
     "checkers.py",
     "stats.py",
+    # The Windows RAPL power sampler + one-shot pkg-temp reader (S0 item 8).
+    # It shells out to `powershell`/`Get-Counter`, never to a model server, so
+    # it stays importable by the trace/analysis side without an HTTP client.
+    "power.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
