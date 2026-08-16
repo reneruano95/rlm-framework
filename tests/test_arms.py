@@ -8,6 +8,7 @@ rather than a second, prettier implementation of them.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import hashlib
 from pathlib import Path
@@ -22,7 +23,9 @@ from rlm.arms import (
     CHECKER_FAILED,
     NO_ANSWER,
     NO_SUMMARY,
+    ROTATION_FAILED,
     SERVER_UNREACHABLE,
+    SLOT_POOL_EXHAUSTED,
     ArmEpisode,
     ArmResult,
     b2_summary_n_predict,
@@ -36,7 +39,15 @@ from rlm.arms import (
 )
 from rlm.config import Config
 from rlm.episode import Task
-from rlm.errors import BudgetBreach, ConfigError, DispatchError, Outcome
+from rlm.errors import (
+    BudgetBreach,
+    ConfigError,
+    DispatchError,
+    Outcome,
+    ServerRotationError,
+    SlotPoolExhausted,
+    StepStatus,
+)
 from rlm.trace import TraceLogger
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1200,3 +1211,308 @@ async def test_b2_records_the_scaffold_provenance_columns(bench_cfg, fake_root_s
                                scaffold_instance_id="4242", scaffold_git_sha="deadbeef")
     assert env.episode["scaffold_instance_id"] == "4242"
     assert env.episode["scaffold_git_sha"] == "deadbeef"
+
+
+# --------------------------------------------------------------------------- #
+# Rotation (spec §5 C4, this task's second addition) -- B2's map can drain the
+# leaf's never-reuse slot pool (`--parallel` 128 against ~300 aggregation
+# windows), and without a rotation every such task would end `error` for a
+# reason that has nothing to do with the task -- a manufactured §8
+# contamination-class loss. B1/B3 make one call each and never exercise this
+# path (their `process_manager` stays unset).
+# --------------------------------------------------------------------------- #
+
+
+def test_rotation_vocab_matches_the_episode_runner():
+    """DUPLICATED FROM `rlm/episode.py` ON PURPOSE (the module docstring's
+    "THIS MODULE NEVER IMPORTS C4") -- pinned equal so the vocabulary cannot
+    drift in silence, the same discipline `test_reason_constants_match_the_
+    episode_runner` already applies to `CHECKER_FAILED`/`SERVER_UNREACHABLE`."""
+    assert SLOT_POOL_EXHAUSTED == episodemod.SLOT_POOL_EXHAUSTED
+    assert ROTATION_FAILED == episodemod.ROTATION_FAILED
+
+
+def test_outcome_for_error_maps_slot_pool_exhausted_and_rotation_failed():
+    assert outcome_for_error(SlotPoolExhausted("x")) == (
+        Outcome.ERROR, SLOT_POOL_EXHAUSTED)
+    assert outcome_for_error(ServerRotationError("x")) == (
+        Outcome.ERROR, ROTATION_FAILED)
+
+
+class _RotatingDispatcher(_PerChunkDispatcher):
+    """A `_PerChunkDispatcher` whose GLOBAL `call_count`-th `.query()`
+    invocation raises `SlotPoolExhausted` (`exhaust_at`) or a plain
+    `DispatchError` (`error_at`) instead of dispatching, and whose rotation
+    surface (`rotating()`, `rotate_pool()`, `restart_required`,
+    `pool_error_drained`) is close enough to `LLMDispatcher`'s to drive
+    `ArmEpisode._rotate_leaf` for real -- retry_idx continuation included:
+    `_new_step`'s contract is that a re-dispatched call_id gets the NEXT
+    retry_idx, not 0 again (`rlm/dispatcher.py:_retry_base`), and
+    `MockDispatcher.query` always writes 0, so this patches the successful
+    retry's step the way the real dispatcher's `_retry_base` would have
+    produced it -- getting this wrong would make `log_call`'s
+    `(call_id, retry_idx)` idempotency key silently drop the answering
+    attempt as a "duplicate" of the exhausted one.
+    """
+
+    def __init__(self, reply_for=None, *, exhaust_at: int | None = None,
+                 error_at: int | None = None, error_drained: bool = False) -> None:
+        super().__init__(reply_for)
+        self.exhaust_at = exhaust_at
+        self.error_at = error_at
+        self.error_drained_flag = error_drained
+        self.call_count = 0
+        self.rotate_pool_calls = 0
+        self.rotating_calls = 0
+        self.restart_required = False
+        self.pool_error_drained = False
+
+    async def query(self, prompt: str, *, role: str, call_id: str,
+                     chunk: str | None = None) -> str:
+        from rlm.dispatcher import _new_step
+
+        self.call_count += 1
+        retry_idx = len([s for s in self._inner.steps if s.get("call_id") == call_id])
+        if self.error_at is not None and self.call_count == self.error_at:
+            step = _new_step(call_id, retry_idx, role)
+            step["status"] = StepStatus.ERROR
+            step["error_detail"] = "server fault (test)"
+            self._inner.steps.append(step)
+            raise DispatchError("server fault (test)")
+        if self.exhaust_at is not None and self.call_count == self.exhaust_at:
+            step = _new_step(call_id, retry_idx, role)
+            step["status"] = StepStatus.ERROR
+            step["error_detail"] = "leaf slot pool exhausted (test)"
+            self._inner.steps.append(step)
+            self.restart_required = True
+            self.pool_error_drained = self.error_drained_flag
+            raise SlotPoolExhausted("leaf slot pool exhausted (test)")
+        answer = await super().query(prompt, role=role, call_id=call_id, chunk=chunk)
+        self._inner.steps[-1]["retry_idx"] = retry_idx
+        self.restart_required = False
+        return answer
+
+    def rotating(self):
+        self.rotating_calls += 1
+        return self._rotating_cm()
+
+    @contextlib.asynccontextmanager
+    async def _rotating_cm(self):
+        yield
+
+    def rotate_pool(self) -> None:
+        self.rotate_pool_calls += 1
+        self.restart_required = False
+
+
+class _FakeProcessManager:
+    """The `rlm.serverproc.ProcessManager` duck type: one method,
+    `.restart()`. `fail=True` makes it raise `ServerRotationError`, the same
+    exception a real `LlamaServerProcess.restart()` raises when the
+    replacement never comes up."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.restart_calls = 0
+        self.fail = fail
+
+    async def restart(self) -> None:
+        self.restart_calls += 1
+        if self.fail:
+            raise ServerRotationError("could not restart (test)")
+
+
+# -- ArmEpisode.call_leaf: the rotation mechanics, isolated from run_b2 ------ #
+
+
+async def test_call_leaf_rotates_once_on_slot_pool_exhausted_with_a_process_manager(
+        bench_cfg):
+    cfg = bench_cfg()
+    disp = _RotatingDispatcher(exhaust_at=1)
+    pm = _FakeProcessManager()
+    env = _ArmEnv(cfg)
+    holder: dict = {}
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=disp, trace=tl,
+                         registry=cfg.prompt_registry(), arm="b2",
+                         bench_extra=BENCH_EXTRA, process_manager=pm)
+        holder["ep"] = ep
+        ep.start_clock()
+        ep.open_episode()
+        answer = await ep.call_leaf("q1")
+        return ep.close(Outcome.SUCCESS, None, answer=answer)
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.SUCCESS and res.answer == "SUMMARY"
+    ep = holder["ep"]
+    assert ep.rotations == 1
+    assert pm.restart_calls == 1
+    assert disp.rotate_pool_calls == 1 and disp.rotating_calls == 1
+
+    assert len(env.steps) == 2                # the exhausted attempt + the retry
+    assert env.steps[0]["status"] == "error"
+    assert env.steps[0]["server_rotation"] == 1   # stamped on the TRIGGERING attempt
+    assert env.steps[1]["status"] == "ok"
+    assert env.steps[1]["server_rotation"] is None
+    assert env.steps[0]["call_id"] == env.steps[1]["call_id"]      # same logical call
+
+
+async def test_call_leaf_without_a_process_manager_slot_pool_exhaustion_is_clean(
+        bench_cfg):
+    cfg = bench_cfg()
+    disp = _RotatingDispatcher(exhaust_at=1)
+    env = _ArmEnv(cfg)
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=disp, trace=tl,
+                         registry=cfg.prompt_registry(), arm="b2",
+                         bench_extra=BENCH_EXTRA)     # no process_manager
+        ep.start_clock()
+        ep.open_episode()
+        try:
+            await ep.call_leaf("q1")
+        except SlotPoolExhausted as exc:
+            return ep.close(*outcome_for_error(exc))
+        raise AssertionError("expected SlotPoolExhausted")
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.ERROR and res.reason == SLOT_POOL_EXHAUSTED
+    assert disp.rotating_calls == 0 and disp.rotate_pool_calls == 0
+    # the exhausted attempt is still on the trace -- a refusal still happened
+    assert len(env.steps) == 1 and env.steps[0]["status"] == "error"
+
+
+async def test_call_leaf_rotation_refused_when_the_pool_is_error_drained(bench_cfg):
+    """§5 C4: a generation that answered NOTHING is a FAILED server wearing
+    pool exhaustion's exception, not a healthy one that ran out of windows --
+    never restarted, regardless of an injected `process_manager`."""
+    cfg = bench_cfg()
+    disp = _RotatingDispatcher(exhaust_at=1, error_drained=True)
+    pm = _FakeProcessManager()
+    env = _ArmEnv(cfg)
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=disp, trace=tl,
+                         registry=cfg.prompt_registry(), arm="b2",
+                         bench_extra=BENCH_EXTRA, process_manager=pm)
+        ep.start_clock()
+        ep.open_episode()
+        try:
+            await ep.call_leaf("q1")
+        except SlotPoolExhausted as exc:
+            return ep.close(*outcome_for_error(exc))
+        raise AssertionError("expected SlotPoolExhausted")
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.ERROR and res.reason == SLOT_POOL_EXHAUSTED
+    assert pm.restart_calls == 0        # never attempted -- the pool is error-drained
+
+
+async def test_call_leaf_never_rotates_on_a_non_exhaustion_dispatch_error(bench_cfg):
+    """§5's rule, checked directly: rotation fires ONLY on `SlotPoolExhausted`,
+    never on a plain `DispatchError` -- a FAILED server is never restarted."""
+    cfg = bench_cfg()
+    disp = _RotatingDispatcher(error_at=1)
+    pm = _FakeProcessManager()
+    env = _ArmEnv(cfg)
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=disp, trace=tl,
+                         registry=cfg.prompt_registry(), arm="b2",
+                         bench_extra=BENCH_EXTRA, process_manager=pm)
+        ep.start_clock()
+        ep.open_episode()
+        try:
+            await ep.call_leaf("q1")
+        except DispatchError as exc:
+            return ep.close(*outcome_for_error(exc))
+        raise AssertionError("expected a plain DispatchError")
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.ERROR and res.reason == SERVER_UNREACHABLE
+    assert pm.restart_calls == 0
+    assert disp.rotating_calls == 0 and disp.rotate_pool_calls == 0
+
+
+async def test_call_leaf_rotation_failure_is_a_dedicated_outcome_reason(bench_cfg):
+    cfg = bench_cfg()
+    disp = _RotatingDispatcher(exhaust_at=1)
+    pm = _FakeProcessManager(fail=True)
+    env = _ArmEnv(cfg)
+
+    async def factory(tl):
+        ep = ArmEpisode(_task(), cfg, dispatcher=disp, trace=tl,
+                         registry=cfg.prompt_registry(), arm="b2",
+                         bench_extra=BENCH_EXTRA, process_manager=pm)
+        ep.start_clock()
+        ep.open_episode()
+        try:
+            await ep.call_leaf("q1")
+        except ServerRotationError as exc:
+            return ep.close(*outcome_for_error(exc))
+        raise AssertionError("expected ServerRotationError")
+
+    res = await env.run(factory)
+    assert res.outcome == Outcome.ERROR and res.reason == ROTATION_FAILED
+    assert pm.restart_calls == 1
+    assert disp.rotating_calls == 1     # the gate WAS closed
+    assert disp.rotate_pool_calls == 0  # never reached -- restart failed first
+
+
+# -- run_b2: the end-to-end aggregation-corpus scenario this task exists for  #
+
+
+async def test_b2_completes_an_episode_that_needed_a_rotation(
+        bench_cfg, fake_root_server, b2_root_client):
+    """The controller's repro, at B2's own (3-chunk) scale: the SECOND leaf
+    dispatch exhausts a pool that can only ever hold one call at a time, a
+    `process_manager` is injected, and the map must still finish -- all three
+    chunks summarized, the reduce still runs, the rotation still recorded."""
+    cfg = _b2_cfg(bench_cfg)
+    disp = _RotatingDispatcher(_reply_by_marker, exhaust_at=2)
+    pm = _FakeProcessManager()
+    fake_root_server.script = ["FINAL"]
+
+    res, env = await _run_b2(cfg, _b2_task(), disp, b2_root_client,
+                              process_manager=pm)
+
+    assert res.outcome == Outcome.SUCCESS and res.answer == "FINAL"
+    assert pm.restart_calls == 1
+    assert disp.rotating_calls == 1 and disp.rotate_pool_calls == 1
+
+    root_prompt = fake_root_server.last_completion_prompt
+    assert "SUMMARY-A" in root_prompt
+    assert "SUMMARY-B" in root_prompt      # the chunk whose call got rotated
+    assert "SUMMARY-C" in root_prompt
+
+    leaf_steps = [s for s in env.steps if s["actor"] == "leaf"]
+    root_steps = [s for s in env.steps if s["actor"] == "root"]
+    assert len(leaf_steps) == 4            # 3 chunks, one retried once
+    assert len(root_steps) == 1
+    statuses = [s["status"] for s in leaf_steps]
+    assert statuses.count("error") == 1 and statuses.count("ok") == 3
+    rotated = [s for s in leaf_steps if s["server_rotation"] is not None]
+    assert len(rotated) == 1
+    assert rotated[0]["server_rotation"] == 1 and rotated[0]["status"] == "error"
+
+    snap = env.episode["config_snapshot"]
+    assert snap["bench"]["arm"] == "b2"
+    assert snap["bench"]["n_chunks"] == 3
+
+
+async def test_b2_without_a_process_manager_closes_as_error_on_slot_pool_exhaustion(
+        bench_cfg, fake_root_server, b2_root_client):
+    """The honest degraded mode: no `process_manager` injected, so the same
+    exhaustion that test (a) rotates through here ends the episode cleanly."""
+    cfg = _b2_cfg(bench_cfg)
+    disp = _RotatingDispatcher(_reply_by_marker, exhaust_at=2)
+    fake_root_server.script = ["FINAL"]
+
+    res, env = await _run_b2(cfg, _b2_task(), disp, b2_root_client)
+
+    assert res.outcome == Outcome.ERROR and res.reason == SLOT_POOL_EXHAUSTED
+    assert env.episode["outcome"] == "error"
+    assert env.episode["outcome_reason"] == "slot_pool_exhausted"
+    # chunk A answered before the exhaustion; the reduce step never ran
+    assert all(s["actor"] == "leaf" for s in env.steps)
+    assert [s["status"] for s in env.steps] == ["ok", "error"]

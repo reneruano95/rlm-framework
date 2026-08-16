@@ -20,6 +20,8 @@ semantics:
     answer + checker fail      -> fail / checker_failed
     wall-clock breach          -> budget_kill / wall_clock
     dispatcher/server failure  -> error / server_unreachable
+    leaf slot pool exhausted   -> error / slot_pool_exhausted  (B2, see below)
+    a rotation could not run   -> error / rotation_failed      (B2, see below)
 
 **THE STEPS COME FROM C4, NOT FROM HERE.** Every model call is routed through
 the injected dispatcher, so the R13 leak columns, the retry attempts and the
@@ -27,6 +29,25 @@ timing/token fields are recorded by the one component that measures them. This
 module only copies C4's attempt dicts onto trace rows (the pattern
 `rlm/episode.py:720-757` owns), which is why an arm's steps are comparable with
 the RLM arm's rather than merely similar to them.
+
+**B2'S MAP CAN DRAIN THE LEAF'S NEVER-REUSE SLOT POOL, AND ROTATES.** R13's
+mitigation gives every window one never-reused slot, sized to `--parallel`
+(128 on the measured config); a §8 aggregation corpus needs ~300 of them, so
+without a rotation `SlotPoolExhausted` would end every such task `error`
+partway through the map -- a manufactured contamination-class loss, not a
+finding about the task. `ArmEpisode` therefore accepts an optional
+`process_manager` (the `rlm.serverproc.ProcessManager` duck type: one method,
+`.restart()`) and `call_leaf` rotates through it on `SlotPoolExhausted` ONLY
+(§5 C4: a FAILED server is never restarted, only a HEALTHY one whose pool
+served its `--parallel` windows), mirroring `rlm/episode.py::_rotate_leaf`'s
+quiesce -> restart -> `rotate_pool()` -> resume sequence with one guarantee
+deliberately narrowed and documented (`ArmEpisode._rotate_leaf`'s docstring):
+this module cannot re-run §4's `/props` handshake against the restarted
+process, because it cannot talk HTTP at all (`FORBIDDEN_ROOTS` in
+`tests/test_import_rules.py`), not merely `rlm.dispatcher`. `None` (no
+`process_manager` injected) is today's behaviour, unchanged: a clean
+`error/slot_pool_exhausted`, never a crash. B1/B3 never pass one -- their one
+call each cannot exhaust a pool sized >= 1.
 
 **KILL GRANULARITY IS ONE MODEL CALL.** C5's wall clock is checked immediately
 before and immediately after each dispatch, and nowhere else. The RLM arm needs
@@ -107,6 +128,8 @@ from rlm.errors import (
     ConfigError,
     DispatchError,
     Outcome,
+    ServerRotationError,
+    SlotPoolExhausted,
     StepStatus,
 )
 
@@ -124,7 +147,9 @@ __all__ = [
     "MAX_FIT_VERIFY_ROUNDS",
     "NO_ANSWER",
     "NO_SUMMARY",
+    "ROTATION_FAILED",
     "SERVER_UNREACHABLE",
+    "SLOT_POOL_EXHAUSTED",
     "SNAPSHOT_KEYS",
     "ArmEpisode",
     "ArmResult",
@@ -162,6 +187,17 @@ ARM_ERROR = "arm_error"
 #: summary, and never silently drop the chunk from the numbered list either —
 #: the root still sees a slot for it, just one that says nothing was there.
 NO_SUMMARY = "[no summary]"
+
+#: `rlm/episode.py`'s rotation vocabulary, DUPLICATED here for the same
+#: reason `CHECKER_FAILED`/`SERVER_UNREACHABLE` are (importing `rlm.episode`
+#: would drag C4 in) — `SLOT_POOL_EXHAUSTED` fires when a leaf's never-reuse
+#: slot pool ran out and either no `process_manager` was injected or the pool
+#: was error-drained (not a healthy pool that simply served its `--parallel`
+#: windows, spec §5 C4 — see `ArmEpisode._rotate_leaf`); `ROTATION_FAILED`
+#: fires when a `process_manager.restart()` that WAS attempted could not
+#: complete. `tests/test_arms.py` pins both against `rlm.episode`'s.
+SLOT_POOL_EXHAUSTED = "slot_pool_exhausted"
+ROTATION_FAILED = "rotation_failed"
 
 #: Slack between the fitted prompt and the slot's true capacity, in tokens. It
 #: absorbs the two separators this module inserts and the chat template's markup,
@@ -271,11 +307,22 @@ def outcome_for_error(exc: BaseException) -> tuple[Outcome, str]:
 
     A `BudgetBreach` already carries the outcome C5 decided, and it wins as-is:
     an arm killed for `wall_clock` whose dispatcher then reports a failure is
-    `budget_kill`, not `error`. Everything from C4 is `error/server_unreachable`
-    — a baseline arm has no route around a leaf that will not answer.
+    `budget_kill`, not `error`. `SlotPoolExhausted` (checked BEFORE the generic
+    `DispatchError` branch below, since it is a subclass of it) is B2's honest
+    degraded mode when a rotation could not run or was refused — see
+    `ArmEpisode._rotate_leaf`'s docstring — and it is deliberately not lumped
+    into `server_unreachable`: the leaf never failed to answer, the pool simply
+    had nothing left to hand out. `ServerRotationError` is a rotation that WAS
+    attempted (a `process_manager` was injected) and could not complete.
+    Everything else from C4 is `error/server_unreachable` — a baseline arm has
+    no route around a leaf that will not answer.
     """
     if isinstance(exc, BudgetBreach):
         return exc.outcome, exc.reason
+    if isinstance(exc, SlotPoolExhausted):
+        return Outcome.ERROR, SLOT_POOL_EXHAUSTED
+    if isinstance(exc, ServerRotationError):
+        return Outcome.ERROR, ROTATION_FAILED
     if isinstance(exc, DispatchError):
         return Outcome.ERROR, SERVER_UNREACHABLE
     return Outcome.ERROR, ARM_ERROR
@@ -358,7 +405,8 @@ class ArmEpisode:
                  trace: Any, registry: PromptRegistry, arm: str,
                  bench_extra: dict[str, Any] | None,
                  scaffold_instance_id: str = "",
-                 scaffold_git_sha: str = "") -> None:
+                 scaffold_git_sha: str = "",
+                 process_manager: Any = None) -> None:
         self.task = task
         self.cfg = cfg
         self.dispatcher = dispatcher
@@ -366,6 +414,23 @@ class ArmEpisode:
         self.registry = registry
         self.arm = arm
         self.bench_extra = dict(bench_extra or {})
+        # §5 C4's rotation (v0.2.6), B2's leaf topology only: the object that
+        # owns the leaf PROCESS (`rlm.serverproc.ProcessManager`'s duck type —
+        # one method, `.restart()`), never constructed here (arms.py may not
+        # start or stop processes any more than it may talk HTTP). `None` is
+        # "current behaviour" -- `SlotPoolExhausted` propagates unrotated, the
+        # honest degraded mode `outcome_for_error` maps cleanly (see
+        # `_rotate_leaf`'s docstring). B1/B3 never pass one: their one call
+        # each cannot exhaust a pool sized >= 1.
+        self.process_manager = process_manager
+        #: How many rotations THIS episode has completed. In-memory only —
+        #: unlike `rlm/episode.py`, no `config_snapshot` field carries this
+        #: (episode.py itself has none either; `steps.server_rotation`,
+        #: stamped by `_rotate_leaf`, is the durable record). Exposed for
+        #: tests and for a caller that wants a fast total without scanning
+        #: steps.
+        self.rotations = 0
+        self._rotation_lock = asyncio.Lock()
         # §6's provenance columns, PASSED IN rather than computed here: `rlm
         # run` already owns both answers (`cli.py:529` -- the pid of the process
         # that ran the episode, and the sha of the tree it ran from), and a
@@ -576,16 +641,23 @@ class ArmEpisode:
         `max_subcalls` AND `max_total_tokens` exactly as the RLM arm's leaf
         sub-calls are (`rlm/episode.py`'s `_EpisodeRun._on_llm_query`/
         `_settle`, mirrored here rather than imported — the dependency rule).
-        B1/B3 never
-        pass it: their ONE call per episode is already bounded by the
-        bench_leaf relaunch profile's single-slot capacity, so admitting it
-        besides would only duplicate that check with a different one.
+        B1/B3 never pass it: their ONE call per episode is already bounded by
+        the bench_leaf relaunch profile's single-slot capacity, so admitting
+        it besides would only duplicate that check with a different one.
 
         A `BudgetBreach` from `.admit()` is raised BEFORE any dispatch and
         BEFORE any reservation is recorded (`BudgetEnforcer.admit` never
         partially reserves — see its docstring) — nothing was sent, so
         (matching `rlm/episode.py`'s own admission path) nothing is logged as
         a step; the breach itself is the episode's outcome.
+
+        The dispatch itself goes through `_dispatch_leaf`, which rotates the
+        leaf server on `SlotPoolExhausted` when a `process_manager` was
+        injected (see its docstring) — B2's obligation (this task's second
+        addition): B2's ~300-window map would otherwise hit
+        `SlotPoolExhausted` at window `--parallel` (128) and every aggregation
+        task would end `error` for a reason that has nothing to do with the
+        task, a manufactured §8 contamination-class loss.
         """
         self.check_wall_clock()
         call_id = str(uuid.uuid4())
@@ -596,7 +668,7 @@ class ArmEpisode:
         if slot_id is not None and self.can_pin_slot():
             kwargs["slot_id"] = slot_id
         try:
-            raw = await self.dispatcher.query(prompt, **kwargs)
+            raw = await self._dispatch_leaf(prompt, call_id, kwargs)
         except BaseException:
             if reservation is not None:
                 self._settle_admission(reservation, call_id)
@@ -608,6 +680,112 @@ class ArmEpisode:
         self.log_call(call_id, prompt, answer=answer, parent=parent)
         self.check_wall_clock()
         return answer
+
+    async def _dispatch_leaf(self, prompt: str, call_id: str,
+                              kwargs: dict[str, Any]) -> Any:
+        """One `dispatcher.query()`, rotating the leaf server ONCE on
+        `SlotPoolExhausted` when a `process_manager` was injected — spec §5
+        C4's rotation, scoped to what `arms.py` can reach (see
+        `_rotate_leaf`'s docstring for the one guarantee this narrows
+        relative to `rlm/episode.py`'s `_dispatch_leaf`, which this mirrors).
+
+        FIRES ONLY ON EXHAUSTION, NEVER ON ANY OTHER `DispatchError` (§5's
+        rule: a server that FAILED is never restarted — that would mask the
+        fault the trace exists to record — only a HEALTHY one whose pool ran
+        out is a resource-lifecycle operation). `pool_error_drained` (when the
+        dispatcher exposes it, matching `LLMDispatcher`) distinguishes the two
+        shapes of exhaustion the same way `rlm/episode.py:586` does: a
+        generation that answered NOTHING is a failed server wearing pool
+        exhaustion's exception, not a healthy one that ran out of windows.
+
+        Retries the SAME `call_id` ONCE after a successful rotation — B2's
+        map is serial, so (unlike `rlm/episode.py`'s up-to-
+        `MAX_ROTATIONS_PER_CALL` loop, sized for concurrent callers racing the
+        same pool) one rotation is always enough to make forward progress on
+        one call; a second exhaustion immediately against a freshly rotated,
+        still-virgin pool would be a distinct bug, not something to loop on.
+        """
+        try:
+            return await self.dispatcher.query(prompt, **kwargs)
+        except SlotPoolExhausted:
+            if self.process_manager is None:
+                # Nobody owns the leaf process (launched outside `rlm run
+                # bench`, or a caller that simply chose not to inject one) --
+                # there is nothing to rotate. The refusal propagates
+                # unchanged; `outcome_for_error` maps it to a clean
+                # `error/slot_pool_exhausted`, never a crash and never a
+                # silent wrap onto a slot that has held another document.
+                raise
+            if getattr(self.dispatcher, "pool_error_drained", False):
+                raise
+            await self._rotate_leaf(call_id)
+            return await self.dispatcher.query(prompt, **kwargs)
+
+    async def _rotate_leaf(self, call_id: str) -> None:
+        """Replace the healthy leaf process and resume on a virgin pool --
+        `rlm/episode.py::_rotate_leaf`'s sequence, mirrored: quiesce C4
+        (`dispatcher.rotating()`, quiesce -> resume with the reopen in a
+        `finally` INSIDE C4) -> `process_manager.restart()` -> `rotate_pool()`
+        (a new process means a new pool) -> resume. Serialized on
+        `_rotation_lock` for the same reason episode.py's is: a second caller
+        that queued behind the first finds the pool already refilled and
+        returns without rotating again (moot for B2 today, whose map is
+        serial and therefore never has two calls racing this method, but
+        `call_leaf` is shared plumbing and the lock costs nothing idle).
+
+        ONE GUARANTEE THIS NARROWS, DELIBERATELY, DOCUMENTED RATHER THAN LEFT
+        TO BE DISCOVERED: `rlm/episode.py` re-runs §4's `/props` handshake
+        against the freshly restarted process (`_rehandshake_leaf`,
+        `assert_props` — total_slots/n_ctx/build_info re-checked against
+        config) as an EXTRA, independent verification that the replacement
+        really is what config describes. `arms.py` cannot do that: it is one
+        of the ISOLATED modules `tests/test_import_rules.py` forbids from
+        importing an HTTP client AT ALL (`FORBIDDEN_ROOTS` blocks `httpx`
+        *and* the stdlib `http`/`socket`, not merely `rlm.dispatcher`) — there
+        is no way to GET `/props` from inside this module, so re-running the
+        handshake here the way `_rehandshake_leaf` does is not "not imported
+        for tidiness", it is architecturally unreachable. Two things still
+        stand in for it, both weaker than a pre-emptive `/props` check but
+        not nothing: `ProcessManager.restart()`'s OWN contract already
+        promises "a fresh process of the SAME CONFIGURATION ... returning
+        only once it answers /health" (`rlm/serverproc.py`'s `ProcessManager`
+        Protocol), and C4's per-target prefix-hash check
+        (`LLMDispatcher._query_once`) fires automatically on the very next
+        call if the restarted process renders a different system head, so a
+        template/config drift is still CAUGHT, one call later, as
+        `PrefixDrift`, just not pre-emptively. A caller that wants the full
+        §4 re-validation composes it into its own `process_manager` (e.g. a
+        `.restart()` that also calls `rlm.episode.handshake` before
+        returning) — `arms.py` only ever calls the one method the
+        `ProcessManager` Protocol already promises.
+
+        Stamps `steps.server_rotation` on the triggering (exhausted) attempt,
+        the SAME mechanism `rlm/episode.py:683-696` (`_stamp_rotation`) uses:
+        `self.dispatcher.steps` is a plain public list of dicts — the one
+        `log_call` already reads — so mutating the last recorded attempt for
+        `call_id` in place needs no C4 import, only data C4 already exposes.
+        Also counted in `self.rotations` (in-memory; `episode.py` keeps no
+        `config_snapshot` field for this either, only the per-step column and
+        a lifecycle-log event this module has no lifecycle log to write to).
+        """
+        async with self._rotation_lock:
+            if not getattr(self.dispatcher, "restart_required", True):
+                return    # someone else already rotated while this queued
+            # `process_manager.restart()` raising `ServerRotationError` (or
+            # anything else, including cancellation) propagates UNCHANGED --
+            # `dispatcher.rotating()`'s own `finally` still reopens the gate
+            # (its docstring: parked calls must take a refusal, never hang),
+            # and the caller's `outcome_for_error` maps `ServerRotationError`
+            # to a dedicated `error/rotation_failed` rather than the generic
+            # `arm_error` a bare `except: raise` would add nothing over.
+            async with self.dispatcher.rotating():
+                await self.process_manager.restart()
+                self.dispatcher.rotate_pool()
+            self.rotations += 1
+            attempts = [s for s in self.dispatcher.steps
+                        if s.get("call_id") == call_id]
+            if attempts:
+                attempts[-1]["server_rotation"] = self.rotations
 
     def _settle_admission(self, reservation: Any, call_id: str) -> None:
         """Release `reservation`'s hold and charge what the call ACTUALLY
@@ -1077,7 +1255,8 @@ async def _b2_root_final(cfg: Config, *, ep: ArmEpisode, registry: PromptRegistr
 async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any,
                   trace: Any, registry: PromptRegistry, bench_extra: dict[str, Any],
                   scaffold_instance_id: str = "",
-                  scaffold_git_sha: str = "") -> ArmResult:
+                  scaffold_git_sha: str = "",
+                  process_manager: Any = None) -> ArmResult:
     """§8's B2: deterministic map-reduce -- chunk (C2 verbatim), summarise
     (SERIAL, one leaf call per chunk -- `scaffold.dispatch_concurrency` is
     pinned at 1 by config, R14: concurrent leaf dispatch corrupts the answer),
@@ -1090,11 +1269,24 @@ async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any
     `s1/run_s1.py:control_attempt` does. Neither is constructed here --
     `arms.py` may not import `rlm.dispatcher`/`rlm.rootclient` (the dependency
     rule; `tests/test_import_rules.py` lints it).
+
+    `process_manager` is a THIRD, optional injected dependency (the
+    `rlm.serverproc.ProcessManager` duck type: one method, `.restart()`), and
+    it exists because B2's map is the one baseline arm that can actually drain
+    the leaf's never-reuse slot pool: an aggregation corpus's ~300 windows
+    against `--parallel 128` slots means `SlotPoolExhausted` partway through
+    every such task, without it. `None` (the default) is today's behaviour --
+    a clean `error/slot_pool_exhausted` outcome via `outcome_for_error`, never
+    a crash and never a silent wrap onto a slot that has held another
+    document. See `ArmEpisode._rotate_leaf`'s docstring for the rotation
+    sequence and the one guarantee it deliberately narrows relative to
+    `rlm/episode.py`'s.
     """
     ep = ArmEpisode(task, cfg, dispatcher=dispatcher, trace=trace,
                      registry=registry, arm="b2", bench_extra=bench_extra,
                      scaffold_instance_id=scaffold_instance_id,
-                     scaffold_git_sha=scaffold_git_sha)
+                     scaffold_git_sha=scaffold_git_sha,
+                     process_manager=process_manager)
     ep.start_clock()
     try:
         chunks, corpus_tokens = await _b2_chunks(task, cfg, dispatcher=dispatcher)
@@ -1130,7 +1322,7 @@ async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any
                                             root_client=root_client,
                                             summaries=summaries,
                                             question=task.text)
-        except (BudgetBreach, DispatchError) as exc:
+        except (BudgetBreach, DispatchError, ServerRotationError) as exc:
             return ep.close(*outcome_for_error(exc))
         except BaseException:
             # Never orphan the row (§6). The exception still propagates: a bug
