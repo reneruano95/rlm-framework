@@ -21,6 +21,13 @@ ISOLATED = [
     # answer, and the trace/analysis side re-derives envelope verdicts offline
     # from stored answers. Neither needs an HTTP client.
     "envelope.py",
+    # §8's benchmark checkers. Isolation is load-bearing rather than tidy: S4
+    # scoring and `rlm replay` must be able to re-derive every pass/fail from
+    # the trace alone, with no server reachable, so a checker that could reach
+    # an LLM would make the benchmark unscoreable offline -- and would open the
+    # door to a model-graded checker, which §8 forbids by requiring answers be
+    # "programmatically verifiable".
+    "checkers.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",

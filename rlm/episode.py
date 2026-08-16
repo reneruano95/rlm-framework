@@ -189,13 +189,15 @@ class Task:
             return True
         if self.answer is None:
             raise ConfigError(f"checker {mode!r} requires the task to declare an answer")
-        got = _normalise(value)
-        want = _normalise(self.answer)
-        if mode == "exact":
-            return got == want
-        if mode == "contains":
-            return want in got
-        raise ConfigError(f"unknown checker {mode!r}")
+        # Delegated to the registry (§8's "checker fn" per task). `exact` and
+        # `contains` keep byte-identical semantics there -- same normalisation,
+        # same comparison -- so S1's recorded `contains` results still mean what
+        # they said, while the benchmark gains checkers strict enough to reject
+        # a hedge. An unknown name still raises rather than defaulting: a
+        # typo'd checker silently becoming `contains` is exactly the permissive
+        # failure §8 warns converts R5 confabulation into false passes.
+        from rlm.checkers import check as _run_checker
+        return _run_checker(mode, value, self.answer)
 
 
 def _normalise(value: Any) -> str:
