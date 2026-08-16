@@ -29,6 +29,14 @@ ISOLATED = [
     # "programmatically verifiable".
     "checkers.py",
     "stats.py",
+    # §8's scoring/inference/report layer. Isolation is the same load-bearing
+    # property `checkers.py` and `stats.py` have, one level up: the S4 VERDICT
+    # must be recomputable from the closed trace store alone, with no server
+    # reachable. A scoring module that could reach a model is a scoring module
+    # that could be re-run until it agreed, which is the p-hacking §8's
+    # pre-registration exists to prevent. It reads duckdb + `rlm.stats` and
+    # takes the manifest as an injected object (`bench/` is not in the wheel).
+    "verdict.py",
     # §8's baseline arms. They make model calls, but through an INJECTED
     # dispatcher: `rlm/episode.py` is the only module permitted to import both
     # C4 and the isolated components, and widening that to a second module is
