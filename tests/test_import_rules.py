@@ -28,6 +28,7 @@ ISOLATED = [
     # door to a model-graded checker, which §8 forbids by requiring answers be
     # "programmatically verifiable".
     "checkers.py",
+    "stats.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
