@@ -19,3 +19,9 @@ sandbox_bootstrap/
 # source -- and I4 makes them the sole episode truth, not something to
 # reconstruct from a commit.
 traces/
+
+# S3 gate: generated per-run artifacts (trace store, per-run configs with
+# dynamic fake-root ports). runs.jsonl and RESULTS.md are the record and are
+# committed.
+s3/results/store/
+s3/results/cfg-*.yaml
