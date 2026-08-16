@@ -208,7 +208,34 @@ scaffold:
     # affordable" therefore STANDS, with a worse margin. Not raised further:
     # 1,228 subcalls would only move the breach to the wall clock.
     max_subcalls: 926
-    max_wall_clock_s: 900
+    # RAISED 900 -> 1300, RULED 2026-08-15, to break the §8 aggregation
+    # deadlock (priced in `s2/aggregation_options.py`).
+    #
+    # The deadlock: §8 caps aggregation corpora at ~200K tokens so full
+    # coverage FITS, but at the measured 2.78 s/window serial a 200K corpus
+    # needs 1,839 s per episode against a 900 s cap -- so §8 forbade authoring
+    # any aggregation task against the 200K figure "until concurrent dispatch
+    # is usable", and R14 says it never will be (31/32 correct serial, 7/32 at
+    # two in flight; `dispatch_concurrency` is pinned at 1).
+    #
+    # The ruling takes the HYBRID: shrink the aggregation corpus to ~130K
+    # tokens AND raise this cap, rather than either alone. 130,464 tokens =
+    # 302 windows (snap bound) = 604 sub-calls, comfortably inside
+    # max_subcalls 926, and needs 1,199 s per episode.
+    #
+    # 1300 and not 1200 because 1,199 s against a 1,200 s cap is a ONE-SECOND
+    # margin, which is not a margin; 1,300 gives 8.4%. It costs nothing in the
+    # S4 projection -- episodes do not run to the cap, so the projected total
+    # is 39.6 h of the 60 h budget either way.
+    #
+    # What this deliberately does NOT do: option A (keep 200K, raise the cap to
+    # 1,900) was priced and rejected. It preserves the pre-registered corpus
+    # size but more than DOUBLES the runaway-episode kill threshold, and at
+    # N=30 it spends 49.9 h of 60 -- 83% of the budget, with thermal and retry
+    # variance still to come. The hybrid keeps B1, the single-shot baseline RLM
+    # must beat by +3, seeing 25% of the aggregation corpus against 16% at
+    # 200K; option B (shrink only, no cap change) would have handed it 34%.
+    max_wall_clock_s: 1300
     max_total_tokens: 1500000
     # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
     # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.

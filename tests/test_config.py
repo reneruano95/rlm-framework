@@ -430,3 +430,21 @@ def test_the_shipped_config_declares_mtp_and_emits_it(valid_cfg):
     assert root.mtp is True
     assert any("draft-mtp" in f for f in root.extra_flags)
     assert root.parallel == 1, "MTP is single-slot on this build"
+
+
+def test_the_wall_clock_budget_carries_the_aggregation_ruling(valid_cfg):
+    """§8's aggregation deadlock was ruled 2026-08-15: corpora capped at ~130K
+    tokens AND this budget raised 900 -> 1300, jointly.
+
+    A tripwire, not a preference. 130,464 tokens is 302 windows at the snap
+    bound and needs 1,199 s per episode at the measured 2.78 s/window serial.
+    Dropping this back to 900 silently makes every aggregation task in the
+    frozen benchmark unaffordable -- they would `budget_kill`, which §8 scores
+    as a FAILURE for every arm, so the benchmark would measure the budget
+    rather than the roots. 1300 rather than 1200 because 1,199 against 1,200 is
+    a one-second margin. See s2/aggregation_options.py for the full pricing.
+    """
+    assert valid_cfg.scaffold.budgets.max_wall_clock_s == 1300
+    # 302 windows x 2 sub-calls must still fit the sub-call budget, or the
+    # ruling would have moved the breach rather than removed it.
+    assert valid_cfg.scaffold.budgets.max_subcalls >= 604

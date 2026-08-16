@@ -103,6 +103,15 @@ def main() -> None:
           f"figure charged no root overhead)")
     print()
 
+    print(">>> RULED 2026-08-15: hybrid, aggregation 130K, N=30, cap 1300")
+    row("RULING cap 1300, agg 130K, N=30", 30, 7, 130_464, 1300)
+    print("    The cap is 1300 and not 1200: a 130,464-token corpus needs 1,199 s")
+    print("    per aggregation episode, so a 1,200 s cap leaves ONE SECOND of")
+    print("    margin, which is not a margin. 1,300 gives 8.4%. It costs nothing")
+    print("    in the S4 projection because episodes do not run to the cap --")
+    print("    the projected total is identical either way.")
+    print()
+
     print(">>> H: hybrid -- raise the cap somewhat AND shrink the corpus")
     for cap in (1200, 1500):
         fit = tokens_affordable(cap)
