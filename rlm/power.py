@@ -63,13 +63,22 @@ class PowerSampler:
 
     def _pump(self) -> None:
         assert self._proc and self._proc.stdout
-        for line in self._proc.stdout:
-            r = parse_counter_line(line)
-            if r is None:
-                continue
-            with self._lock:
-                self._latest, self._count = r, self._count + 1
-                self._last_growth = time.monotonic()
+        try:
+            for line in self._proc.stdout:
+                r = parse_counter_line(line)
+                if r is None:
+                    continue
+                with self._lock:
+                    self._latest, self._count = r, self._count + 1
+                    self._last_growth = time.monotonic()
+        except (ValueError, OSError):
+            # stop() may close stdout out from under a still-blocked
+            # readline() if this thread hasn't unblocked within stop()'s
+            # join timeout (slow PowerShell teardown). On Windows that
+            # surfaces here as "I/O operation on closed file" — expected
+            # teardown noise once stop() has been called, not a real
+            # failure, so this thread just exits quietly.
+            pass
 
     def reading(self) -> PowerReading | None:
         with self._lock:
@@ -92,7 +101,16 @@ class PowerSampler:
         except subprocess.TimeoutExpired:
             pass
         if proc.stdout is not None:
-            proc.stdout.close()
+            try:
+                proc.stdout.close()
+            except (ValueError, OSError):
+                # Mirrors the guard in _pump: if the pump thread didn't
+                # unblock within the join timeout above, this close() races
+                # its still-blocked readline() on the same file object.
+                # Closing is still required to eventually unstick a hung
+                # reader, so swallow whatever this side of the race raises
+                # rather than letting pure teardown timing crash stop().
+                pass
 
 
 def read_pkg_temp_c() -> float | None:
