@@ -776,8 +776,18 @@ async def _b3_prompt(task: "Task", cfg: Config, *, dispatcher: Any,
     budget = (int(0.8 * capacity) - overhead
               - cfg.scaffold.budgets.max_predict.leaf - FIT_SLACK_TOKENS)
     token_counts = [await dispatcher.count_tokens(c, role="leaf") for c in chunks]
-    selected, record = bm25_select(chunks, task.text, budget_tokens=budget,
-                                    token_counts=token_counts)
+    # Off-loop, mirroring `split()` two lines up: `bm25_select` builds and
+    # queries an in-memory DuckDB FTS index (`CREATE TABLE` + `INSERT` +
+    # `PRAGMA create_fts_index` + a `match_bm25` scan), all synchronous CPU/IO
+    # work with no `await` inside it -- measured ~720 ms at 450 chunks. Left
+    # un-threaded it would block the bench process's one event loop, which
+    # also has to keep servicing the power sampler and lifecycle machinery
+    # while this call runs. `bm25_select` itself stays a plain sync function
+    # (its unit tests call it directly, no loop required) -- only the call
+    # site pays for the loop it happens to run on.
+    selected, record = await asyncio.to_thread(
+        bm25_select, chunks, task.text, budget_tokens=budget,
+        token_counts=token_counts)
     body = "\n\n".join(chunks[i] for i in selected)
     prompt = f"{head}\n\n{body}\n\n{task.text}"
     return prompt, record, corpus_tokens, chunks
