@@ -887,7 +887,7 @@ class _EpisodeEnv:
         self.task = task
         self.dispatcher = dispatcher
         self.server = server
-        self._run_kwargs = run_kwargs
+        self.run_kwargs = run_kwargs
         self._episode: dict | None = None
         self._steps: list[dict] = []
         self._lifecycle_stream = io.StringIO()
@@ -908,7 +908,7 @@ class _EpisodeEnv:
         lifecycle = Lifecycle(None, stream=self._lifecycle_stream)
         try:
             result = await run_episode(self.task, self.cfg, dispatcher=self.dispatcher,
-                                       trace=tl, lifecycle=lifecycle, **self._run_kwargs)
+                                       trace=tl, lifecycle=lifecycle, **self.run_kwargs)
         finally:
             await tl.drain()
             await tl.aclose()

@@ -775,3 +775,15 @@ async def test_both_questions_about_a_window_precede_its_retirement(
     assert res.outcome == Outcome.SUCCESS
     assert pm.restarts == 0
     assert mock_server.requested_slots() == [0, 0, 1, 1]
+
+
+async def test_snapshot_extra_lands_in_config_snapshot(episode_env):
+    """Task 5: `run_episode(snapshot_extra=...)` threads bench identity (arm,
+    run_id, seed, block) into `config_snapshot` -- Task 9's consumer, not
+    exercised here -- without disturbing any of `_snapshot`'s own keys."""
+    env = episode_env(root_script=["```repl\nfinal_answer('x')\n```"])
+    env.run_kwargs["snapshot_extra"] = {"bench": {"arm": "rlm", "run_id": "r-1",
+                                                    "seed": 1, "block": 0}}
+    await env.run()
+    snap = env.episode_row()["config_snapshot"]
+    assert snap["bench"] == {"arm": "rlm", "run_id": "r-1", "seed": 1, "block": 0}

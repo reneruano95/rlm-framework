@@ -385,7 +385,8 @@ class _EpisodeRun:
                  registry, props: dict, max_turns: int | None,
                  scaffold_instance_id: str, scaffold_git_sha: str,
                  benchmark_version: str | None,
-                 process_manager: Any = None) -> None:
+                 process_manager: Any = None,
+                 snapshot_extra: dict | None = None) -> None:
         self.task = task
         self.cfg = cfg
         self.dispatcher = dispatcher
@@ -403,6 +404,7 @@ class _EpisodeRun:
         self.scaffold_instance_id = scaffold_instance_id
         self.scaffold_git_sha = scaffold_git_sha
         self.benchmark_version = benchmark_version
+        self.snapshot_extra = snapshot_extra
 
         self.episode_id = str(uuid.uuid4())
         self.session = None
@@ -1046,7 +1048,7 @@ class _EpisodeRun:
         cannot re-derive the first user message)."""
         root_props = self.props.get("root") or {}
         template = root_props.get("chat_template") or ""
-        return config_snapshot(self.cfg, {
+        base_extra = {
             "prompt_hashes": self.registry.hashes(),
             "pinned_prompt_hashes": self.cfg.pinned_prompt_hashes(),
             "props": self.props,
@@ -1065,7 +1067,14 @@ class _EpisodeRun:
                 # recorded here so it is measurable rather than guessed at.
                 "chunk_ms": chunk_ms,
             },
-        })
+        }
+        if self.snapshot_extra:
+            # Merged LAST, so a caller-supplied key (e.g. bench identity)
+            # never shadows anything this method itself records.
+            extra = self.snapshot_extra
+            assert not (set(extra) & set(base_extra))
+            base_extra.update(extra)
+        return config_snapshot(self.cfg, base_extra)
 
     def record_abort(self, reason: str) -> None:
         """Terminal attribution for the operator-abort path, SYNCHRONOUSLY.
@@ -1151,7 +1160,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                        scaffold_instance_id: str = "",
                        scaffold_git_sha: str = "",
                        benchmark_version: str | None = None,
-                       process_manager: Any = None) -> EpisodeResult:
+                       process_manager: Any = None,
+                       snapshot_extra: dict | None = None) -> EpisodeResult:
     """Run ONE episode end to end and return its §6 outcome.
 
     `dispatcher`, `trace` and `lifecycle` are injected because their lifetimes
@@ -1193,7 +1203,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                            scaffold_instance_id=scaffold_instance_id,
                            scaffold_git_sha=scaffold_git_sha,
                            benchmark_version=benchmark_version,
-                           process_manager=process_manager)
+                           process_manager=process_manager,
+                           snapshot_extra=snapshot_extra)
         try:
             return await run.execute(manager, root)
         except asyncio.CancelledError:
