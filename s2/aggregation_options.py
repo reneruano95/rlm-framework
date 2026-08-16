@@ -63,17 +63,29 @@ def s4_hours(n_tasks: int, n_agg: int, agg_tokens: int, wall_cap: int) -> float:
     return (agg + other + cheap + escalation) / 3600
 
 
-ROOT_CTX = 32_768          # config.yaml servers.root.ctx -- all B1 can ever see
+# CORRECTED 2026-08-15. An earlier version of this file used the ROOT's window
+# (32,768) as "all B1 can ever see" and reported B1 seeing 16% / 25% / 34% of an
+# aggregation corpus across the options. That was WRONG and the conclusion drawn
+# from it was void: §8:351 gives B1 its own profile -- "leaf model, single shot,
+# full 256K native context (`--parallel 1 -c 262144`)" -- so B1 FITS 100% of
+# every corpus priced here, and corpus size never decides whether it truncates.
+# What corpus size actually changes for B1 is how much it must ATTEND to, and
+# §7 #2 already says the leaf's effective reach is ~1,000 tokens from the
+# question at any size. So shrinking the corpus does not hand B1 coverage it
+# lacked; it shortens the aggregation it must perform, which plausibly helps
+# every single-shot arm somewhat -- a real but unquantified cost, stated as
+# such rather than dressed in a number that measured the wrong model.
+B1_CTX = 262_144           # §8:351, B1/B3's dedicated single-slot profile
 
 
 def row(name: str, n_tasks: int, n_agg: int, agg_tokens: int, wall_cap: int):
     w = windows_for(agg_tokens)
     ep = episode_seconds(agg_tokens)
     h = s4_hours(n_tasks, n_agg, agg_tokens, wall_cap)
-    # The number that decides what the CATEGORY still tests: aggregation exists
-    # to make single-shot reading impossible. Shrinking the corpus hands B1 back
-    # a larger share of it, and B1 is the baseline RLM must beat by +2.
-    b1_sees = ROOT_CTX / agg_tokens
+    # Reported instead: does B1 have to truncate (its pre-registered head+tail
+    # 50/50 overflow policy), which is the only corpus-size effect on B1 that
+    # this file can actually compute.
+    b1_sees = min(1.0, B1_CTX / agg_tokens)
     fits_ep = "OK" if ep <= wall_cap else f"BREACH ({ep:.0f}s > {wall_cap}s)"
     fits_s4 = "OK" if h <= S4_BUDGET_H else "OVER"
     print(f"{name:<34} {n_tasks:>3} {n_agg:>4} {agg_tokens:>8,} {w:>7} "
@@ -86,7 +98,7 @@ def main() -> None:
           f"{S_PER_WINDOW}s per window serial; "
           f"{ROOT_OVERHEAD_FRAC:.0%} of an episode is non-leaf\n")
     print(f"{'option':<34} {'N':>3} {'agg':>4} {'agg tok':>8} {'windows':>7} "
-          f"{'subcalls':>8} {'ep secs':>9} {'cap':>7} {'S4 h':>7} {'B1 sees':>7}  "
+          f"{'subcalls':>8} {'ep secs':>9} {'cap':>7} {'S4 h':>7} {'B1 fits':>7}  "
           f"{'per-episode':<22} 60h")
     print("-" * 130)
 
