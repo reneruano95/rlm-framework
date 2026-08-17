@@ -1759,9 +1759,27 @@ def pool_rotating_swap(orchestra, *, resident_dispatcher, bench_dispatcher):
     leaf is restarted just as often, and an un-rotated resident pool would run
     RLM's later blocks against slots the scaffold believes are virgin and the
     server has already used -- R13 itself, reintroduced by its own mitigation.
+
+    ONLY WHEN A PROCESS ACTUALLY RESTARTED, which is the same rule read from
+    the other side: `swap_to` no-ops when the requested profile is already
+    live, and adopting a virgin pool for a server that never restarted is
+    precisely the hazard `SlotPool` names -- the scaffold would believe every
+    slot untouched while the process still holds every document it has served.
+
+    The signal is the leaf PROCESS OBJECT's identity, not the reported
+    relaunch seconds. `_bring_up_leaf` builds a new `LlamaServerProcess` for
+    every bring-up, so a changed object is a restarted server by construction,
+    whereas the timing value is `round(elapsed, 3)` and a fast (or faked)
+    relaunch can legitimately report 0.0. The seconds are kept as the fallback
+    for an orchestra that exposes no process at all.
     """
     async def swap(profile: str):
+        before = getattr(orchestra, "leaf_proc", None)
         relaunch_s = await orchestra.swap_to(profile)
+        after = getattr(orchestra, "leaf_proc", None)
+        restarted = (after is not None and after is not before) or bool(relaunch_s)
+        if not restarted:
+            return relaunch_s
         dispatcher = (bench_dispatcher if profile == BENCH_PROFILE
                       else resident_dispatcher)
         if dispatcher is not None and hasattr(dispatcher, "rotate_pool"):
@@ -2233,6 +2251,17 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
         over the trace: after `aclose()` a `TraceLogger` is finished (its
         writer pool is shut down), so phase 2 has a different object and every
         runner has to be pointed at it.
+
+        AND THE PROFILE IS READ OFF THE ORCHESTRA, NOT DEFAULTED. `BenchCtx`
+        defaults `current_profile` to `resident` -- correct for a fresh run,
+        wrong for every later phase: §8's within-block order ends on b3, so the
+        main grid leaves the leaf on the BENCH profile. A rebuilt context that
+        assumed `resident` would see no profile change at the escalation
+        phase's first (rlm) cell, skip the swap, and then handshake the
+        RESIDENT config against the bench-profile server that is actually
+        running -- a `total_slots` mismatch, a `ConfigError` out of §4, and the
+        entire escalation phase aborted (phase 1.5's healing with it). The
+        orchestra owns which process is live, so it is asked, every time.
         """
         return BenchCtx(
             raw_cfg=raw_cfg, cfg=cfg, run_id=run_id, manifest=manifest,
@@ -2254,6 +2283,7 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
                 orchestra, resident_dispatcher=rlm_dispatcher,
                 bench_dispatcher=leaf_dispatcher),
             temp_fn=read_pkg_temp_c,
+            current_profile=orchestra.current_profile or RESIDENT_PROFILE,
             repo_root=REPO_ROOT)
 
     print(f"{'smoke run_id' if args.smoke else 'run_id'}: {run_id}"

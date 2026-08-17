@@ -794,9 +794,11 @@ class CannedDispatcher:
         from rlm.dispatcher import MockDispatcher
 
         self._inner = MockDispatcher(dict(fixtures or {}), parallel=parallel)
-        #: The `seed=` every caller passed, in order. §8's seed discipline
-        #: is only real if the seed reaches the dispatcher PER CALL.
+        #: The `seed=`/`n_predict=` every caller passed, in order. §8's seed
+        #: discipline is only real if the seed reaches the dispatcher PER
+        #: CALL, and B2's summary budget only binds if `n_predict` does.
         self.seeds: list[int | None] = []
+        self.n_predicts: list[int | None] = []
 
     def __getattr__(self, name):          # semaphore, steps, last_step, ...
         return getattr(self._inner, name)
@@ -805,11 +807,16 @@ class CannedDispatcher:
         return await self._inner.count_tokens(text, role=role)
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None, seed: int | None = None) -> str:
-        # `seed` recorded, never consulted: this double replays fixtures, so
-        # the ASSERTION a test makes about it is that the caller passed the
-        # right one -- not that a draw changed.
+                     chunk: str | None = None, seed: int | None = None,
+                     n_predict: int | None = None) -> str:
+        # `seed`/`n_predict` recorded, never consulted: this double replays
+        # fixtures, so the ASSERTION a test makes about them is that the caller
+        # passed the right ones -- not that a draw changed or a decode stopped.
+        # Both are declared rather than swallowed by `**kwargs` for the reason
+        # `_accepts_slot_id` gives: a double that absorbs an unknown keyword
+        # lets a caller believe it applied something it never sent.
         self.seeds.append(seed)
+        self.n_predicts.append(n_predict)
         import hashlib
 
         from rlm.dispatcher import compose_leaf_user

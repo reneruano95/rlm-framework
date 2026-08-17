@@ -1180,18 +1180,26 @@ async def run_b3(task: "Task", cfg: Config, *, dispatcher: Any, trace: Any,
 # episode would be, via `ArmEpisode.call_leaf`'s `admit_tokens` (this task's
 # addition to the shared plumbing).
 #
-# `LLMDispatcher.query` (checked against its signature, `rlm/dispatcher.py`)
-# has NO per-call `n_predict` -- a target's generation budget is fixed at
-# construction to `cfg.scaffold.budgets.max_predict.leaf` for every call on
-# that role, and hacking a per-call override into C4 for one baseline arm is
-# exactly the drift the module docstring's "THIS MODULE NEVER IMPORTS C4"
-# rule exists to keep out of a component §8 depends on staying identical
-# across every arm. So `b2_summary_n_predict`'s value is NOT enforced
-# per-call: it is the pre-registered target the prompt sizing is built
-# around (every summary should fit inside it so the reduce prompt fits 80% of
-# the root window), it is RECORDED in `config_snapshot["bench"]`
-# (`summary_n_predict`) so a result is auditable against it, and actual
-# enforcement is whatever the leaf role's `max_predict` already does.
+# THE SUMMARY BUDGET IS ENFORCED PER CALL, and the reasoning that once said
+# otherwise is kept here because it was wrong in an instructive way. It ran:
+# `LLMDispatcher.query` has no per-call `n_predict`, a target's budget is fixed
+# at construction, and adding an override for one baseline arm would be drift
+# into a component §8 needs identical across every arm -- so record the number
+# and let the leaf role's `max_predict` do the enforcing.
+#
+# What that missed is that the number is not an aspiration, it is the thing
+# that makes the arm fit: `b2_summary_n_predict` exists so ALL `n_chunks`
+# summaries fit 80% of the root window. Unenforced, a 299-chunk aggregation
+# corpus decodes 299 x max_predict (512) tokens into a reduce prompt sized for
+# 0.8 x 32K -- B2 overflows the root by construction on every aggregation task,
+# which is a manufactured §8 result and not a measurement of anything. And the
+# drift argument had it backwards: an OPTIONAL, defaulted `n_predict` on
+# `query` changes nothing for any other arm (omitted, every caller still gets
+# `target.max_predict`), while a budget only one arm silently misses is exactly
+# the asymmetry §8 cannot afford. So C4 gained the override (resolved once per
+# call, beside the seed), `ep.call_leaf` passes it, and the recorded
+# `config_snapshot["bench"]["summary_n_predict"]` is now the number that was
+# actually sent rather than the number that was hoped for.
 # --------------------------------------------------------------------------- #
 
 

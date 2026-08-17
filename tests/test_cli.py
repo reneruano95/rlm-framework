@@ -536,7 +536,16 @@ def test_run_takes_launch_leaf_and_defaults_to_off():
 
 
 class _FakeOrchestra:
-    """`ServerOrchestra`'s surface with no processes and no HTTP."""
+    """`ServerOrchestra`'s surface with no processes and no HTTP.
+
+    `handshake_profile` REFUSES a profile that is not the one running, which
+    the real one does too and for the same reason: §4 asserts the live
+    `/props` against the config for `profile`, so asking for `resident` while
+    the bench-profile server is up is a `total_slots` mismatch, not a no-op.
+    Modelling that is what lets a test see a scheduler running on a stale
+    profile assumption at all -- a handshake double that accepted anything
+    blinds every assertion downstream of it.
+    """
 
     def __init__(self, cfg, *, launch=True, lifecycle=None, out=None, err=None,
                  **_kw):
@@ -545,10 +554,15 @@ class _FakeOrchestra:
         self.events = []
         self.current_profile = None
         self.last_relaunch_s = 0.0
+        #: A stand-in for the leaf process object, so `pool_rotating_swap` can
+        #: tell a real relaunch from a no-op swap the way it does in
+        #: production (identity, not the reported seconds).
+        self.leaf_proc = None
 
     async def start_resident(self):
         self.events.append(("start_resident", None))
         self.current_profile = "resident"
+        self.leaf_proc = object()
 
     async def quiesce(self, profile):
         self.events.append(("quiesce", profile))
@@ -556,11 +570,20 @@ class _FakeOrchestra:
 
     async def handshake_profile(self, profile):
         self.events.append(("handshake", profile))
+        if profile != self.current_profile:
+            from rlm.errors import ConfigError
+
+            raise ConfigError(
+                f"leaf /props mismatch: handshaking the {profile!r} profile "
+                f"against the {self.current_profile!r} server that is running")
         return {"root": {}}
 
     async def swap_to(self, profile):
         self.events.append(("swap", profile))
+        if profile == self.current_profile:
+            return 0.0                       # already there: `_bring_up_leaf`
         self.current_profile = profile
+        self.leaf_proc = object()            # a new process, a virgin pool
         self.last_relaunch_s = 11.5
         return 11.5
 
@@ -1014,6 +1037,39 @@ def test_escalation_runs_both_arms_of_every_flagged_pair_then_recomputes_once(
     assert rc == cli.EXIT_OK
     assert "Post-escalation gate: PASS" in report
     assert "escalation" in out.lower()
+
+
+def test_the_escalation_phase_starts_from_the_profile_the_grid_left_behind(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """Each phase rebuilds its `BenchCtx`, and `BenchCtx.current_profile`
+    defaults to `resident` — correct for a fresh run, wrong for every later
+    phase. §8's within-block order ends on **b3**, so the main grid leaves the
+    leaf on the BENCH profile. A rebuilt context that assumed `resident` sees
+    no profile change at the escalation phase's first (rlm) cell, skips the
+    swap, and hands §4 the resident config to assert against the bench-profile
+    server that is actually running: a `total_slots` mismatch, a `ConfigError`,
+    and the entire escalation phase gone (phase 1.5's healing with it).
+
+    `_FakeOrchestra.handshake_profile` refuses a profile that is not the one
+    running, exactly as the real §4 assertion would, so this test can see the
+    difference at all.
+    """
+    outcomes = _baselines_fail_everything()
+    outcomes[("rlm", "codeqa-01")] = Outcome.FAIL
+    rc, arms = _graded(valid_config_file, tmp_path, monkeypatch, outcomes)
+    orchestra = fake_orchestra[0]
+
+    assert rc == cli.EXIT_OK, "the escalation phase refused on a stale profile"
+    # 4 tasks x 3 seeds = 12 blocks. Block 1 swaps once (resident -> bench for
+    # b1/b3); every later block swaps twice (back for rlm/b2, out again for
+    # b1/b3) -> 1 + 2*11 = 23 swaps in the grid. The 24th is the escalation
+    # phase's first cell (rlm) asking for the resident leaf.
+    swaps = orchestra.kinds("swap")
+    assert len(swaps) > 23, "the escalation phase issued no swap at all"
+    assert swaps[23] == "resident"
+    # …and every handshake in the whole run agreed with the live profile,
+    # which the fake enforces by raising rather than by being asked politely.
+    assert [c for c in arms.calls if c["seed"] in (4, 5)]
 
 
 def test_a_margin_outside_the_band_escalates_nothing(
@@ -1481,22 +1537,71 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
     assert bench_leaf.rotations == 2 and resident.rotations == 1
 
 
+class _SwappingOrchestra:
+    """`swap_to`'s real shape: a no-op when the requested profile is already
+    live (`_bring_up_leaf`'s `already_there`), a NEW process object otherwise."""
+
+    def __init__(self, profile=None):
+        self.current_profile = profile
+        self.leaf_proc = object() if profile else None
+
+    async def swap_to(self, profile):
+        if profile == self.current_profile:
+            return 0.0
+        self.current_profile = profile
+        self.leaf_proc = object()
+        return 9.0
+
+
 async def test_the_pool_is_rotated_only_for_the_profile_that_swapped(tmp_path):
     """A swap to the bench profile must not hand the RESIDENT dispatcher a
     fresh pool: the resident leaf process is untouched by that swap, and
     telling C4 its used slots are virgin again is R13 itself."""
     resident, bench_leaf = _PooledDispatcher(4), _PooledDispatcher(2)
-
-    class _Orchestra:
-        async def swap_to(self, profile):
-            return 0.0
-
-    swap = cli.pool_rotating_swap(_Orchestra(), resident_dispatcher=resident,
+    swap = cli.pool_rotating_swap(_SwappingOrchestra(cli.RESIDENT_PROFILE),
+                                   resident_dispatcher=resident,
                                    bench_dispatcher=bench_leaf)
     await swap(cli.BENCH_PROFILE)
     assert (bench_leaf.rotations, resident.rotations) == (1, 0)
     await swap(cli.RESIDENT_PROFILE)
     assert (bench_leaf.rotations, resident.rotations) == (1, 1)
+
+
+async def test_a_swap_that_restarted_nothing_does_not_adopt_a_virgin_pool(tmp_path):
+    """`swap_to` NO-OPS when the requested profile is already live. Rotating
+    then would tell C4 every slot is untouched while the same process still
+    holds every document it has served — the hazard the never-reuse pool
+    exists to prevent, reintroduced by the fix for the opposite one."""
+    resident, bench_leaf = _PooledDispatcher(4), _PooledDispatcher(2)
+    orchestra = _SwappingOrchestra(cli.BENCH_PROFILE)
+    swap = cli.pool_rotating_swap(orchestra, resident_dispatcher=resident,
+                                   bench_dispatcher=bench_leaf)
+
+    assert await swap(cli.BENCH_PROFILE) == 0.0        # already there
+    assert (bench_leaf.rotations, resident.rotations) == (0, 0)
+    # …and a genuine swap still rotates, so this is a gate and not a mute.
+    assert await swap(cli.RESIDENT_PROFILE) == 9.0
+    assert (bench_leaf.rotations, resident.rotations) == (0, 1)
+
+
+async def test_a_relaunch_that_measured_zero_seconds_still_rotates(tmp_path):
+    """The signal is the PROCESS OBJECT, not the clock. `last_relaunch_s` is
+    `round(elapsed, 3)`, so a fast (or faked) relaunch legitimately reports
+    0.0 — and a rotation skipped on that arithmetic is a used pool the
+    scaffold believes is virgin."""
+    bench_leaf = _PooledDispatcher(2)
+
+    class _InstantOrchestra(_SwappingOrchestra):
+        async def swap_to(self, profile):
+            self.current_profile = profile
+            self.leaf_proc = object()      # it really did restart
+            return 0.0                     # …in under a millisecond
+
+    swap = cli.pool_rotating_swap(_InstantOrchestra(cli.RESIDENT_PROFILE),
+                                   resident_dispatcher=None,
+                                   bench_dispatcher=bench_leaf)
+    await swap(cli.BENCH_PROFILE)
+    assert bench_leaf.rotations == 1
 
 
 async def test_the_swap_hook_still_reports_what_the_relaunch_cost(tmp_path):
