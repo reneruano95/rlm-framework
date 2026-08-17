@@ -139,7 +139,7 @@ import contextlib
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -159,6 +159,7 @@ from rlm.errors import (
     SlotMismatch,
     SlotPoolExhausted,
     StepStatus,
+    TransportError,
 )
 from rlm.leakcheck import NOT_CHECKED, ChunkIndex, LeakVerdict
 from rlm.trace import utc_now
@@ -463,14 +464,104 @@ class CompletionResult:
     truncated: bool = False
 
 
+#: Ceiling on the CONNECT phase of every model-server call, whatever the
+#: per-call timeout is. Both servers are on this box's loopback: a connect that
+#: has not completed in half a minute is a refusal that Windows is still
+#: retrying, not a slow network.
+_CONNECT_TIMEOUT_S = 30.0
+
+
+def _os_detail(exc: BaseException) -> str:
+    """The OS error hiding under an httpx/httpcore exception, formatted.
+
+    Exists because of what the S4 smoke crash did NOT say. `anyio` collapses
+    every address it tried into one `OSError("All connection attempts
+    failed")`, `httpcore` re-raises it, and `httpx` re-wraps it a third time
+    with `str(exc)` as the message -- so the traceback that ended the run named
+    neither the errno nor the WinError, and "the server refused us" (10061),
+    "we ran out of ephemeral ports" (10048) and "the buffer pool is empty"
+    (10055) were indistinguishable in the one artefact the failure left behind.
+    The chain still carries the number; nothing was reading it.
+
+    Walks `__cause__`/`__context__` AND `ExceptionGroup.exceptions`, because
+    anyio's happy-eyeballs failure is a group.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException | None] = [exc]
+    while stack:
+        cur = stack.pop()
+        if cur is None or id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        winerror = getattr(cur, "winerror", None)
+        if isinstance(cur, OSError) and (cur.errno or winerror):
+            return (f" [errno={cur.errno} winerror={winerror}"
+                    f"{': ' + cur.strerror if cur.strerror else ''}]")
+        if isinstance(cur, BaseExceptionGroup):
+            stack.extend(cur.exceptions)
+        stack.extend((cur.__cause__, cur.__context__))
+    return ""
+
+
+@contextlib.contextmanager
+def _transport_guard(what: str) -> "Iterator[None]":
+    """C4's client boundary: no `httpx` type may cross it (spec §5 C4).
+
+    Wraps the HTTP library's exceptions in `rlm.errors` ones so that the whole
+    scaffold -- the arms, the episode runner, `rlm.bench`, and above all
+    `rlm.cli`'s exit-code taxonomy, which is written in `except RlmError` --
+    sees ONE named failure family instead of a third-party one. See
+    `TransportError` for what an unnamed exception costs.
+
+    The split is "did the server answer?": a status the caller raised on is a
+    plain `DispatchError` (the server answered, and its answer was a refusal),
+    while a connect/read/write/pool failure or an unparseable body is a
+    `TransportError` (no answer arrived, and an identical request might get
+    one). Nothing else is caught -- `asyncio.CancelledError` is a
+    `BaseException` and C5's abort path still owns it, and a `TypeError` in
+    this module is still a bug that must crash loudly.
+    """
+    try:
+        yield
+    except httpx.HTTPStatusError as exc:
+        raise DispatchError(
+            f"{what}: HTTP {exc.response.status_code} "
+            f"{exc.response.reason_phrase}") from exc
+    except (httpx.HTTPError, OSError) as exc:
+        raise TransportError(
+            f"{what}: {type(exc).__name__}: {exc}{_os_detail(exc)}") from exc
+    except json.JSONDecodeError as exc:
+        raise TransportError(f"{what}: malformed JSON in the response: {exc}") from exc
+
+
 class ServerClient:
-    """One llama-server endpoint. Owns its own httpx.AsyncClient."""
+    """One llama-server endpoint. Owns its own httpx.AsyncClient.
+
+    EVERY method here is wrapped in `_transport_guard`: this class is the seam
+    between `httpx` and the scaffold, and the guard is what makes "no raw HTTP
+    exception escapes C4" true by construction rather than by each caller
+    remembering to catch one.
+    """
 
     def __init__(self, base_url: str, *, timeout: float = 240.0,
                  http_client: httpx.AsyncClient | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self._timeout = timeout
-        self._client = http_client or httpx.AsyncClient(timeout=timeout)
+        # THE CONNECT DEADLINE IS NOT THE CALL DEADLINE, and conflating them
+        # gets worse the longer the call deadline is. `timeout` is sized for a
+        # first byte that is minutes away on a 262K-token prefill; the connect
+        # to a server on THIS machine's loopback either happens in
+        # milliseconds or is not going to happen. Measured on this box: a
+        # refused connect (no listener, or a listener whose accept backlog is
+        # full) reports `[WinError 1225]` after ~2.2 s of SYN retries, and a
+        # connection that lands in a stalled server's backlog is accepted and
+        # then answers nothing at all -- which under a flat 900 s timeout would
+        # park one `/tokenize` of a 12,000-call chunking storm for fifteen
+        # minutes. Everything else keeps the per-call value: `read` is the one
+        # a long prefill actually spends.
+        self._httpx_timeout = httpx.Timeout(
+            timeout, connect=min(timeout, _CONNECT_TIMEOUT_S))
+        self._client = http_client or httpx.AsyncClient(timeout=self._httpx_timeout)
         self._owns_client = http_client is None
 
     async def aclose(self) -> None:
@@ -482,9 +573,11 @@ class ServerClient:
         instrument: sha256 the returned string, verbatim, at the caller."""
         body: dict[str, Any] = {"messages": messages, "add_generation_prompt": True}
         body.update(kw)
-        resp = await self._client.post(f"{self.base_url}/apply-template", json=body)
-        resp.raise_for_status()
-        return resp.json()["prompt"]
+        with _transport_guard(f"POST {self.base_url}/apply-template"):
+            resp = await self._client.post(f"{self.base_url}/apply-template",
+                                            json=body)
+            resp.raise_for_status()
+            return resp.json()["prompt"]
 
     async def tokenize(self, text: str, *, add_special: bool = False) -> list[int]:
         """POST /tokenize. A missing/empty `content` returns HTTP 200
@@ -498,19 +591,22 @@ class ServerClient:
         284/285, 474/475, 1274/1275 -- a constant +1. Admission must therefore
         pass `add_special=True` (it is counting what will occupy the slot),
         while a chunk-body count must not (BOS is not part of a chunk)."""
-        resp = await self._client.post(
-            f"{self.base_url}/tokenize",
-            json={"content": text, "add_special": add_special})
-        resp.raise_for_status()
-        toks = resp.json().get("tokens", [])
+        with _transport_guard(f"POST {self.base_url}/tokenize "
+                              f"({len(text)} chars)"):
+            resp = await self._client.post(
+                f"{self.base_url}/tokenize",
+                json={"content": text, "add_special": add_special})
+            resp.raise_for_status()
+            toks = resp.json().get("tokens", [])
         if text and not toks:
             raise DispatchError("/tokenize returned 0 tokens for non-empty input")
         return toks
 
     async def props(self) -> dict:
-        resp = await self._client.get(f"{self.base_url}/props")
-        resp.raise_for_status()
-        return resp.json()
+        with _transport_guard(f"GET {self.base_url}/props"):
+            resp = await self._client.get(f"{self.base_url}/props")
+            resp.raise_for_status()
+            return resp.json()
 
     async def health(self) -> bool:
         """GET /health as a POLL, not an assertion: True only on a 200.
@@ -536,9 +632,10 @@ class ServerClient:
         idle?", and both read exactly this field. Note the shape: `next_token`
         is a LIST (one entry per sequence), not an object -- a slot-state
         parser must index it rather than `.get()` it (recipes §serverapi)."""
-        resp = await self._client.get(f"{self.base_url}/slots")
-        resp.raise_for_status()
-        return resp.json()
+        with _transport_guard(f"GET {self.base_url}/slots"):
+            resp = await self._client.get(f"{self.base_url}/slots")
+            resp.raise_for_status()
+            return resp.json()
 
     async def completion(self, prompt: str, *, n_predict: int, temperature: float,
                           top_p: float, seed: int, stream: bool = True,
@@ -571,21 +668,23 @@ class ServerClient:
         parts: list[str] = []
         final_event: dict[str, Any] | None = None
         t_first_byte = None
-        async with self._client.stream(
-            "POST", f"{self.base_url}/completion", json=body, timeout=self._timeout
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                if t_first_byte is None:
-                    t_first_byte = utc_now()
-                ev = json.loads(line[len("data: "):])
-                if ev.get("stop"):
-                    final_event = ev
-                    break
-                if ev.get("content"):
-                    parts.append(ev["content"])
+        with _transport_guard(f"POST {self.base_url}/completion"):
+            async with self._client.stream(
+                "POST", f"{self.base_url}/completion", json=body,
+                timeout=self._httpx_timeout
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    if t_first_byte is None:
+                        t_first_byte = utc_now()
+                    ev = json.loads(line[len("data: "):])
+                    if ev.get("stop"):
+                        final_event = ev
+                        break
+                    if ev.get("content"):
+                        parts.append(ev["content"])
 
         if final_event is None:
             raise DispatchError("/completion stream ended without a final event")
@@ -753,6 +852,15 @@ class LLMDispatcher:
         # one logical call after a rotation continues its `retry_idx` sequence
         # instead of colliding with the refusal that triggered the rotation.
         self._recorded: dict[str, int] = {}
+        #: `/tokenize` attempts that died in transport and were retried
+        #: (`count_tokens`). Counted rather than left silent because a retry
+        #: that nobody can see turns a degrading box into a slightly slower
+        #: one: at 3.2M tokenize calls per §8 grid, "the transport hiccuped
+        #: twice" and "the transport hiccuped 40,000 times" are the same run
+        #: without this number. It is not a `steps` row -- these calls carry no
+        #: call_id and are not episode work -- so this counter is where the
+        #: evidence lives.
+        self.transport_retries = 0
 
     @classmethod
     def from_config(cls, cfg: Config, *,
@@ -777,10 +885,18 @@ class LLMDispatcher:
         # the better and could only introduce mid-episode prefix drift.
         use_envelope = cfg.scaffold.leaf_envelope.enabled
         leaf_prefix = cfg.prompt_registry().load().render_leaf(envelope=use_envelope)
+        # `servers.leaf.per_call_timeout_s` WINS where it is set, and the whole
+        # point is which config object this is: §8's B1/B3 dispatcher is built
+        # from `bench_leaf_config`, which substitutes `servers.bench_leaf` INTO
+        # `servers.leaf`, so the bench profile's own timeout arrives here by
+        # the same route its ctx and slot count do. An unset value keeps
+        # `scaffold.retries.per_call_timeout_s` -- the resident leaf's 240 s.
+        timeout_s = (cfg.servers.leaf.per_call_timeout_s
+                     or cfg.scaffold.retries.per_call_timeout_s)
         targets = {
             "leaf": DispatchTarget(
                 client=ServerClient(f"http://127.0.0.1:{cfg.servers.leaf.port}",
-                                     timeout=cfg.scaffold.retries.per_call_timeout_s),
+                                     timeout=timeout_s),
                 max_predict=max_predict.leaf,
                 slot_capacity_tokens=cfg.servers.leaf.ctx // cfg.servers.leaf.parallel,
                 temperature=leaf_sampling.temperature,
@@ -993,14 +1109,64 @@ class LLMDispatcher:
         every window boundary through it. A rotation that replaced the process
         underneath one of those would kill C2's chunking or C5's admission with
         a bare connection error, outside any retry loop.
+
+        RETRIED ON `TransportError`, AND THIS IS THE HOT PATH, NOT AN EDGE
+        CASE. Measured on the shipped 640/480 geometry against the bench leaf:
+        C2's boundary binary search costs 11,796 `/tokenize` round trips to
+        chunk ONE 424 KB corpus (~430-580 calls/s), against ONE `/completion`
+        for the answer -- so >99.9% of a B2/B3 episode's leaf round trips come
+        through here, and the pre-registered §8 grid (360 cells, ~270 of them
+        chunking) issues roughly 3.2 MILLION of them. Every one was a single
+        point of failure for the whole 39-hour run until this loop existed:
+        `query()` has had three attempts and a backoff since S1, and an S4
+        smoke run died on cell 16/16 when exactly one of ~120,000 of these hit
+        a transient loopback connect failure (`httpx.ConnectError`, mid-chunk,
+        no retry, no containment).
+
+        The retry is SAFE rather than merely convenient: `/tokenize` is a pure
+        function of (text, add_special) on this target's fixed tokenizer. It
+        holds no slot, allocates nothing in the KV cache, costs no budget and
+        writes no step, so a second identical request cannot change what the
+        first would have returned -- which is precisely why the same three
+        attempts would NOT be safe on `/completion` without the slot and step
+        bookkeeping `_attempts_loop` does around them.
+
+        ONLY `TransportError` is retried. A `/tokenize` that answered "0 tokens
+        for non-empty input", an HTTP 4xx, or an unknown role are faults an
+        identical retry cannot fix, and retrying them would spend three round
+        trips and two backoffs to fail the same way.
         """
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
         if not text:
             return 0
-        async with self._admitted():
-            return len(await target.client.tokenize(text))
+        attempts = max(1, self._retries.max_attempts)
+        last: TransportError | None = None
+        for attempt in range(attempts):
+            async with self._admitted():
+                try:
+                    n = len(await target.client.tokenize(text))
+                except TransportError as exc:
+                    last = exc
+                    self.transport_retries += 1
+                else:
+                    return n
+            # OUTSIDE `_admitted()`, exactly as `_attempts_loop` holds no
+            # semaphore across its backoff: a call that is sleeping is not
+            # talking to the server, and keeping the rotation gate's in-flight
+            # count up across a 1-4 s sleep would make `quiesce()` wait for a
+            # coroutine that is doing nothing.
+            if attempt < attempts - 1:
+                await asyncio.sleep(self._backoff(attempt))
+        raise TransportError(
+            f"/tokenize failed after {attempts} attempts (role={role!r}, "
+            f"{len(text)} chars): {last}") from last
+
+    def _backoff(self, attempt: int) -> float:
+        """`retries.backoff_s` clamped to its last entry, 0 if it is empty."""
+        backoff = self._retries.backoff_s
+        return float(backoff[min(attempt, len(backoff) - 1)]) if backoff else 0.0
 
     def _record(self, step: dict[str, Any]) -> None:
         self.steps.append(step)

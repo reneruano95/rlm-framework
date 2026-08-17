@@ -55,6 +55,29 @@ class DispatchError(RlmError):
     """A model-server call failed after its retry budget."""
 
 
+class TransportError(DispatchError):
+    """A model-server call never got an answer: the connection was refused,
+    reset, or timed out, or the body would not parse (spec §5 C4).
+
+    THE CLASS THAT KEEPS `httpx` INSIDE C4. Every `ServerClient` method maps
+    the HTTP library's own exceptions onto this before they can leave the
+    dispatcher, because `rlm.cli`'s exit-code taxonomy is written in terms of
+    `RlmError`: an exception the scaffold cannot name is deliberately allowed
+    to escape as an uncaught traceback (it is a bug), while an attributable
+    failure becomes `refused: ...` and exit 2 with a `--resume` hint. A raw
+    `httpx.ConnectError` is an attributable failure wearing a bug's clothes,
+    and it ended a 15/16-cell S4 smoke run on the last cell.
+
+    A `DispatchError` subclass so every `except DispatchError` handler in the
+    arms, the episode runner and C5 keeps working unchanged. It is separate
+    from its parent for one reason: it is the failure class that is worth
+    RETRYING on an idempotent request, and `LLMDispatcher.count_tokens` retries
+    exactly this and nothing else (a `/tokenize` that answered "0 tokens for
+    non-empty input", or an HTTP 4xx, is a fault that a second identical
+    request cannot fix).
+    """
+
+
 class PreflightFailed(DispatchError):
     """A leaf call could not be BUILT: `/apply-template` or the pre-flight
     `/tokenize` failed, so nothing was ever dispatched and no slot was burned.

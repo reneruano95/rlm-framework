@@ -153,6 +153,25 @@ servers:
     ub: 512
     b: 2048
     env: { ROCBLAS_USE_HIPBLASLT: '1' }
+    # PRE-REGISTERED 2026-08-17, before any scored §8 run exists. The global
+    # `scaffold.retries.per_call_timeout_s: 240` is sized for the RLM profile's
+    # 2,560-token slots; this profile hands B1/B3 a 262,144-token slot and §8
+    # pre-registers corpora that fill it, so the per-call deadline here has to
+    # be denominated in this box's measured long-context prefill rate.
+    #
+    #   measured  2026-08-16, block 23 b1: 104,364 tokens prefilled in 226.9 s
+    #             (460.0 t/s) -- 227 s to first byte, 13 s inside the old 240 s;
+    #             repeated 2026-08-17 at 126,346 tokens / 303.8 s (415.8 t/s).
+    #   projected the largest pre-registered inputs (~1M-char needle corpora,
+    #             ~265K tokens) truncate to ~261K tokens for the 256K slot, and
+    #             at the same 460 t/s that is a ~567 s first byte.
+    #
+    # 600 s would leave ~5% margin on the biggest pre-registered input, which is
+    # the same thin-margin bet the 240 s default just lost at 104K. 900 s is
+    # ~1.6x the worst measured-rate case, and it costs nothing when calls are
+    # fast: it is a deadline, not a delay. C5's episode wall clock still bounds
+    # the run.
+    per_call_timeout_s: 900
     # `--cont-batching` is deliberately ABSENT (the RLM leaf carries it): this
     # profile serves exactly two sequential single calls per block, so batching
     # buys nothing, and R14 (`s2/OCCUPANCY.md` §7) puts the concurrent-dispatch

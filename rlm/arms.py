@@ -55,8 +55,10 @@ a 0.1 s watchdog because a sandbox cell can loop forever and never return to the
 turn loop; a baseline arm has no sandbox and no cell — it makes between one and
 a few hundred calls and does nothing else — so the coarser bound is the honest
 one, and it is stated here rather than discovered from the code. A breach is
-therefore detected at most one model call late (bounded by
-`scaffold.retries.per_call_timeout_s` × `max_attempts`).
+therefore detected at most one model call late (bounded by that call's timeout
+× `max_attempts` -- `servers.<role>.per_call_timeout_s` where the profile sets
+one, `scaffold.retries.per_call_timeout_s` otherwise; B1/B3 run on the bench
+profile's 900 s, sized against a 262K-token slot's measured prefill).
 
 **THIS MODULE NEVER IMPORTS C4.** `rlm/episode.py` is the composition root and
 the only module permitted to import both C4 and the isolated components; arms

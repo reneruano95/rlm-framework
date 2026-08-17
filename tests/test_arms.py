@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import copy
 import hashlib
+import socket
 from pathlib import Path
 
 import duckdb
@@ -1680,3 +1681,52 @@ def test_the_transport_family_is_recognised_without_importing_httpx():
     assert is_transport_error(jsonmod.JSONDecodeError("bad", "{", 0))
     assert not is_transport_error(TypeError("a bug"))
     assert not is_transport_error(ValueError("a bug"))
+
+
+# --------------------------------------------------------------------------- #
+# The S4 smoke crash, at the level it actually happened (2026-08-16, run
+# 0f798a78, cell 16/16 = codeqa-01/b3): B3 assembles its prompt by chunking the
+# corpus through C2, whose boundary binary search is ~12,000 `/tokenize` round
+# trips, and ONE of them died in transport. `_b3_prompt` runs before the episode
+# row is opened and `rlm.bench._run_cell` contains only `ConfigError`, so the
+# exception went all the way out of `run_bench` -- and because `httpx` types are
+# not `RlmError`, `rlm.cli.cmd_bench`'s taxonomy (which turns named failures
+# into `refused: ...` + exit 2 + a resume hint, and deliberately lets unnamed
+# ones out as tracebacks) filed a transport hiccup as an unnameable bug.
+# --------------------------------------------------------------------------- #
+
+
+async def test_b3_chunk_counting_contains_a_dead_transport_as_an_rlm_error(
+        bench_cfg):
+    """A REAL C4 over a REAL client pointed at a port nothing listens on --
+    not a fake that raises a chosen exception, since the whole question is what
+    the HTTP library does and whether it can escape."""
+    import httpx
+
+    from rlm.config import Retries
+    from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient, SlotPool
+    from rlm.errors import RlmError, TransportError
+
+    cfg = bench_cfg()
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    client = ServerClient(f"http://127.0.0.1:{port}", timeout=5.0)
+    disp = LLMDispatcher(
+        targets={"leaf": DispatchTarget(
+            client=client, max_predict=64, slot_capacity_tokens=32768,
+            temperature=0.3, top_p=0.9, seed=1, system_prefix="s")},
+        parallel=2,
+        retries=Retries(max_attempts=2, backoff_s=[0.01], per_call_timeout_s=5),
+        slots=SlotPool(2))
+    try:
+        with pytest.raises(RlmError) as caught:
+            await _run_b3(cfg, _task(context="a" * 4000), disp)
+    finally:
+        await disp.aclose()
+    assert isinstance(caught.value, TransportError)
+    assert not isinstance(caught.value, httpx.HTTPError)
+    # The retry happened, and it happened where the storm is (the counter), not
+    # around the one /completion B3 never got to make.
+    assert disp.transport_retries == 2

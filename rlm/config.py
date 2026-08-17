@@ -55,6 +55,20 @@ class ServerConfig(_Strict):
     ub: int
     b: int
     extra_flags: list[str] = []
+    #: THIS server's per-call HTTP timeout, overriding
+    #: `scaffold.retries.per_call_timeout_s` for the client that talks to it.
+    #: `None` keeps the global value, which is what every pre-S4 config gets.
+    #:
+    #: It exists because one number cannot serve two topologies. The global 240
+    #: s is sized for the RLM profile, whose slots are 2,560 tokens and whose
+    #: calls answer in seconds; `servers.bench_leaf` gives B1/B3 a 262,144-token
+    #: slot and pre-registers corpora that fill it, where a single first byte is
+    #: minutes away (measured on this box: 227 s at 104K tokens). Raising the
+    #: global instead would slacken every RLM-profile call's deadline by the
+    #: same factor, and C5's wall clock is not a substitute -- it kills the
+    #: EPISODE, so a hung call would burn the whole budget instead of failing
+    #: its own attempt.
+    per_call_timeout_s: int | None = None
     #: Environment overlay for the launch, MERGED over `os.environ` (never
     #: substituted for it -- a child with a two-entry environment has no PATH
     #: and loads no backend DLL). Here rather than in code for the same reason

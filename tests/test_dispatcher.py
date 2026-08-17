@@ -1466,3 +1466,211 @@ async def test_the_mock_dispatcher_accepts_the_n_predict_keyword_too():
     key = f"leaf:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
     d = MockDispatcher({key: "A"}, parallel=1)
     assert await d.query("q", role="leaf", call_id="c1", n_predict=7) == "A"
+
+
+# --------------------------------------------------------------------------- #
+# C4's client boundary: no httpx type may cross it, and the one round trip the
+# chunker makes ~12,000 times per episode gets the retry every other one has.
+#
+# THE FAILURE THIS IS WRITTEN FROM (2026-08-16, S4 smoke run 0f798a78): 15 of 16
+# cells done, and cell 16 (codeqa-01/b3) died mid-chunking with a raw
+# `httpx.ConnectError: All connection attempts failed` out of
+# `chunker._snap_back` -> `dispatcher.count_tokens`. Two independent defects
+# were needed for that to end the RUN rather than the CALL:
+#   1. `count_tokens` had no retry, while it is >99.9% of an episode's leaf
+#      round trips (measured 11,796 /tokenize per 424 KB corpus against 1
+#      /completion), so the one call in ~120,000 that hit a transient took the
+#      grid with it; and
+#   2. `httpx.ConnectError` is not an `RlmError`, and `rlm.cli.cmd_bench`
+#      deliberately lets un-named exceptions escape as tracebacks (they are
+#      bugs) while turning named ones into `refused: ...` + exit 2 + a resume
+#      hint. A transport hiccup was wearing a bug's clothes.
+# --------------------------------------------------------------------------- #
+
+
+class _FlakyClient:
+    """Wraps a real `ServerClient`, failing the first `n` /tokenize calls the
+    way a broken connection does -- through C4's own boundary type, since that
+    is what `ServerClient` now raises."""
+
+    def __init__(self, inner, n: int, exc: Exception | None = None) -> None:
+        self._inner = inner
+        self.left = n
+        self.calls = 0
+        self._exc = exc
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def tokenize(self, text: str, *, add_special: bool = False):
+        from rlm.errors import TransportError
+
+        self.calls += 1
+        if self.left > 0:
+            self.left -= 1
+            raise self._exc or TransportError("connection refused (fake)")
+        return await self._inner.tokenize(text, add_special=add_special)
+
+
+def _dead_client(timeout: float = 2.0):
+    """A `ServerClient` pointed at a port nothing listens on: a real connect, a
+    real refusal, a real httpx exception inside the guard.
+
+    The port is bound and released rather than picked as a constant, because a
+    low well-known port (9, 1) is DROPPED rather than reset on this box's
+    firewall -- the connect then times out, which is a different failure with a
+    different errno and takes the whole timeout to arrive."""
+    import socket
+
+    from rlm.dispatcher import ServerClient
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return ServerClient(f"http://127.0.0.1:{port}", timeout=timeout)
+
+
+@pytest.mark.parametrize("call", ["apply_template", "tokenize", "props",
+                                  "slots", "completion"])
+async def test_no_raw_httpx_exception_escapes_a_server_client_method(call):
+    """(1) The boundary itself: every method, one dead port, one named family.
+
+    Parametrized over ALL of them rather than the one that crashed, because the
+    property has to hold for the method nobody has hit yet."""
+    import httpx
+
+    from rlm.errors import RlmError, TransportError
+
+    args, kwargs = {
+        "apply_template": ([[{"role": "user", "content": "q"}]], {}),
+        "tokenize": (["hello"], {}),
+        "props": ([], {}),
+        "slots": ([], {}),
+        "completion": (["p"], {"n_predict": 1, "temperature": 0.0,
+                               "top_p": 1.0, "seed": 1}),
+    }[call]
+    client = _dead_client()
+    try:
+        with pytest.raises(RlmError) as caught:
+            await getattr(client, call)(*args, **kwargs)
+    finally:
+        await client.aclose()
+    assert isinstance(caught.value, TransportError)
+    assert not isinstance(caught.value, httpx.HTTPError)
+    # The httpx exception is preserved as the CAUSE -- contained, not erased.
+    assert isinstance(caught.value.__cause__, httpx.HTTPError)
+
+
+def test_a_connect_failures_os_error_number_survives_into_the_message():
+    """(2) The diagnostic the S4 crash did not have, rebuilt in its exact shape.
+
+    `anyio` collapses every address it tried into ONE
+    `OSError("All connection attempts failed")` whose real errno is inside an
+    `ExceptionGroup`, `httpcore` re-raises, `httpx` re-wraps with `str(exc)` as
+    the message -- so the traceback that ended run 0f798a78 named neither the
+    errno nor the WinError, and "refused" (10061), "out of ephemeral ports"
+    (10048) and "buffer pool empty" (10055) were indistinguishable in the only
+    artefact the failure left. Synthetic rather than a live refusal, because a
+    live one on this box takes ~2.2 s to arrive (Windows retries the loopback
+    SYN before reporting `[WinError 1225]`), and a test does not need to buy
+    that twice to check that the number survives the three re-wraps."""
+    import httpx
+
+    from rlm.dispatcher import _transport_guard
+
+    refused = OSError(22, "the connection was refused", None, 10061)
+    with pytest.raises(DispatchError) as caught:
+        with _transport_guard("GET http://127.0.0.1:8081/props"):
+            try:
+                raise ExceptionGroup("all attempts failed", [refused])
+            except BaseException as exc:
+                raise httpx.ConnectError("All connection attempts failed") from exc
+    assert "errno=" in str(caught.value)
+    assert "winerror=10061" in str(caught.value)
+    assert "the connection was refused" in str(caught.value)
+
+
+async def test_count_tokens_retries_a_transport_failure_and_answers(mock_server):
+    """(3) The fix for the crash itself: the chunker's counter now survives a
+    transient exactly as `query()` has since S1."""
+    d = mock_server.dispatcher()
+    target = d._targets["leaf"]
+    flaky = target.client = _FlakyClient(target.client, 2)
+
+    assert await d.count_tokens("hello world", role="leaf") > 0
+    assert flaky.calls == 3                      # two refusals, then an answer
+    assert d.transport_retries == 2              # ...and counted, not silent
+
+
+async def test_count_tokens_gives_up_as_a_dispatch_error_never_as_httpx(mock_server):
+    """(4) When the transport really is gone, C4 still owns the exception: a
+    `DispatchError` (so `rlm.cli`'s taxonomy refuses with exit 2 and a resume
+    hint) and never the HTTP library's own type."""
+    import httpx
+
+    from rlm.errors import TransportError
+
+    d = mock_server.dispatcher(max_attempts=3)
+    target = d._targets["leaf"]
+    target.client = _dead_client()
+    try:
+        with pytest.raises(DispatchError) as caught:
+            await d.count_tokens("hello world", role="leaf")
+    finally:
+        await target.client.aclose()
+    assert isinstance(caught.value, TransportError)
+    assert not isinstance(caught.value, httpx.HTTPError)
+    assert "after 3 attempts" in str(caught.value)
+    assert d.transport_retries == 3
+
+
+async def test_count_tokens_does_not_retry_a_fault_a_retry_cannot_fix(mock_server):
+    """(5) Only `TransportError` is retried. A `/tokenize` that ANSWERED,
+    wrongly, is not made right by asking again -- and spending three round trips
+    plus two backoffs to learn that is the retry loop working against itself."""
+    d = mock_server.dispatcher()
+    target = d._targets["leaf"]
+    flaky = target.client = _FlakyClient(
+        target.client, 5, exc=DispatchError("/tokenize returned 0 tokens"))
+
+    with pytest.raises(DispatchError, match="0 tokens"):
+        await d.count_tokens("hello world", role="leaf")
+    assert flaky.calls == 1
+    assert d.transport_retries == 0
+
+
+async def test_the_count_tokens_backoff_is_not_held_across_the_rotation_gate(
+        mock_server):
+    """(6) The sleep sits OUTSIDE `_admitted()`, so a retrying counter does not
+    keep `quiesce()` waiting on a coroutine that is doing nothing."""
+    import asyncio
+
+    d = mock_server.dispatcher(backoff_s=[0.3])
+    target = d._targets["leaf"]
+    target.client = _FlakyClient(target.client, 1)
+
+    task = asyncio.create_task(d.count_tokens("hello world", role="leaf"))
+    await asyncio.sleep(0.15)                    # mid-backoff, by construction
+    assert d.in_flight == 0
+    await asyncio.wait_for(d.quiesce(), timeout=1.0)
+    d.resume()
+    assert await task > 0
+
+
+async def test_a_server_block_may_override_the_per_call_timeout(minimal_cfg_dict):
+    """(7) §8's B1/B3 profile prefills for minutes on a 262,144-token slot, so
+    it carries its own deadline; the resident leaf keeps the global 240 s."""
+    from rlm.cli import bench_leaf_config
+
+    raw = _absolutized_prompt_paths(copy.deepcopy(minimal_cfg_dict))
+    resident = LLMDispatcher.from_config(Config.model_validate(copy.deepcopy(raw)))
+    bench = LLMDispatcher.from_config(bench_leaf_config(copy.deepcopy(raw)))
+    try:
+        assert (resident._targets["leaf"].client._timeout
+                == raw["scaffold"]["retries"]["per_call_timeout_s"])
+        assert raw["servers"]["bench_leaf"]["per_call_timeout_s"] == 900
+        assert bench._targets["leaf"].client._timeout == 900
+    finally:
+        await resident.aclose()
+        await bench.aclose()
