@@ -423,4 +423,8 @@ benchmark:
   manifest_sha256: 571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91
   seeds: [1, 2, 3]
   escalation_seeds: [4, 5]
-power_sampling: { enabled: false }
+# S0 item 8 measured the Windows RAPL collector's overhead at +0.56% (noise)
+# and recorded energy_j as ENABLED on this box (s0/RESULTS.md:73-74). §8 makes
+# the cost scorecard mandatory and energy one of its columns, so leaving this
+# off would have run S4 with the energy column NULL for no reason but a default.
+power_sampling: { enabled: true }

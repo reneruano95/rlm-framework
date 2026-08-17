@@ -156,6 +156,7 @@ __all__ = [
     "b2_summary_n_predict",
     "bench_slot_capacity",
     "bm25_select",
+    "is_transport_error",
     "outcome_for_error",
     "run_b1",
     "run_b2",
@@ -300,6 +301,33 @@ def bench_slot_capacity(cfg: Config) -> int:
 # --------------------------------------------------------------------------- #
 # shared arm plumbing
 # --------------------------------------------------------------------------- #
+
+
+#: Exception FAMILIES that mean "the injected client could not reach the
+#: server", recognised by the module their type is defined in.
+#:
+#: `arms.py` may not import `httpx` (the dependency rule -- `FORBIDDEN_ROOTS`
+#: in `tests/test_import_rules.py` bars every HTTP library from this side), so
+#: `except httpx.HTTPError` is not available here and the family is recognised
+#: structurally instead. The alternative -- `except Exception` around the root
+#: call -- would swallow the scaffold's own bugs and score them as an ordinary
+#: `error` episode, which §6 forbids and which this module's own `except
+#: BaseException: ep.close(...); raise` exists to prevent.
+_TRANSPORT_MODULES = frozenset({"httpx", "httpcore", "ssl", "json"})
+
+
+def is_transport_error(exc: BaseException) -> bool:
+    """Is `exc` a TRANSPORT failure from an injected HTTP client?
+
+    `OSError` covers the socket layer; the module check covers httpx/httpcore
+    (connect, read, write, pool timeouts, and `HTTPStatusError` from
+    `raise_for_status`) and a response body that would not parse as JSON --
+    all of them "the server did not answer usefully", none of them a bug in
+    this file.
+    """
+    if isinstance(exc, OSError):
+        return True
+    return (type(exc).__module__ or "").split(".")[0] in _TRANSPORT_MODULES
 
 
 def outcome_for_error(exc: BaseException) -> tuple[Outcome, str]:
@@ -626,7 +654,8 @@ class ArmEpisode:
     async def call_leaf(self, prompt: str, *, chunk: str | None = None,
                          slot_id: int | None = None,
                          parent: int | None = None,
-                         admit_tokens: int | None = None) -> str:
+                         admit_tokens: int | None = None,
+                         n_predict: int | None = None) -> str:
         """One leaf call through C4, wall-clock-checked on both sides and
         logged either way.
 
@@ -644,6 +673,14 @@ class ArmEpisode:
         B1/B3 never pass it: their ONE call per episode is already bounded by
         the bench_leaf relaunch profile's single-slot capacity, so admitting
         it besides would only duplicate that check with a different one.
+
+        `n_predict`, when given, CAPS this call's decode. B2 passes
+        `b2_summary_n_predict`'s value on every summary so that the budget §8
+        pre-registers is ENFORCED rather than merely recorded: the whole point
+        of that formula is that all `n_chunks` summaries fit 80% of the root
+        window, and a 299-chunk corpus decoding at the leaf's full
+        `max_predict` overflows the reduce prompt by construction. Omitted, C4
+        uses the leaf role's `max_predict` exactly as before.
 
         A `BudgetBreach` from `.admit()` is raised BEFORE any dispatch and
         BEFORE any reservation is recorded (`BudgetEnforcer.admit` never
@@ -673,6 +710,8 @@ class ArmEpisode:
             # draw while `config_snapshot` recorded three different ones.
             "seed": self.cfg.scaffold.sampling.leaf.seed,
         }
+        if n_predict is not None:
+            kwargs["n_predict"] = n_predict
         if slot_id is not None and self.can_pin_slot():
             kwargs["slot_id"] = slot_id
         try:
@@ -1162,9 +1201,15 @@ def b2_summary_n_predict(cfg: Config, n_chunks: int) -> int:
     `n_chunks * n_predict <= 0.8 * window_tokens`, i.e.
     `n_predict = (8 * window_tokens) // (10 * n_chunks)` -- floored at 16
     tokens (a summary shorter than that is not a useful compression of a
-    whole chunk) and capped at the leaf role's configured `max_predict` (the
-    dispatcher will not decode past it regardless; see the module docstring
-    just above for why the value is recorded rather than enforced per-call).
+    whole chunk) and capped at the leaf role's configured `max_predict`.
+
+    ENFORCED, not merely recorded: `run_b2` passes this value to
+    `call_leaf(n_predict=...)` on every summary call, so C4 decodes to it (the
+    per-call override on `LLMDispatcher.query`). It was recorded-only once, and
+    that made the "fits by construction" claim false for exactly the corpora
+    the formula exists for -- at 299 chunks the cap is 87 tokens while the leaf
+    would have decoded up to 512, putting ~150K tokens of summary into a
+    reduce prompt sized for 0.8 x 32K.
 
     `n_chunks <= 0` (an empty corpus) returns the leaf role's `max_predict`
     unshrunk rather than dividing by zero -- there is no summary call to size
@@ -1231,14 +1276,36 @@ async def _b2_root_final(cfg: Config, *, ep: ArmEpisode, registry: PromptRegistr
 
     ep.check_wall_clock()
     call_id = str(uuid.uuid4())
-    rendered = await root_client.apply_template(
-        messages,
-        chat_template_kwargs={"enable_thinking": cfg.scaffold.root.enable_thinking})
     sampling = cfg.scaffold.sampling.root
-    result = await root_client.completion(
-        rendered, n_predict=cfg.scaffold.budgets.max_predict.root,
-        temperature=sampling.temperature, top_p=sampling.top_p,
-        seed=sampling.seed, stream=True)
+    # THE ROOT SERVER IS A SERVER TOO. C4 wraps every leaf transport failure in
+    # `DispatchError`, so a leaf that dies is `error/server_unreachable` and §8's
+    # rerun-once applies to it. The reduce step talks to the root DIRECTLY (via
+    # the injected client), so an httpx error here used to propagate out of
+    # `run_b2` uncaught -- past the `(BudgetBreach, DispatchError,
+    # ServerRotationError)` handler, through `except BaseException` (which
+    # closes the row `arm_error` and RE-RAISES), and out of `rlm.bench._run_cell`,
+    # which contains only `ConfigError`. One root hiccup at hour 12 would end
+    # the whole grid. Mapped to the same `DispatchError` a leaf failure raises,
+    # it becomes this cell's `error/server_unreachable` and gets §8's rerun.
+    try:
+        rendered = await root_client.apply_template(
+            messages,
+            chat_template_kwargs={"enable_thinking": cfg.scaffold.root.enable_thinking})
+        result = await root_client.completion(
+            rendered, n_predict=cfg.scaffold.budgets.max_predict.root,
+            temperature=sampling.temperature, top_p=sampling.top_p,
+            seed=sampling.seed, stream=True)
+    except asyncio.CancelledError:
+        raise                       # C5's abort path owns this one
+    except BaseException as exc:
+        # A BUG STAYS LOUD (`is_transport_error`'s docstring): only the
+        # transport family is converted, everything else re-raises and closes
+        # the row `arm_error` through `run_b2`'s own handler.
+        if not is_transport_error(exc):
+            raise
+        raise DispatchError(
+            f"B2's reduce step could not reach the root server at port "
+            f"{cfg.servers.root.port}: {exc}") from exc
     answer = _strip_reasoning(result.content).strip()
 
     attempt = {
@@ -1320,7 +1387,14 @@ async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any
                 # `check_wall_clock()` at the top of every call is what makes
                 # the clock "checked between calls" (Task 6's rule) without a
                 # second check here.
-                summary = await ep.call_leaf(prompt, admit_tokens=prompt_tokens)
+                # `n_predict=n_predict`: §8's summary budget ENFORCED, not
+                # merely recorded in the snapshot. Without it a 299-chunk
+                # aggregation corpus decodes 299 x the leaf's max_predict into
+                # a reduce prompt sized for 0.8 x the root window -- B2 would
+                # overflow the root by construction on every aggregation task,
+                # which is a manufactured §8 result, not a measurement.
+                summary = await ep.call_leaf(prompt, admit_tokens=prompt_tokens,
+                                              n_predict=n_predict)
                 # Deterministic, never crash-and-error the arm on one bad
                 # summary (module docstring): an empty/whitespace reply still
                 # gets a numbered slot in the reduce prompt, just a literal

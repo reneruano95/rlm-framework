@@ -6,10 +6,13 @@ mode is dying silently at launch — callers must check alive() and record NULLs
 never fabricated numbers, when it is not."""
 from __future__ import annotations
 
+import contextlib
+import os
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 _PS_SCRIPT = (
     "$ErrorActionPreference='Stop';"
@@ -45,8 +48,19 @@ def energy_j_between(a: PowerReading, b: PowerReading) -> float:
 
 
 class PowerSampler:
-    def __init__(self, interval_s: float = 1.0) -> None:
+    def __init__(self, interval_s: float = 1.0,
+                 stderr_path: str | os.PathLike | None = None) -> None:
         self._interval = interval_s
+        #: Where the child's stderr goes. Its KNOWN failure mode is dying
+        #: silently at launch (this module's own docstring), and `alive()`
+        #: reports THAT it is dead without ever saying why -- the counter set
+        #: absent, the counter name localised, the Energy Meter provider not
+        #: registered, PowerShell's own execution policy. Discarding stderr
+        #: made every one of those look identical from the outside, on a
+        #: 39-hour run whose energy column silently becomes NULL. `None` keeps
+        #: the old DEVNULL behaviour for callers with nowhere to write.
+        self._stderr_path = Path(stderr_path) if stderr_path is not None else None
+        self._stderr_file = None
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
         self._latest: PowerReading | None = None
@@ -54,12 +68,29 @@ class PowerSampler:
         self._last_growth = 0.0
         self._lock = threading.Lock()
 
+    def _open_stderr(self):
+        if self._stderr_path is None:
+            return subprocess.DEVNULL
+        try:
+            self._stderr_path.parent.mkdir(parents=True, exist_ok=True)
+            self._stderr_file = self._stderr_path.open("w", encoding="utf-8",
+                                                        errors="replace")
+        except OSError:
+            # A diagnostic that cannot be opened must not stop the run: the
+            # sampler is optional instrumentation and this is its log file.
+            return subprocess.DEVNULL
+        return self._stderr_file
+
     def start(self) -> None:
         self._proc = subprocess.Popen(
             ["powershell", "-NoProfile", "-Command", _PS_SCRIPT],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            stdout=subprocess.PIPE, stderr=self._open_stderr(), text=True)
         self._thread = threading.Thread(target=self._pump, daemon=True)
         self._thread.start()
+
+    @property
+    def stderr_path(self) -> "Path | None":
+        return self._stderr_path
 
     def _pump(self) -> None:
         assert self._proc and self._proc.stdout
@@ -100,6 +131,10 @@ class PowerSampler:
             proc.wait(timeout=5.0)
         except subprocess.TimeoutExpired:
             pass
+        if self._stderr_file is not None:
+            with contextlib.suppress(OSError, ValueError):
+                self._stderr_file.close()
+            self._stderr_file = None
         if proc.stdout is not None:
             try:
                 proc.stdout.close()

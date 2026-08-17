@@ -1045,7 +1045,8 @@ class LLMDispatcher:
 
     async def query(self, prompt: str, *, role: str, call_id: str,
                      chunk: str | None = None,
-                     seed: int | None = None) -> "str | dict[str, Any]":
+                     seed: int | None = None,
+                     n_predict: int | None = None) -> "str | dict[str, Any]":
         """Dispatch one leaf call. Returns the answer STRING, or -- when this
         target asks for the JSON envelope -- the parsed envelope as a dict
         (`rlm.envelope.payload`). Off by default, so every existing caller and
@@ -1082,6 +1083,17 @@ class LLMDispatcher:
         recorded that it varied: three replicates of one leaf, reported as
         three seeds. `None` keeps the construction-time value, which is what
         every non-bench caller wants.
+
+        `n_predict` OVERRIDES `target.max_predict` FOR THIS CALL, on the same
+        terms and for a related reason: §8's B2 sizes its per-chunk summary
+        budget so that ALL of them fit 80% of the ROOT window
+        (`rlm.arms.b2_summary_n_predict`), and a budget the caller can only
+        RECORD is not a budget. Unenforced, a 299-chunk aggregation corpus
+        decodes 299 x `max_predict` tokens of summary into a reduce prompt
+        sized for 0.8 x 32K -- the arm overflows the root window by
+        construction, which is a manufactured §8 result rather than a
+        measurement. Never used to RAISE a budget: the caller passes a value
+        it derived, and `target.max_predict` remains what an omitted call gets.
         """
         for attempt in range(_MAX_PREFLIGHT_ROTATIONS + 1):
             generation = self._pool_generation
@@ -1092,7 +1104,7 @@ class LLMDispatcher:
                 try:
                     return await self._query_once(prompt, role=role,
                                                    call_id=call_id, chunk=chunk,
-                                                   seed=seed)
+                                                   seed=seed, n_predict=n_predict)
                 except PreflightFailed:
                     # The pre-flight died against a process the scaffold itself
                     # was replacing. That is not this call's fault and must not
@@ -1142,15 +1154,17 @@ class LLMDispatcher:
 
     async def _query_once(self, prompt: str, *, role: str, call_id: str,
                            chunk: str | None = None,
-                           seed: int | None = None) -> "str | dict[str, Any]":
+                           seed: int | None = None,
+                           n_predict: int | None = None) -> "str | dict[str, Any]":
         """One pre-flight-and-dispatch pass, already gated and counted."""
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
-        # Resolved ONCE, here, so every attempt of this call decodes at the
-        # same seed: a retry that silently changed it would make the retry a
-        # different draw from the one being retried.
+        # Both decoding parameters are resolved ONCE, here, so every attempt of
+        # this call decodes identically: a retry that silently changed either
+        # would make the retry a different call from the one being retried.
         seed = target.seed if seed is None else seed
+        n_predict = target.max_predict if n_predict is None else n_predict
         layout = LAYOUT_QUESTION_ONLY if chunk is None else LAYOUT_CHUNK_QUESTION
         # Where this dispatch's retry_idx sequence starts -- 0 unless a
         # rotation is re-dispatching a call that already recorded attempts.
@@ -1309,7 +1323,7 @@ class LLMDispatcher:
         try:
             answer, parsed = await self._attempts_loop(
                 target, role, call_id, base, layout, rendered, sent, slot,
-                seed=seed)
+                seed=seed, n_predict=n_predict)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1333,14 +1347,14 @@ class LLMDispatcher:
 
     async def _attempts_loop(self, target: DispatchTarget, role: str, call_id: str,
                               base: int, layout: str, rendered: str, sent: str,
-                              slot: int, *,
-                              seed: int) -> tuple[str, "EnvelopeParse | None"]:
+                              slot: int, *, seed: int,
+                              n_predict: int) -> tuple[str, "EnvelopeParse | None"]:
         """The retry loop for one call, on one already-acquired slot.
 
-        `seed` is already resolved by `_query_once` (this call's override or
-        the target's) and is required rather than defaulted here, for the same
-        reason `ServerClient.completion` requires it: a decoding parameter that
-        can be forgotten is one that will be.
+        `seed` and `n_predict` are already resolved by `_query_once` (this
+        call's overrides, or the target's values) and are required rather than
+        defaulted here, for the same reason `ServerClient.completion` requires
+        them: a decoding parameter that can be forgotten is one that will be.
 
         Returns the answer verbatim plus, when this target asks for the JSON
         envelope, the parsed envelope that came with it. A malformed envelope is
@@ -1372,7 +1386,7 @@ class LLMDispatcher:
                     # would break byte-identity for a reason no test on
                     # message *content* could ever catch.
                     result = await target.client.completion(
-                        rendered, n_predict=target.max_predict,
+                        rendered, n_predict=n_predict,
                         temperature=target.temperature, top_p=target.top_p,
                         seed=seed, stream=True, id_slot=slot)
             except asyncio.CancelledError:
@@ -1529,13 +1543,14 @@ class MockDispatcher:
         return (len(text) + 3) // 4
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None, seed: int | None = None) -> str:
-        # `seed` is accepted and IGNORED, for interface parity with
-        # `LLMDispatcher.query`: a dry run replays fixtures and decodes
-        # nothing, so there is no draw for a seed to steer -- but every caller
-        # passes one, and a mock that rejected the keyword would make the
-        # dry-run path diverge from the real one at exactly the call site the
-        # dry run exists to exercise.
+                     chunk: str | None = None, seed: int | None = None,
+                     n_predict: int | None = None) -> str:
+        # `seed` and `n_predict` are accepted and IGNORED, for interface parity
+        # with `LLMDispatcher.query`: a dry run replays fixtures and decodes
+        # nothing, so there is no draw for a seed to steer and no decode for a
+        # budget to bound -- but every caller passes both, and a mock that
+        # rejected either keyword would make the dry-run path diverge from the
+        # real one at exactly the call site the dry run exists to exercise.
         #
         # Keyed on the COMPOSED user string, so a fixture keyed by (role,
         # prompt-hash) still matches whichever form the model used to build

@@ -80,6 +80,7 @@ class _ScriptedDispatcher(CannedDispatcher):
         self.counted: list[str] = []
         self.slot_ids: list[int | None] = []
         self.seeds: list[int | None] = []
+        self.n_predicts: list[int | None] = []
 
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         self.counted.append(text)
@@ -93,8 +94,10 @@ class _ScriptedDispatcher(CannedDispatcher):
         return base
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None, seed: int | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None,
+                     n_predict: int | None = None) -> str:
         self.seeds.append(seed)
+        self.n_predicts.append(n_predict)
         from rlm.dispatcher import compose_leaf_user
 
         self.prompts.append(prompt)
@@ -116,10 +119,11 @@ class _SlotAwareDispatcher(_ScriptedDispatcher):
 
     async def query(self, prompt: str, *, role: str, call_id: str,
                      chunk: str | None = None, slot_id: int | None = None,
-                     seed: int | None = None) -> str:
+                     seed: int | None = None,
+                     n_predict: int | None = None) -> str:
         self.slot_ids.append(slot_id)
         return await super().query(prompt, role=role, call_id=call_id,
-                                    chunk=chunk, seed=seed)
+                                    chunk=chunk, seed=seed, n_predict=n_predict)
 
 
 @pytest.fixture
@@ -979,14 +983,17 @@ class _PerChunkDispatcher(CannedDispatcher):
         self.prompts: list[str] = []
         self.set_corpus_calls: list[Any] = []
         self.seeds: list[int | None] = []
+        self.n_predicts: list[int | None] = []
 
     def set_corpus(self, chunks) -> None:
         self.set_corpus_calls.append(chunks)
         self._inner.set_corpus(chunks)
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None, seed: int | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None,
+                     n_predict: int | None = None) -> str:
         self.seeds.append(seed)
+        self.n_predicts.append(n_predict)
         from rlm.dispatcher import compose_leaf_user
 
         self.prompts.append(prompt)
@@ -1010,10 +1017,11 @@ class _SlotAwarePerChunkDispatcher(_PerChunkDispatcher):
 
     async def query(self, prompt: str, *, role: str, call_id: str,
                      chunk: str | None = None, slot_id: int | None = None,
-                     seed: int | None = None) -> str:
+                     seed: int | None = None,
+                     n_predict: int | None = None) -> str:
         self.slot_ids.append(slot_id)
         return await super().query(prompt, role=role, call_id=call_id,
-                                    chunk=chunk, seed=seed)
+                                    chunk=chunk, seed=seed, n_predict=n_predict)
 
 
 def _reply_by_marker(prompt: str) -> str:
@@ -1281,7 +1289,8 @@ class _RotatingDispatcher(_PerChunkDispatcher):
         self.pool_error_drained = False
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None, seed: int | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None,
+                     n_predict: int | None = None) -> str:
         from rlm.dispatcher import _new_step
 
         self.call_count += 1
@@ -1567,3 +1576,107 @@ async def test_the_leaf_seed_is_the_configs_and_never_the_dispatchers(bench_cfg)
         res, _env = await _run_b1(bench_cfg(leaf_seed=seed), _task(), disp)
         assert res.outcome == Outcome.SUCCESS
     assert disp.seeds == [1, 2, 3]
+
+
+# --------------------------------------------------------------------------- #
+# B2's summary budget is ENFORCED, and B2's root call cannot end the grid
+# (S4 Task 12, fix wave 2).
+# --------------------------------------------------------------------------- #
+
+
+class _FailingRootClient:
+    """A `root_client` whose first call raises. Structural, not a mock library:
+    B2 only ever calls `apply_template` and `completion` on it."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    async def apply_template(self, *_a, **_kw):
+        raise self._exc
+
+    async def completion(self, *_a, **_kw):     # pragma: no cover - never reached
+        raise self._exc
+
+
+async def test_b2_caps_every_summary_at_the_pre_registered_budget(
+        bench_cfg, fake_root_server, b2_root_client):
+    """§8's formula sizes the summaries so ALL of them fit 80% of the root
+    window. Recorded but unenforced, that claim was false for exactly the
+    corpora it exists for: the leaf decodes to its own `max_predict` and the
+    reduce prompt overflows the root by construction."""
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    fake_root_server.script = ["FINAL"]
+
+    res, env = await _run_b2(cfg, _b2_task(), disp, b2_root_client)
+    assert res.outcome == Outcome.SUCCESS
+
+    n_chunks = env.episode["config_snapshot"]["bench"]["n_chunks"]
+    want = b2_summary_n_predict(cfg, n_chunks)
+    # The RECORDED number is the one that was SENT, on every summary call.
+    assert env.episode["config_snapshot"]["bench"]["summary_n_predict"] == want
+    assert disp.n_predicts == [want] * n_chunks
+    assert len(disp.n_predicts) == 3
+
+
+async def test_the_summary_budget_actually_shrinks_at_scale(bench_cfg):
+    """The formula is only worth enforcing if it BINDS. At §8's aggregation
+    scale it is 6x below the leaf's own ceiling, which is the whole gap
+    'recorded but not enforced' left open."""
+    cfg = bench_cfg()
+    assert b2_summary_n_predict(cfg, 299) == 87
+    assert cfg.scaffold.budgets.max_predict.leaf == 512
+
+
+async def test_b2_maps_a_root_transport_failure_to_server_unreachable(
+        bench_cfg, fake_root_server):
+    """The root server is a server too. C4 wraps every LEAF transport failure
+    in `DispatchError`, so a leaf that dies is `error/server_unreachable` and
+    §8's rerun-once applies to it. B2's reduce step talks to the root DIRECTLY,
+    and an httpx error there used to propagate out of `run_b2`, past
+    `rlm.bench._run_cell` (which contains only `ConfigError`) and out of the
+    whole grid: one root hiccup at hour 12 ends a 39-hour run."""
+    import httpx
+
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    root = _FailingRootClient(httpx.ConnectError("connection refused"))
+
+    res, env = await _run_b2(cfg, _b2_task(), disp, root)
+    assert res.outcome == Outcome.ERROR
+    assert res.reason == SERVER_UNREACHABLE
+    # The row was CLOSED, not orphaned -- §6, and what makes the rerun scoreable.
+    assert env.episode["outcome"] == "error"
+    assert env.episode["outcome_reason"] == SERVER_UNREACHABLE
+
+
+async def test_a_bug_in_the_root_call_is_not_dressed_as_a_server_failure(
+        bench_cfg, fake_root_server):
+    """The other half of the same guard: ONLY the transport family is
+    converted. A `TypeError` is a bug in the scaffold, and §6 requires it stay
+    loud rather than being scored as an ordinary `error` episode."""
+    cfg = _b2_cfg(bench_cfg)
+    disp = _PerChunkDispatcher(_reply_by_marker)
+    root = _FailingRootClient(TypeError("apply_template() got a surprise"))
+
+    with pytest.raises(TypeError):
+        await _run_b2(cfg, _b2_task(), disp, root)
+
+
+def test_the_transport_family_is_recognised_without_importing_httpx():
+    """`arms.py` may not import httpx (the dependency rule bars every HTTP
+    library from this side), so the family is recognised by the module its type
+    is defined in. Pinned against the real classes, so an upstream rename
+    cannot quietly empty the set."""
+    import json as jsonmod
+
+    import httpx
+
+    from rlm.arms import is_transport_error
+
+    assert is_transport_error(httpx.ConnectError("x"))
+    assert is_transport_error(httpx.ReadTimeout("x"))
+    assert is_transport_error(OSError("socket died"))
+    assert is_transport_error(jsonmod.JSONDecodeError("bad", "{", 0))
+    assert not is_transport_error(TypeError("a bug"))
+    assert not is_transport_error(ValueError("a bug"))

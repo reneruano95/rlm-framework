@@ -82,7 +82,14 @@ from rlm.episode import (
     no_cell_observation,
     run_episode,
 )
-from rlm.errors import ActionType, ConfigError, RlmError, ServerRotationError, StepStatus
+from rlm.errors import (
+    ActionType,
+    ConfigError,
+    Outcome,
+    RlmError,
+    ServerRotationError,
+    StepStatus,
+)
 from rlm.lifecycle import Lifecycle
 from rlm.power import PowerSampler, read_pkg_temp_c
 from rlm.rootclient import assistant_prefix, extract_cell
@@ -93,6 +100,8 @@ from rlm.trace import TraceLogger, recover_orphans, unpack_blob
 from rlm.verdict import (
     BASELINES,
     RLM_ARM,
+    PairResult,
+    Verdict,
     VerdictError,
     cost_scorecard,
     decide,
@@ -1676,38 +1685,120 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
             cfg = bench_cfgs[seed] = seeded_config(bench_leaf_raw(raw_cfg), seed)
         return cfg
 
+    # Each runner drops its dispatcher's step log on the way out (see
+    # `reset_dispatcher_steps`): the episode is over, nothing reads those rows
+    # again, and they hold every rendered prompt the episode sent.
     async def rlm_arm(task, cfg, *, bench_extra):
-        return await run_episode(
-            task, cfg, dispatcher=rlm_dispatcher, trace=trace, lifecycle=lifecycle,
-            snapshot_extra={"bench": bench_extra},
-            process_manager=orchestra.episode_process_manager(),
-            scaffold_instance_id=scaffold_instance_id,
-            scaffold_git_sha=scaffold_git_sha,
-            benchmark_version=benchmark_version)
+        try:
+            return await run_episode(
+                task, cfg, dispatcher=rlm_dispatcher, trace=trace,
+                lifecycle=lifecycle, snapshot_extra={"bench": bench_extra},
+                process_manager=orchestra.episode_process_manager(),
+                scaffold_instance_id=scaffold_instance_id,
+                scaffold_git_sha=scaffold_git_sha,
+                benchmark_version=benchmark_version)
+        finally:
+            reset_dispatcher_steps(rlm_dispatcher)
 
     async def b2_arm(task, cfg, *, bench_extra):
-        return await run_b2(
-            task, cfg, dispatcher=rlm_dispatcher, root_client=root_client,
-            trace=trace, registry=registry, bench_extra=bench_extra,
-            scaffold_instance_id=scaffold_instance_id,
-            scaffold_git_sha=scaffold_git_sha,
-            process_manager=orchestra.b2_process_manager())
+        try:
+            return await run_b2(
+                task, cfg, dispatcher=rlm_dispatcher, root_client=root_client,
+                trace=trace, registry=registry, bench_extra=bench_extra,
+                scaffold_instance_id=scaffold_instance_id,
+                scaffold_git_sha=scaffold_git_sha,
+                process_manager=orchestra.b2_process_manager())
+        finally:
+            reset_dispatcher_steps(rlm_dispatcher)
 
     async def b1_arm(task, _cfg, *, bench_extra):
-        return await run_b1(
-            task, _bench_cfg(bench_extra["seed"]), dispatcher=leaf_dispatcher,
-            trace=trace, registry=registry, bench_extra=bench_extra,
-            scaffold_instance_id=scaffold_instance_id,
-            scaffold_git_sha=scaffold_git_sha)
+        try:
+            return await run_b1(
+                task, _bench_cfg(bench_extra["seed"]), dispatcher=leaf_dispatcher,
+                trace=trace, registry=registry, bench_extra=bench_extra,
+                scaffold_instance_id=scaffold_instance_id,
+                scaffold_git_sha=scaffold_git_sha)
+        finally:
+            reset_dispatcher_steps(leaf_dispatcher)
 
     async def b3_arm(task, _cfg, *, bench_extra):
-        return await run_b3(
-            task, _bench_cfg(bench_extra["seed"]), dispatcher=leaf_dispatcher,
-            trace=trace, registry=registry, bench_extra=bench_extra,
-            scaffold_instance_id=scaffold_instance_id,
-            scaffold_git_sha=scaffold_git_sha)
+        try:
+            return await run_b3(
+                task, _bench_cfg(bench_extra["seed"]), dispatcher=leaf_dispatcher,
+                trace=trace, registry=registry, bench_extra=bench_extra,
+                scaffold_instance_id=scaffold_instance_id,
+                scaffold_git_sha=scaffold_git_sha)
+        finally:
+            reset_dispatcher_steps(leaf_dispatcher)
 
     return {"rlm": rlm_arm, "b2": b2_arm, "b1": b1_arm, "b3": b3_arm}
+
+
+def pool_rotating_swap(orchestra, *, resident_dispatcher, bench_dispatcher):
+    """`BenchCtx.swap_servers_fn`, plus the half `ServerOrchestra` cannot do:
+    telling C4 that its never-reuse slot pool is virgin again.
+
+    THE DEFECT THIS CLOSES. R13's mitigation gives every window a slot that is
+    never handed out twice for the lifetime of one leaf PROCESS, and
+    `SlotPool` says so ("a restarted server means a new pool"). The orchestra
+    restarts the process at every profile change, but the pool lives in the
+    DISPATCHER, which a bench run builds once and keeps for all 90 blocks. The
+    bench-profile leaf has TWO slots and B1/B3 spend one each per block (both
+    call with `chunk=None`, so `window_key` is per-call and no window ever
+    repeats), so from block 2 onward every B1 and B3 cell raised
+    `SlotPoolExhausted` against a server that had just been restarted with two
+    virgin slots. §8's two single-shot arms would have failed 58 of 60 blocks
+    structurally -- a manufactured result, in the exact class §8's
+    contamination paragraph names.
+
+    Rotating AFTER the swap returns is what makes it safe: `rotate_pool`
+    refuses with calls in flight, and `rlm.bench._prepare` runs the swap
+    strictly between cells, with nothing dispatched.
+
+    Both directions rotate, and the resident one matters as much: the RLM/B2
+    leaf is restarted just as often, and an un-rotated resident pool would run
+    RLM's later blocks against slots the scaffold believes are virgin and the
+    server has already used -- R13 itself, reintroduced by its own mitigation.
+    """
+    async def swap(profile: str):
+        relaunch_s = await orchestra.swap_to(profile)
+        dispatcher = (bench_dispatcher if profile == BENCH_PROFILE
+                      else resident_dispatcher)
+        if dispatcher is not None and hasattr(dispatcher, "rotate_pool"):
+            dispatcher.rotate_pool()
+        return relaunch_s
+
+    return swap
+
+
+def reset_dispatcher_steps(*dispatchers) -> None:
+    """Drop the per-call step records C4 accumulated for the episode that just
+    ended.
+
+    `LLMDispatcher.steps` is an append-only list of every attempt, each row
+    holding the FULL rendered prompt, and the dispatcher is a bench run's
+    long-lived object while an episode is not. B1's single call renders a
+    ~256K-token document, so one B1 episode retains roughly half a megabyte
+    that nothing will read again -- an arm reads `steps` only for the call_ids
+    of the episode it is closing (`ArmEpisode.log_call`,
+    `_EpisodeRun._log_attempts`), never across episodes. Over 360 episodes on a
+    64 GiB-carved box that is not a leak to shrug at.
+
+    Cleared by the COMPOSITION ROOT, which owns the dispatcher's lifetime,
+    rather than by an arm: an arm clearing a shared object's state would be
+    reaching outside the episode it was handed.
+    """
+    for dispatcher in dispatchers:
+        if dispatcher is None:
+            continue
+        steps = getattr(dispatcher, "steps", None)
+        if isinstance(steps, list):
+            steps.clear()
+        # `_retry_base` continues a call's retry_idx across a mid-call
+        # rotation; the counter is meaningless once the call is over.
+        recorded = getattr(dispatcher, "_recorded", None)
+        if isinstance(recorded, dict):
+            recorded.clear()
 
 
 def assert_bench_wiring(ctx: BenchCtx, arms) -> None:
@@ -1762,6 +1853,108 @@ def bench_exit_code(verdict, escalated=None) -> int:
 # --------------------------------------------------------------------------- #
 # escalation execution (§8:343)
 # --------------------------------------------------------------------------- #
+
+
+def escalation_plan_path(ledger_path, run_id: str) -> Path:
+    """Beside the ledger, and named by run: a plan is per-run state, exactly
+    like the ledger it sits next to."""
+    return Path(ledger_path).parent / f"escalation-{run_id}.json"
+
+
+def save_escalation_plan(path, verdict, *, seeds) -> Path:
+    """Write the pre-escalation verdict's REPORTING FACTS and the plan, BEFORE
+    a single escalation episode runs.
+
+    WHY THIS FILE EXISTS. §8 permits exactly one recomputation, and the report
+    must state both the pre- and post-escalation figures. Both of those become
+    unrecoverable the moment the first escalation episode lands: the store then
+    holds a 5-seed grid, and no query over it can reproduce what the 3-seed
+    grid decided (`load_grid` builds a cell from every seed present). A run that
+    crashed mid-escalation could therefore be resumed to completion and STILL
+    not be reportable -- the pre-escalation column would be gone, and the only
+    honest thing left to print would be "this grid was escalated against a
+    baseline we can no longer name".
+
+    So the figures are written down while they are still true. `pairs` carries
+    the whole `PairResult` per baseline (margin, p, CI, the discordant list),
+    which is everything `render_report` reads off the pre-escalation verdict,
+    and the discordant lists double as the work list a resume finishes.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "run_id": verdict.run_id,
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "escalation_seeds": list(seeds),
+        "n_tasks": verdict.n_tasks,
+        "n_manifest_tasks": verdict.n_manifest_tasks,
+        "task_ids": list(verdict.task_ids),
+        "arms": list(verdict.arms),
+        "passes": {arm: list(tasks) for arm, tasks in verdict.passes.items()},
+        "success_rate": dict(verdict.success_rate),
+        "gate_pass": verdict.gate_pass,
+        "clean_pass": verdict.clean_pass,
+        "chunk_sizes": list(verdict.chunk_sizes),
+        "escalation_plan": {b: list(t) for b, t in verdict.escalation_plan.items()},
+        "pairs": {
+            b: {"baseline": p.baseline, "present": p.present,
+                "rlm_passes": p.rlm_passes, "baseline_passes": p.baseline_passes,
+                "margin": p.margin, "wins": p.wins, "losses": p.losses,
+                "discordant": list(p.discordant), "p": p.p,
+                "ci": list(p.ci) if p.ci is not None else None,
+                "mean_delta": p.mean_delta, "escalates": p.escalates,
+                "beats": p.beats}
+            for b, p in verdict.pairs.items()},
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8",
+                    newline="\n")
+    return path
+
+
+def load_escalation_plan(path):
+    """The pre-escalation verdict, rebuilt from `save_escalation_plan`'s file,
+    or `None` when no escalation was ever planned for this run.
+
+    Rebuilt as a real `Verdict` so `render_report`/`_final` take it unchanged:
+    they read `run_id`, `pairs` and `escalation_plan` off the pre-escalation
+    verdict and everything else off the post-escalation one. `scores`,
+    `categories` and `findings` are left empty on purpose -- the report never
+    reads them from this side, and inventing them would be inventing figures.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ConfigError(
+            f"the escalation plan at {path} could not be read ({exc}). It "
+            f"records the pre-escalation figures §8 requires reported beside "
+            f"the post-escalation ones, and they cannot be recomputed from a "
+            f"store that already carries seeds {{4, 5}}; move the file aside "
+            f"only if you accept losing them") from exc
+    pairs = {
+        b: PairResult(
+            baseline=d["baseline"], present=d["present"],
+            rlm_passes=d["rlm_passes"], baseline_passes=d["baseline_passes"],
+            margin=d["margin"], wins=d["wins"], losses=d["losses"],
+            discordant=tuple(d["discordant"]), p=d["p"],
+            ci=tuple(d["ci"]) if d["ci"] is not None else None,
+            mean_delta=d["mean_delta"], escalates=d["escalates"],
+            beats=d["beats"])
+        for b, d in (raw.get("pairs") or {}).items()}
+    verdict = Verdict(
+        run_id=raw["run_id"], n_tasks=raw["n_tasks"],
+        n_manifest_tasks=raw["n_manifest_tasks"],
+        task_ids=tuple(raw["task_ids"]), arms=tuple(raw["arms"]),
+        passes={a: tuple(t) for a, t in (raw.get("passes") or {}).items()},
+        success_rate=dict(raw.get("success_rate") or {}), scores={},
+        pairs=pairs, categories=(), findings=(),
+        escalation_plan={b: tuple(t)
+                         for b, t in (raw.get("escalation_plan") or {}).items()},
+        gate_pass=raw["gate_pass"], clean_pass=raw["clean_pass"],
+        chunk_sizes=tuple(raw.get("chunk_sizes") or ()), escalated=False)
+    return verdict, [int(s) for s in raw.get("escalation_seeds") or ()]
 
 
 async def run_escalation(ctx: BenchCtx, verdict, *, seeds: list[int],
@@ -2054,7 +2247,12 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
             load_task_fn=Task.from_file,
             quiesce_fn=orchestra.quiesce,
             handshake_fn=orchestra.handshake_profile,
-            swap_servers_fn=orchestra.swap_to,
+            # NOT `orchestra.swap_to` bare: a relaunched process has virgin
+            # slots and C4 has to be told, or B1/B3 exhaust a 2-slot pool in
+            # block 1 and error for the rest of the run.
+            swap_servers_fn=pool_rotating_swap(
+                orchestra, resident_dispatcher=rlm_dispatcher,
+                bench_dispatcher=leaf_dispatcher),
             temp_fn=read_pkg_temp_c,
             repo_root=REPO_ROOT)
 
@@ -2067,9 +2265,16 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
         if cfg.power_sampling.enabled:
             # A child process, stopped in the same `finally` as everything
             # else: one left running past a 39-hour grid is a PowerShell
-            # polling an energy counter forever.
-            sampler = PowerSampler()
+            # polling an energy counter forever. Its stderr goes to a file
+            # beside the lifecycle log, because dying silently at launch is
+            # its documented failure mode and `alive()` reports only THAT it
+            # died -- on a 39-hour run whose energy column then goes NULL,
+            # "why" is worth one file.
+            sampler = PowerSampler(
+                stderr_path=Path(cfg.trace.db_path).parent / "power-sampler.err")
             sampler.start()
+            print(f"power sampler: started (stderr -> {sampler.stderr_path})",
+                  file=out)
         orchestra = ServerOrchestra(cfg, launch=not args.no_launch_servers,
                                      lifecycle=lifecycle, out=out, err=err)
         rlm_dispatcher = LLMDispatcher.from_config(cfg)
@@ -2098,18 +2303,65 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
         if args.smoke:
             print_calibration(records, manifest, cfg, arms=arms,
                                run_id=run_id, out=out)
+            # A smoke run has no gate, so EXIT_FAILED keeps its literal
+            # meaning here -- the command did not complete cleanly. A
+            # calibration pass whose cells errored has measured nothing, and
+            # exiting 0 on it is how a broken topology gets a green light on
+            # the way into a 39-hour run.
+            errored = [r for r in records if str(r["outcome"]) == str(Outcome.ERROR)]
+            if errored:
+                print(f"\n{len(errored)} of {len(records)} smoke cell(s) errored "
+                      f"— this calibration measured nothing for them: "
+                      + ", ".join(f"{r['arm']}/{r['task_id']}"
+                                  f"({r['reason'] or 'error'})" for r in errored[:8]),
+                      file=err)
+                return EXIT_FAILED
             return EXIT_OK
 
+        esc_seeds = list(cfg.benchmark.escalation_seeds)
+        plan_path = escalation_plan_path(args.ledger, run_id)
+
+        # -- phase 1.5: heal a crashed escalation, BEFORE any load_grid --- #
+        #
+        # A run that died mid-escalation leaves half-escalated cells (some of
+        # {4,5}, not all), which `load_grid` refuses outright and correctly --
+        # §8 re-decides at >=3/5 and a 4-long cell would be scored at a
+        # denominator it never pre-registered. So a resume finishes the plan
+        # FIRST and only then asks for a grid. `run_bench` skips cells already
+        # decided, so this runs exactly what is still owed.
+        saved = load_escalation_plan(plan_path)
+        if saved is not None:
+            pre_verdict, saved_seeds = saved
+            print(f"resuming an escalation planned at {plan_path}: finishing "
+                  f"seeds {saved_seeds} on "
+                  f"{sum(len(t) for t in pre_verdict.escalation_plan.values())} "
+                  f"pair-task(s) before scoring", file=out)
+            trace = await _open_trace(cfg, lifecycle)
+            try:
+                await run_escalation(_ctx(trace), pre_verdict,
+                                      seeds=saved_seeds or esc_seeds,
+                                      offset=len(blocks), out=out)
+                await trace.drain()
+            finally:
+                await trace.aclose()
+
         # -- phase 2: the verdict, on the CLOSED store ------------------- #
-        verdict = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds), manifest)
+        verdict = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds,
+                                    escalation_seeds=esc_seeds), manifest)
 
         # -- phase 3: escalation, only where §8 owes it ------------------ #
         escalated = None
-        if verdict.escalation_plan:
+        if saved is not None:
+            # Already escalated (this run, or the crashed one this resumed):
+            # the grid just scored IS the post-escalation one, and the
+            # pre-escalation figures come from the plan written before the
+            # first escalation episode -- the only place they still exist.
+            verdict, escalated = saved[0], verdict
+        elif verdict.escalation_plan:
+            save_escalation_plan(plan_path, verdict, seeds=esc_seeds)
             trace = await _open_trace(cfg, lifecycle)
             try:
-                await run_escalation(_ctx(trace), verdict,
-                                      seeds=list(cfg.benchmark.escalation_seeds),
+                await run_escalation(_ctx(trace), verdict, seeds=esc_seeds,
                                       offset=len(blocks), out=out)
                 await trace.drain()
             finally:
@@ -2117,8 +2369,8 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
             # -- phase 4: ONE recomputation (§8: "no other recomputation is
             # permitted"). `render_report` refuses a pair that is not this
             # run's, or one computed on a grid carrying no escalation seeds.
-            escalated = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds),
-                                manifest)
+            escalated = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds,
+                                          escalation_seeds=esc_seeds), manifest)
 
         scorecard = cost_scorecard(cfg.trace.db_path, run_id)
         leaks = leak_report(cfg.trace.db_path, run_id)

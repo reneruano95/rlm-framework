@@ -577,8 +577,36 @@ class _FakeOrchestra:
         return [p for k, p in self.events if k == kind]
 
 
+class _StubSampler:
+    """`PowerSampler`'s surface with no PowerShell child.
+
+    `power_sampling.enabled` is TRUE in the shipped config (S0 measured the
+    collector's overhead at noise and §8 makes energy a scorecard column), so a
+    bench test that did not stub this would spawn a real 1 Hz Get-Counter child
+    per test. It reports `alive() is False`, which is the honest "no readings"
+    state `rlm.bench._stamp_metrics` records as NULL rather than as a
+    fabricated zero."""
+
+    def __init__(self, *_a, **_kw) -> None:
+        self.started = self.stopped = False
+        self.stderr_path = None
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def alive(self) -> bool:
+        return False
+
+    def reading(self):
+        return None
+
+
 @pytest.fixture
 def fake_orchestra(monkeypatch):
+    """The no-hardware bench fixture: no server processes, no power sampler."""
     made = []
 
     def factory(cfg, **kw):
@@ -587,6 +615,7 @@ def fake_orchestra(monkeypatch):
         return orchestra
 
     monkeypatch.setattr(cli, "ServerOrchestra", factory)
+    monkeypatch.setattr(cli, "PowerSampler", _StubSampler)
     return made
 
 
@@ -1224,23 +1253,7 @@ def test_the_sampler_is_stopped_even_when_teardown_raises(
     it."""
     _ArmRecorder().patch(monkeypatch)
 
-    class _Sampler:
-        def __init__(self):
-            self.started = self.stopped = False
-
-        def start(self):
-            self.started = True
-
-        def stop(self):
-            self.stopped = True
-
-        def alive(self):
-            return False
-
-        def reading(self):
-            return None
-
-    sampler = _Sampler()
+    sampler = _StubSampler()
     monkeypatch.setattr(cli, "PowerSampler", lambda *a, **kw: sampler)
 
     class _ExplodingDispatcher:
@@ -1339,3 +1352,350 @@ def test_smoke_and_resume_are_refused_together(valid_config_file, tmp_path,
     err = capsys.readouterr().err
     assert rc == cli.EXIT_REFUSED
     assert "mutually exclusive" in err
+
+
+# =========================================================================== #
+# Fix wave 2 (whole-branch review)
+# =========================================================================== #
+
+
+class _PooledDispatcher:
+    """A dispatcher double carrying the REAL `SlotPool`, at the bench
+    profile's real size of 2.
+
+    Everything R13's mitigation actually does is in that object: a slot index
+    is handed out at most once for the lifetime of one leaf PROCESS, and
+    exhaustion RAISES rather than wrapping. So this double uses the shipped
+    class rather than modelling it -- a hand-rolled counter would let the test
+    pass against semantics the production pool does not have.
+    """
+
+    def __init__(self, size: int = 2) -> None:
+        from rlm.dispatcher import SlotPool
+
+        self._SlotPool = SlotPool
+        self.slots = SlotPool(size)
+        self.rotations = 0
+        self.calls: list[str] = []
+        self.steps: list[dict] = []
+        self._recorded: dict[str, int] = {}
+
+    def rotate_pool(self) -> None:
+        self.slots = self._SlotPool(self.slots.size)
+        self.rotations += 1
+
+    async def query(self, prompt, *, role, call_id, chunk=None, **_kw):
+        # B1/B3 call with `chunk=None`, so every call is its own window and no
+        # window is ever repeated -- which is exactly why a 2-slot pool is
+        # spent after two calls and why the pool MUST be rotated per block.
+        from rlm.dispatcher import window_key
+
+        window = window_key(chunk, call_id)
+        slot = self.slots.acquire(window)           # raises SlotPoolExhausted
+        self.slots.mark_answered(window)
+        self.calls.append(f"{prompt}@{slot}")
+        self.steps.append({"call_id": call_id, "rendered": "x" * 1024})
+        return "ANSWER"
+
+
+async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
+                                                                minimal_cfg_dict):
+    """C1: the bench-profile pool is never rotated across blocks.
+
+    R13's mitigation gives every window a slot no other window ever gets, for
+    the lifetime of one leaf PROCESS. `ServerOrchestra` restarts that process at
+    every profile change, but the POOL lives in the dispatcher, which a bench
+    run builds once and keeps for all 90 blocks. The bench leaf has TWO slots
+    and B1/B3 spend one each per block, so from block 2 onward every B1 and B3
+    cell raised `SlotPoolExhausted` against a server that had just been
+    restarted with two virgin slots — §8's two single-shot arms failing 58 of
+    60 blocks structurally, which is a manufactured result, not a measurement.
+
+    Driven through the REAL scheduler (`rlm.bench.run_block`) with the REAL
+    swap wrapper, over two blocks, because one block cannot see the defect.
+    """
+    import copy as copymod
+
+    from rlm.bench import ARM_ORDER, BenchCtx, BenchLedger, build_blocks
+    from rlm.config import Config
+    from rlm.episode import Task
+
+    raw = copymod.deepcopy(minimal_cfg_dict)
+    raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
+    raw["trace"]["blob_root"] = str(tmp_path / "blobs")
+    manifest = cli.load_benchmark_manifest()
+    resident, bench_leaf = _PooledDispatcher(128), _PooledDispatcher(2)
+
+    class _Orchestra:
+        def __init__(self):
+            self.swaps: list[str] = []
+
+        async def swap_to(self, profile):
+            self.swaps.append(profile)
+            return 1.0
+
+    orchestra = _Orchestra()
+    swap = cli.pool_rotating_swap(orchestra, resident_dispatcher=resident,
+                                   bench_dispatcher=bench_leaf)
+
+    async def _noop(_profile):
+        return None
+
+    def _runner(arm, dispatcher):
+        async def run(task, cfg, *, bench_extra):
+            answer = await dispatcher.query(f"{arm}:{task.task_id}", role="leaf",
+                                             call_id=str(uuid.uuid4()))
+            return SimpleNamespace(episode_id=str(uuid.uuid4()),
+                                   outcome=Outcome.SUCCESS, reason=None,
+                                   answer=answer)
+        return run
+
+    ctx = BenchCtx(
+        raw_cfg=raw, cfg=Config.model_validate(copymod.deepcopy(raw)),
+        run_id="pool-run", manifest=manifest,
+        ledger=BenchLedger(tmp_path / "ledger.jsonl"),
+        trace=SimpleNamespace(mark_superseded=lambda *a: None,
+                              update_episode_metrics=lambda *a, **k: None),
+        arm_runners={"rlm": _runner("rlm", resident),
+                     "b2": _runner("b2", resident),
+                     "b1": _runner("b1", bench_leaf),
+                     "b3": _runner("b3", bench_leaf)},
+        load_task_fn=lambda p: Task(task_id=Path(p).stem, text="q", context=""),
+        quiesce_fn=_noop, handshake_fn=_noop, swap_servers_fn=swap,
+        repo_root=Path(tmp_path))
+
+    from rlm.bench import run_block
+
+    records = []
+    for block in build_blocks(manifest, [1])[:2]:
+        records += await run_block(block, list(ARM_ORDER), ctx)
+
+    assert len(records) == 8
+    assert all(str(r["outcome"]) == "success" for r in records), \
+        [(r["arm"], r["outcome"], r["reason"]) for r in records]
+    # Block 2's B1/B3 are the cells the defect killed.
+    assert [(r["arm"], str(r["outcome"])) for r in records[4:]] == [
+        ("rlm", "success"), ("b2", "success"), ("b1", "success"), ("b3", "success")]
+    # …and each rotation followed a real swap, in both directions.
+    assert orchestra.swaps == ["bench", "resident", "bench"]
+    assert bench_leaf.rotations == 2 and resident.rotations == 1
+
+
+async def test_the_pool_is_rotated_only_for_the_profile_that_swapped(tmp_path):
+    """A swap to the bench profile must not hand the RESIDENT dispatcher a
+    fresh pool: the resident leaf process is untouched by that swap, and
+    telling C4 its used slots are virgin again is R13 itself."""
+    resident, bench_leaf = _PooledDispatcher(4), _PooledDispatcher(2)
+
+    class _Orchestra:
+        async def swap_to(self, profile):
+            return 0.0
+
+    swap = cli.pool_rotating_swap(_Orchestra(), resident_dispatcher=resident,
+                                   bench_dispatcher=bench_leaf)
+    await swap(cli.BENCH_PROFILE)
+    assert (bench_leaf.rotations, resident.rotations) == (1, 0)
+    await swap(cli.RESIDENT_PROFILE)
+    assert (bench_leaf.rotations, resident.rotations) == (1, 1)
+
+
+async def test_the_swap_hook_still_reports_what_the_relaunch_cost(tmp_path):
+    """The wrapper must stay transparent: `rlm.bench._prepare` ledgers the
+    hook's return value as `relaunch_s`."""
+    class _Orchestra:
+        async def swap_to(self, profile):
+            return 12.5
+
+    swap = cli.pool_rotating_swap(_Orchestra(), resident_dispatcher=None,
+                                   bench_dispatcher=None)
+    assert await swap(cli.BENCH_PROFILE) == 12.5
+
+
+def test_the_step_log_does_not_grow_across_episodes(valid_config_file, tmp_path,
+                                                     fake_orchestra, monkeypatch):
+    """I4: `LLMDispatcher.steps` is append-only and every row holds the FULL
+    rendered prompt. B1 renders a ~256K-token document, so one B1 episode
+    retains ~0.5 MB that nothing reads again — an arm reads `steps` only for
+    the call_ids of the episode it is closing. Over 360 episodes on a
+    64 GiB-carved box that is not a leak to shrug at, and the composition root
+    owns the dispatcher's lifetime."""
+    seen: list[int] = []
+    dispatchers: dict[str, object] = {}
+
+    class _Recording:
+        @classmethod
+        def from_config(cls, cfg, **kw):
+            return cls()
+
+        def __init__(self):
+            self.steps: list[dict] = []
+            self._recorded: dict[str, int] = {}
+
+        async def aclose(self):
+            pass
+
+    def _capture(arm):
+        async def run(task, cfg, **kw):
+            d = kw.get("dispatcher")
+            dispatchers[arm] = d
+            d.steps.append({"rendered": "x" * 4096})
+            seen.append(len(d.steps))
+            return SimpleNamespace(episode_id=str(uuid.uuid4()),
+                                   outcome=Outcome.SUCCESS, reason=None,
+                                   answer=None, final_answer=None)
+        return run
+
+    monkeypatch.setattr(cli, "LLMDispatcher", _Recording)
+    monkeypatch.setattr(cli, "bench_dispatcher", lambda *a, **kw: _Recording())
+    for name, arm in (("run_episode", "rlm"), ("run_b1", "b1"),
+                      ("run_b2", "b2"), ("run_b3", "b3")):
+        monkeypatch.setattr(cli, name, _capture(arm))
+
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke",
+                     "--tasks", "needle-02,agg-02"))
+    # Every episode saw a step log holding ONLY its own row.
+    assert seen == [1] * 8
+    assert all(d.steps == [] for d in dispatchers.values())
+
+
+def test_a_smoke_run_whose_cells_errored_exits_non_zero(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """M2: a calibration pass whose cells errored has measured nothing, and
+    exiting 0 on it is how a broken topology gets a green light on the way into
+    a 39-hour run. A smoke run has no gate, so 1 keeps EXIT_FAILED's literal
+    meaning — the command did not complete cleanly."""
+    _ArmRecorder({("b1", "needle-02"): Outcome.ERROR}).patch(monkeypatch)
+    rc = main(_bench_argv(valid_config_file, tmp_path, "--smoke",
+                          "--tasks", "needle-02"))
+    captured = capsys.readouterr()
+    assert rc == cli.EXIT_FAILED
+    assert "smoke cell(s) errored" in captured.err
+    assert "b1/needle-02" in captured.err
+
+
+def test_a_clean_smoke_run_still_exits_zero(valid_config_file, tmp_path,
+                                             fake_orchestra, monkeypatch):
+    _ArmRecorder().patch(monkeypatch)
+    assert main(_bench_argv(valid_config_file, tmp_path, "--smoke",
+                            "--tasks", "needle-02")) == cli.EXIT_OK
+
+
+# --------------------------------------------------------------------------- #
+# I2: the escalation phase survives a crash
+# --------------------------------------------------------------------------- #
+
+
+def test_the_escalation_plan_is_written_before_any_escalation_episode(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    """The pre-escalation figures stop being recoverable the instant the first
+    escalation episode lands: the store then holds a 5-seed grid and no query
+    over it reproduces what the 3-seed grid decided. §8 requires BOTH reported,
+    so they are written down while they are still true."""
+    outcomes = _baselines_fail_everything()
+    outcomes[("rlm", "codeqa-01")] = Outcome.FAIL
+    _rc, arms = _graded(valid_config_file, tmp_path, monkeypatch, outcomes)
+
+    run_id = arms.calls[0]["run_id"]
+    plan_path = cli.escalation_plan_path(tmp_path / "ledger.jsonl", run_id)
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+
+    assert plan["run_id"] == run_id
+    assert plan["escalation_seeds"] == [4, 5]
+    discordant = {"needle-02", "agg-02", "synth-01"}
+    for baseline in ("b1", "b2", "b3"):
+        assert set(plan["escalation_plan"][baseline]) == discordant
+        pair = plan["pairs"][baseline]
+        assert pair["margin"] == 3 and pair["rlm_passes"] == 3
+        assert pair["baseline_passes"] == 0
+        assert pair["p"] is not None and pair["ci"] is not None
+
+
+def test_a_crash_mid_escalation_resumes_into_the_plan(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """The whole point of the artifact. A run that dies mid-escalation leaves
+    HALF-escalated cells (some of {4,5}, not all), which `load_grid` refuses
+    outright and correctly — §8 re-decides at >=3/5 and a 4-long cell would be
+    scored at a denominator it never pre-registered. So a resume finishes the
+    plan FIRST and only then asks for a grid."""
+    outcomes = _baselines_fail_everything()
+    outcomes[("rlm", "codeqa-01")] = Outcome.FAIL
+
+    # -- the crash: die on the first seed-5 escalation episode --------------
+    arms = _ArmRecorder(outcomes, write=True)
+    real_entry = arms.entry
+
+    def crashing_entry(arm):
+        inner = real_entry(arm)
+
+        async def run(task, cfg, **kw):
+            extra = kw.get("bench_extra") or (kw.get("snapshot_extra") or {}).get("bench")
+            if (extra or {}).get("seed") == 5:
+                raise KeyboardInterrupt          # the operator, or the power
+            return await inner(task, cfg, **kw)
+
+        return run
+
+    arms.entry = crashing_entry
+    arms.patch(monkeypatch)
+    rc = main(_bench_argv(valid_config_file, tmp_path,
+                          "--tasks", ",".join(FOUR_TASKS)))
+    run_id = arms.calls[0]["run_id"]
+    assert rc == cli.EXIT_REFUSED, "an abort mid-escalation is not a gate result"
+    assert cli.escalation_plan_path(tmp_path / "ledger.jsonl", run_id).exists()
+    # The store is now half-escalated: seed 4 landed, seed 5 did not.
+    assert {c["seed"] for c in arms.calls if c["seed"] in (4, 5)} == {4}
+
+    # -- the resume: heal, then score --------------------------------------
+    healed = _ArmRecorder(outcomes, write=True).patch(monkeypatch)
+    rc = main(_bench_argv(valid_config_file, tmp_path,
+                          "--tasks", ",".join(FOUR_TASKS), "--resume", run_id))
+    out = capsys.readouterr().out
+    report = (tmp_path / "RESULTS.md").read_text(encoding="utf-8")
+
+    assert rc == cli.EXIT_OK
+    assert "resuming an escalation" in out
+    # Only the OWED cells were re-run. The crash landed after agg-02/seed 4,
+    # so that cell is decided and must not be drawn a second time, while
+    # agg-02/seed 5 (the half of a half-escalated cell that `load_grid`
+    # refuses) is exactly what the resume owed.
+    healed_cells = {(c["task_id"], c["seed"], c["arm"]) for c in healed.calls}
+    assert ("agg-02", 4, "rlm") not in healed_cells
+    assert ("agg-02", 5, "rlm") in healed_cells
+    assert all(c["seed"] in (4, 5) for c in healed.calls), \
+        "a resume re-ran the base grid"
+    # …and the report still states BOTH figures, the pre one from the plan.
+    assert "Post-escalation gate: PASS" in report
+    assert "| RLM vs B1 | +3 |" in report
+
+
+def test_the_plan_file_carries_the_pre_escalation_figures_into_the_report(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """A resumed escalation scores a grid that already carries {4,5}, so the
+    'pre' column cannot come from the store. It comes from the plan, or it
+    would silently become a second copy of the post column."""
+    outcomes = _baselines_fail_everything()
+    outcomes[("rlm", "codeqa-01")] = Outcome.FAIL
+    _graded(valid_config_file, tmp_path, monkeypatch, outcomes)
+    capsys.readouterr()
+
+    run_id = json.loads(
+        next((tmp_path).glob("escalation-*.json")).read_text(encoding="utf-8"))["run_id"]
+    plan_path = cli.escalation_plan_path(tmp_path / "ledger.jsonl", run_id)
+    restored = cli.load_escalation_plan(plan_path)
+    assert restored is not None
+    verdict, seeds = restored
+    assert seeds == [4, 5]
+    assert verdict.run_id == run_id
+    assert verdict.escalated is False               # it is the PRE verdict
+    assert verdict.pairs["b1"].margin == 3
+    assert set(verdict.escalation_plan["b2"]) == {"needle-02", "agg-02", "synth-01"}
+    assert cli.load_escalation_plan(tmp_path / "absent.json") is None
+
+
+def test_an_unreadable_plan_refuses_rather_than_losing_the_pre_figures(tmp_path):
+    from rlm.errors import ConfigError
+
+    bad = tmp_path / "escalation-x.json"
+    bad.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ConfigError, match="pre-escalation figures"):
+        cli.load_escalation_plan(bad)

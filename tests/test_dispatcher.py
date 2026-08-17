@@ -1414,3 +1414,55 @@ async def test_the_mock_dispatcher_accepts_the_same_seed_keyword():
     d = MockDispatcher({key: "A"}, parallel=1)
     assert await d.query("q", role="leaf", call_id="c1", seed=99) == "A"
     assert await d.query("q", role="leaf", call_id="c2") == "A"
+
+
+# --------------------------------------------------------------------------- #
+# n_predict is PER CALL too (S4 Task 12, fix wave 2).
+#
+# §8's B2 sizes its per-chunk summary budget so that ALL of them fit 80% of the
+# ROOT window (`rlm.arms.b2_summary_n_predict`). A budget the caller can only
+# RECORD is not a budget: at 299 chunks the formula says 87 tokens while the
+# leaf would decode up to its own `max_predict`, putting ~150K tokens of
+# summary into a reduce prompt sized for 0.8 x 32K. Same shape as the seed
+# override, same wire-level assertions.
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_completion_n_predict_follows_the_call(mock_server,
+                                                          minimal_cfg_dict):
+    cfg = _seeded_cfg(minimal_cfg_dict, mock_server.port, 1)
+    configured = cfg.scaffold.budgets.max_predict.leaf
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        await d.query("q", role="leaf", call_id="c1")            # no override
+        await d.query("q", role="leaf", call_id="c2", n_predict=87)
+    finally:
+        await d.aclose()
+    assert [b["n_predict"] for b in mock_server.completion_bodies] == [
+        configured, 87]
+
+
+async def test_every_retry_of_one_call_decodes_to_the_same_budget(
+        mock_server, minimal_cfg_dict):
+    """Resolved once per call, beside the seed: a retry that decoded to a
+    different budget would not be a retry of the same call."""
+    cfg = _seeded_cfg(minimal_cfg_dict, mock_server.port, 1)
+    mock_server.fail_times(2)
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        await d.query("q", role="leaf", call_id="c1", n_predict=33)
+    finally:
+        await d.aclose()
+    assert len(mock_server.completion_bodies) == 3
+    assert {b["n_predict"] for b in mock_server.completion_bodies} == {33}
+
+
+async def test_the_mock_dispatcher_accepts_the_n_predict_keyword_too():
+    import hashlib
+
+    from rlm.dispatcher import MockDispatcher, compose_leaf_user
+
+    composed = compose_leaf_user("q", None)
+    key = f"leaf:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
+    d = MockDispatcher({key: "A"}, parallel=1)
+    assert await d.query("q", role="leaf", call_id="c1", n_predict=7) == "A"
