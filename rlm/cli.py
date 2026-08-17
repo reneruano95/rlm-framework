@@ -1989,6 +1989,20 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
     if unknown_arms:
         raise ConfigError(f"unknown arm(s) {unknown_arms}; §8's arms are "
                           f"{list(ARM_ORDER)}")
+    if args.smoke and args.resume:
+        # The two flags mean opposite things about the run_id, and the smoke
+        # pass is the one that must lose: `--resume` writes into an EXISTING
+        # run's identity, and a smoke pass writes one seed of unscored,
+        # calibration-only episodes. Together they would inject those episodes
+        # into a scored run's grid, where `load_grid` sees them as ordinary
+        # cells. "Never counts toward scoring" is enforced by the throwaway
+        # run_id and by nothing else, so the combination is refused rather
+        # than silently resolved either way.
+        raise ConfigError(
+            "--smoke and --resume are mutually exclusive: a smoke pass runs "
+            "under a THROWAWAY run_id precisely so it can never be scored, "
+            "and --resume would write its calibration episodes into an "
+            "existing run's grid, where nothing downstream can tell them apart")
     seeds = [int(s) for s in (_csv(args.seeds) or cfg.benchmark.seeds)]
     task_ids = _csv(args.tasks)
     if args.smoke:
@@ -2113,16 +2127,25 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
                              report_path=report_path, out=out)
         return bench_exit_code(verdict, escalated)
     finally:
+        # THE SAMPLER GOES FIRST, and every other teardown step is individually
+        # suppressed. It is the only resource here that is a detached OS
+        # process: an httpx client that is never closed dies with this process,
+        # a PowerShell child polling an energy counter does not. Ordering it
+        # after an unprotected `aclose()` meant one teardown exception -- a
+        # server that would not stop, a client whose transport was already
+        # gone -- leaked it for the machine's uptime. Suppressed for the same
+        # reason `stop_all` always was: teardown must not replace the run's own
+        # outcome (or its exception) with a cleanup error.
+        if sampler is not None:
+            with contextlib.suppress(Exception):
+                sampler.stop()
         if orchestra is not None:
-            # Suppressed: teardown must not replace the run's own outcome (or
-            # its exception) with a "the leaf would not stop" error.
             with contextlib.suppress(Exception):
                 await orchestra.stop_all()
         for dispatcher in (rlm_dispatcher, leaf_dispatcher, root_client):
             if dispatcher is not None:
-                await dispatcher.aclose()
-        if sampler is not None:
-            sampler.stop()
+                with contextlib.suppress(Exception):
+                    await dispatcher.aclose()
 
 
 def cmd_bench(args) -> int:
@@ -2155,13 +2178,33 @@ def cmd_bench(args) -> int:
         try:
             return asyncio.run(_bench(args, cfg, raw_cfg, manifest, lifecycle,
                                        out=out, err=err))
-        except (ConfigError, VerdictError) as exc:
-            print(f"refused: {exc}", file=err)
+        # THE EXIT-CODE TAXONOMY, and why nothing here may return 1:
+        #
+        #   0 = §8's gate PASSED     1 = §8's gate FAILED     2 = no verdict
+        #
+        # 1 is a RESULT -- a grid that ran, was scored, and lost. Every branch
+        # below is a run that never produced a verdict at all: a server that
+        # would not come up (`ServerRotationError`), a leaf that drifted mid-grid
+        # (`ConfigError` out of the §4 handshake), an unscoreable grid
+        # (`VerdictError`), an operator's Ctrl-C. Reporting any of those as 1
+        # would put "the scaffold lost to its baselines" into CI, and into the
+        # S4 record, for a run that was never scored -- the one confusion §8's
+        # pre-registration cannot survive. `RlmError` is the root of the
+        # scaffold's own exception tree (`ConfigError` included), so this is
+        # every attributable scaffold failure; a genuine BUG (TypeError,
+        # KeyError) still propagates uncaught and gets a traceback, because a
+        # crash the scaffold cannot name must not be quietly filed as "refused".
+        except (RlmError, VerdictError) as exc:
+            print(f"refused: {exc}. This run produced no verdict; nothing was "
+                  f"scored. Fix the cause and resume the grid with "
+                  f"`rlm bench --resume <run_id>` (the run_id is printed above "
+                  f"and every decided cell is skipped).", file=err)
             return EXIT_REFUSED
         except KeyboardInterrupt:
-            print("aborted by operator — resume this grid with "
-                  f"`rlm bench --resume <run_id>`", file=err)
-            return EXIT_FAILED
+            print("aborted by operator — this run produced no verdict; resume "
+                  "the grid with `rlm bench --resume <run_id>` (the run_id is "
+                  "printed above and every decided cell is skipped).", file=err)
+            return EXIT_REFUSED
     finally:
         lifecycle.close()
 

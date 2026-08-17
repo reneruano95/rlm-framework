@@ -1327,3 +1327,90 @@ async def test_the_head_hash_is_checked_without_a_second_tokenize(mock_server):
     await d.query("second question", role="leaf", call_id="c2")
     assert len(mock_server.tokenize_bodies) - before == 1, (
         "the head was re-tokenized to check a hash that needs no server")
+
+
+# --------------------------------------------------------------------------- #
+# The seed is PER CALL, not per dispatcher (S4 Task 12 fix).
+#
+# A dispatcher outlives a seed. §8 varies the seed of the whole system across
+# three replicates while one bench run holds ONE leaf dispatcher for all of
+# them, so a construction-time-only seed decodes every replicate identically
+# while `config_snapshot` records that they differed -- three draws of one leaf,
+# reported as three seeds. These assertions read the /completion body the fake
+# server actually received, so they cannot pass because the call site was
+# written in some convenient way.
+# --------------------------------------------------------------------------- #
+
+
+def _seeded_cfg(minimal_cfg_dict, port: int, seed: int):
+    raw = _absolutized_prompt_paths(copy.deepcopy(minimal_cfg_dict))
+    raw["servers"]["leaf"]["port"] = port
+    raw["scaffold"]["sampling"]["leaf"]["seed"] = seed
+    return Config.model_validate(raw)
+
+
+async def test_the_completion_seed_follows_the_call_not_the_construction(
+        mock_server, minimal_cfg_dict):
+    """The bug this fixes: ONE dispatcher, built at seed 1, serving §8's three
+    seeds. The wire must carry the seed the CALLER named."""
+    built_at_seed_1 = _seeded_cfg(minimal_cfg_dict, mock_server.port, 1)
+    ran_at_seed_2 = _seeded_cfg(minimal_cfg_dict, mock_server.port, 2)
+    assert built_at_seed_1.scaffold.sampling.leaf.seed == 1
+    assert ran_at_seed_2.scaffold.sampling.leaf.seed == 2
+
+    d = LLMDispatcher.from_config(built_at_seed_1)
+    try:
+        await d.query("q", role="leaf", call_id="c1")           # no override
+        await d.query("q", role="leaf", call_id="c2",
+                      seed=ran_at_seed_2.scaffold.sampling.leaf.seed)
+        await d.query("q", role="leaf", call_id="c3", seed=3)
+    finally:
+        await d.aclose()
+
+    assert [b["seed"] for b in mock_server.completion_bodies] == [1, 2, 3]
+
+
+async def test_an_omitted_seed_still_carries_the_configured_one(
+        mock_server, minimal_cfg_dict):
+    """The override is additive: every pre-S4 caller passes nothing and must
+    keep getting `sampling.leaf.seed`. Nothing here may default to a seed the
+    config did not name."""
+    cfg = _seeded_cfg(minimal_cfg_dict, mock_server.port, 7)
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        await d.query("q", role="leaf", call_id="c1")
+    finally:
+        await d.aclose()
+    assert mock_server.completion_bodies[0]["seed"] == 7
+
+
+async def test_every_retry_of_one_call_decodes_at_the_same_seed(
+        mock_server, minimal_cfg_dict):
+    """Resolved once per call, before the attempts loop: a retry that changed
+    the seed would be a different draw from the one it is retrying, which is
+    not a retry."""
+    cfg = _seeded_cfg(minimal_cfg_dict, mock_server.port, 1)
+    mock_server.fail_times(2)
+    d = LLMDispatcher.from_config(cfg)
+    try:
+        await d.query("q", role="leaf", call_id="c1", seed=5)
+    finally:
+        await d.aclose()
+    assert len(mock_server.completion_bodies) == 3
+    assert {b["seed"] for b in mock_server.completion_bodies} == {5}
+
+
+async def test_the_mock_dispatcher_accepts_the_same_seed_keyword():
+    """Interface parity. A dry run decodes nothing, so the seed steers no draw
+    -- but every caller passes one, and a mock that rejected the keyword would
+    make `dispatcher: mock` diverge from the real path at exactly the call site
+    the dry run exists to exercise."""
+    import hashlib
+
+    from rlm.dispatcher import MockDispatcher, compose_leaf_user
+
+    composed = compose_leaf_user("q", None)
+    key = f"leaf:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
+    d = MockDispatcher({key: "A"}, parallel=1)
+    assert await d.query("q", role="leaf", call_id="c1", seed=99) == "A"
+    assert await d.query("q", role="leaf", call_id="c2") == "A"

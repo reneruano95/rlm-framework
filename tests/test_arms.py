@@ -79,6 +79,7 @@ class _ScriptedDispatcher(CannedDispatcher):
         self.prompts: list[str] = []
         self.counted: list[str] = []
         self.slot_ids: list[int | None] = []
+        self.seeds: list[int | None] = []
 
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         self.counted.append(text)
@@ -92,7 +93,8 @@ class _ScriptedDispatcher(CannedDispatcher):
         return base
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None) -> str:
+        self.seeds.append(seed)
         from rlm.dispatcher import compose_leaf_user
 
         self.prompts.append(prompt)
@@ -113,9 +115,11 @@ class _SlotAwareDispatcher(_ScriptedDispatcher):
     profile's shape. The arm must pass the pin through to it."""
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None, slot_id: int | None = None) -> str:
+                     chunk: str | None = None, slot_id: int | None = None,
+                     seed: int | None = None) -> str:
         self.slot_ids.append(slot_id)
-        return await super().query(prompt, role=role, call_id=call_id, chunk=chunk)
+        return await super().query(prompt, role=role, call_id=call_id,
+                                    chunk=chunk, seed=seed)
 
 
 @pytest.fixture
@@ -128,7 +132,8 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
 
     def build(*, bench_ctx: int | None = None, bench_parallel: int | None = None,
               drop_bench_leaf: bool = False, max_wall_clock_s: int | None = None,
-              max_subcalls: int | None = None, chunk: dict | None = None) -> Config:
+              max_subcalls: int | None = None, chunk: dict | None = None,
+              leaf_seed: int | None = None) -> Config:
         raw = copy.deepcopy(minimal_cfg_dict)
         prompts = raw["scaffold"]["prompts"]
         prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
@@ -156,6 +161,10 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
             raw["scaffold"]["budgets"]["max_subcalls"] = max_subcalls
         if chunk is not None:
             raw["scaffold"]["chunk"].update(chunk)
+        if leaf_seed is not None:
+            # §8's replicate identity. `rlm.bench.seeded_config` patches this
+            # per attempt on the RAW dict, exactly as this does.
+            raw["scaffold"]["sampling"]["leaf"]["seed"] = leaf_seed
         return Config.model_validate(raw)
 
     return build
@@ -969,13 +978,15 @@ class _PerChunkDispatcher(CannedDispatcher):
         self.empty = empty
         self.prompts: list[str] = []
         self.set_corpus_calls: list[Any] = []
+        self.seeds: list[int | None] = []
 
     def set_corpus(self, chunks) -> None:
         self.set_corpus_calls.append(chunks)
         self._inner.set_corpus(chunks)
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None) -> str:
+        self.seeds.append(seed)
         from rlm.dispatcher import compose_leaf_user
 
         self.prompts.append(prompt)
@@ -998,9 +1009,11 @@ class _SlotAwarePerChunkDispatcher(_PerChunkDispatcher):
         self.slot_ids: list[int | None] = []
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None, slot_id: int | None = None) -> str:
+                     chunk: str | None = None, slot_id: int | None = None,
+                     seed: int | None = None) -> str:
         self.slot_ids.append(slot_id)
-        return await super().query(prompt, role=role, call_id=call_id, chunk=chunk)
+        return await super().query(prompt, role=role, call_id=call_id,
+                                    chunk=chunk, seed=seed)
 
 
 def _reply_by_marker(prompt: str) -> str:
@@ -1268,7 +1281,7 @@ class _RotatingDispatcher(_PerChunkDispatcher):
         self.pool_error_drained = False
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None) -> str:
         from rlm.dispatcher import _new_step
 
         self.call_count += 1
@@ -1516,3 +1529,41 @@ async def test_b2_without_a_process_manager_closes_as_error_on_slot_pool_exhaust
     # chunk A answered before the exhaustion; the reduce step never ran
     assert all(s["actor"] == "leaf" for s in env.steps)
     assert [s["status"] for s in env.steps] == ["ok", "error"]
+
+
+# --------------------------------------------------------------------------- #
+# The seed travels with the CALL, not with the dispatcher (S4 Task 12 fix).
+#
+# §8's three replicates are three seeds of the WHOLE system, and a bench run
+# holds ONE leaf dispatcher across all of them while re-seeding the CONFIG per
+# attempt (`rlm.bench.seeded_config`). An arm that let C4's construction-time
+# seed stand would send the same leaf seed for all three while
+# `config_snapshot` recorded three different ones -- three draws of one leaf,
+# reported as three seeds, and every §8 margin computed over them.
+# --------------------------------------------------------------------------- #
+
+
+async def test_b1_sends_its_own_configs_leaf_seed(bench_cfg):
+    cfg = bench_cfg(leaf_seed=4)
+    disp = _ScriptedDispatcher("ANSWER")
+    res, _env = await _run_b1(cfg, _task(), disp)
+    assert res.outcome == Outcome.SUCCESS
+    assert disp.seeds == [4]
+
+
+async def test_b3_sends_its_own_configs_leaf_seed(bench_cfg):
+    cfg = bench_cfg(leaf_seed=5)
+    disp = _ScriptedDispatcher("ANSWER")
+    res, _env = await _run_b3(cfg, _task(), disp)
+    assert res.outcome == Outcome.SUCCESS
+    assert disp.seeds == [5]
+
+
+async def test_the_leaf_seed_is_the_configs_and_never_the_dispatchers(bench_cfg):
+    """The bug's exact shape: two attempts of the SAME task under two seeded
+    configs, one dispatcher. Both calls must differ on the wire."""
+    disp = _ScriptedDispatcher("ANSWER")
+    for seed in (1, 2, 3):
+        res, _env = await _run_b1(bench_cfg(leaf_seed=seed), _task(), disp)
+        assert res.outcome == Outcome.SUCCESS
+    assert disp.seeds == [1, 2, 3]

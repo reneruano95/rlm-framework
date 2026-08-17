@@ -853,8 +853,17 @@ def test_each_arm_is_handed_its_own_profile_and_process_manager(
     assert by_arm["b2"]["kwargs"]["process_manager"] == "b2-process-manager"
     assert by_arm["b2"]["kwargs"]["root_client"] is not None
     # §8's v0.2.6 slot pin: B1 on slot 0, B3 on slot 1 of the bench profile.
-    assert by_arm["b1"]["kwargs"].get("slot_id", 0) == 0
-    assert by_arm["b3"]["kwargs"].get("slot_id", 1) == 1
+    # The CLI passes no `slot_id` at all -- the pin is pre-registered as each
+    # arm's own default, and an override here would be a second place it could
+    # drift from. Asserted as "absent, and the defaults are still 0 and 1",
+    # because `kwargs.get("slot_id", 0) == 0` would pass either way.
+    import inspect
+
+    from rlm.arms import run_b1, run_b3
+    assert "slot_id" not in by_arm["b1"]["kwargs"]
+    assert "slot_id" not in by_arm["b3"]["kwargs"]
+    assert inspect.signature(run_b1).parameters["slot_id"].default == 0
+    assert inspect.signature(run_b3).parameters["slot_id"].default == 1
     # The RLM arm's identity travels in `snapshot_extra`; a baseline's in
     # `bench_extra` (`ArmEpisode.snapshot` adds its own `arm` key).
     assert "bench" in by_arm["rlm"]["kwargs"]["snapshot_extra"]
@@ -1173,3 +1182,160 @@ def test_the_transcript_labels_an_llm_call_by_its_actor(valid_config_file):
     rendered = out.getvalue()
     assert "root llm_call" in rendered
     assert rendered.count("leaf llm_call") == 1
+
+
+# =========================================================================== #
+# Review fixes (S4 Task 12, round 1)
+# =========================================================================== #
+
+
+def test_the_arm_runners_hand_every_arm_the_blocks_own_seed(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    """The bench half of the per-call-seed fix.
+
+    §8's three replicates are three seeds of the WHOLE system, and
+    `rlm.bench.seeded_config` re-seeds the CONFIG per attempt. What the arm
+    runners must therefore hand each arm is a config carrying THAT block's
+    seed -- on both the root and the leaf, and on the bench-profile arms too,
+    which derive their own `Config` and could silently keep the shipped one.
+    (`rlm/episode.py` and `rlm/arms.py` then put that seed on the wire per
+    call; `tests/test_dispatcher.py` pins the wire end.)
+    """
+    arms = _ArmRecorder().patch(monkeypatch)
+    main(_bench_argv(valid_config_file, tmp_path, "--tasks", "needle-02",
+                     "--seeds", "1,2,3"))
+    shipped = load_config(valid_config_file).scaffold.sampling.leaf.seed
+    seen = {(c["arm"], c["seed"], c["root_seed"], c["leaf_seed"])
+            for c in arms.calls}
+    assert seen == {(arm, seed, seed, seed)
+                    for arm in ("rlm", "b1", "b2", "b3") for seed in (1, 2, 3)}
+    # …and at least one of those is NOT the config's shipped value, or this
+    # test would pass against a scaffold that never re-seeded anything.
+    assert {c["leaf_seed"] for c in arms.calls} - {shipped}
+
+
+def test_the_sampler_is_stopped_even_when_teardown_raises(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    """A PowerShell child polling an energy counter is the only resource in
+    this teardown that outlives the process. An unclosed httpx client dies with
+    us; a detached sampler runs until the machine reboots. So it is stopped
+    FIRST and every later step is individually suppressed -- an orchestra that
+    will not stop, or a client whose transport is already gone, must not leak
+    it."""
+    _ArmRecorder().patch(monkeypatch)
+
+    class _Sampler:
+        def __init__(self):
+            self.started = self.stopped = False
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            self.stopped = True
+
+        def alive(self):
+            return False
+
+        def reading(self):
+            return None
+
+    sampler = _Sampler()
+    monkeypatch.setattr(cli, "PowerSampler", lambda *a, **kw: sampler)
+
+    class _ExplodingDispatcher:
+        @classmethod
+        def from_config(cls, cfg, **kw):
+            return cls()
+
+        async def aclose(self):
+            raise RuntimeError("transport already closed")
+
+        async def count_tokens(self, text, *, role="leaf"):
+            return 1
+
+    monkeypatch.setattr(cli, "LLMDispatcher", _ExplodingDispatcher)
+    monkeypatch.setattr(cli, "bench_dispatcher", lambda *a, **kw: _ExplodingDispatcher())
+
+    raw = yaml.safe_load(valid_config_file.read_text(encoding="utf-8"))
+    raw["power_sampling"] = {"enabled": True}
+    powered = tmp_path / "powered.yaml"
+    powered.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    rc = main(_bench_argv(powered, tmp_path, "--smoke", "--tasks", "needle-02"))
+    assert sampler.started and sampler.stopped, "the sampler outlived the run"
+    assert rc == cli.EXIT_OK
+
+
+def test_a_scaffold_failure_mid_grid_is_a_refusal_not_a_gate_failure(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """The exit-code taxonomy: 0 = gate PASS, 1 = gate FAIL, 2 = no verdict.
+
+    1 is a RESULT -- a grid that ran, was scored, and lost. A server that never
+    came up produced no verdict at all, and reporting it as 1 would put "the
+    scaffold lost to its baselines" into CI, and into the S4 record, for a run
+    nothing scored."""
+    from rlm.errors import ServerRotationError
+
+    _ArmRecorder().patch(monkeypatch)
+
+    async def explode(_self):
+        raise ServerRotationError("leaf did not come up on port 8081")
+
+    monkeypatch.setattr(_FakeOrchestra, "start_resident", explode)
+    rc = main(_bench_argv(valid_config_file, tmp_path, "--tasks", "needle-02"))
+    err = capsys.readouterr().err
+    assert rc == cli.EXIT_REFUSED
+    assert rc != cli.EXIT_FAILED
+    assert "no verdict" in err and "--resume" in err
+
+
+def test_an_operator_abort_is_a_refusal_not_a_gate_failure(
+        valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
+    """Ctrl-C at hour 30 of 39 must not be filed as a benchmark loss."""
+    _ArmRecorder().patch(monkeypatch)
+
+    async def interrupt(_self):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_FakeOrchestra, "start_resident", interrupt)
+    rc = main(_bench_argv(valid_config_file, tmp_path, "--tasks", "needle-02"))
+    err = capsys.readouterr().err
+    assert rc == cli.EXIT_REFUSED
+    assert "no verdict" in err and "--resume" in err
+
+
+def test_only_the_banded_pairs_arms_are_escalated(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    """§8 escalates a PAIR, not a grid. One baseline in the {+1,+2,+3} band
+    must draw seeds {4,5} for itself and RLM and for nobody else -- an
+    escalation that swept every arm would spend episodes §8 never registered
+    and re-decide tasks against baselines whose margin was never in doubt.
+
+    RLM 4/4; B1 1/4 (margin +3, banded); B2 and B3 0/4 (margin +4, outside).
+    """
+    outcomes = {(arm, task): Outcome.FAIL
+                for arm in ("b1", "b2", "b3") for task in FOUR_TASKS}
+    outcomes[("b1", "codeqa-01")] = Outcome.SUCCESS
+    _rc, arms = _graded(valid_config_file, tmp_path, monkeypatch, outcomes)
+
+    escalated = [c for c in arms.calls if c["seed"] in (4, 5)]
+    assert {c["arm"] for c in escalated} == {"rlm", "b1"}
+    assert not [c for c in escalated if c["arm"] in ("b2", "b3")]
+    # B1's discordant tasks are the three RLM took and B1 did not.
+    discordant = {"needle-02", "agg-02", "synth-01"}
+    assert {c["task_id"] for c in escalated} == discordant
+    assert len(escalated) == len(discordant) * 2 * 2      # tasks x seeds x arms
+
+
+def test_smoke_and_resume_are_refused_together(valid_config_file, tmp_path,
+                                                capsys, fake_orchestra, monkeypatch):
+    """A smoke pass is unscored ONLY because its run_id is a throwaway.
+    `--resume` would write its calibration episodes into an existing run's
+    grid, where `load_grid` reads them as ordinary cells."""
+    _ArmRecorder().patch(monkeypatch)
+    rc = main(_bench_argv(valid_config_file, tmp_path, "--smoke",
+                          "--tasks", "needle-02", "--resume", str(uuid.uuid4())))
+    err = capsys.readouterr().err
+    assert rc == cli.EXIT_REFUSED
+    assert "mutually exclusive" in err

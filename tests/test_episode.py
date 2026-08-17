@@ -26,6 +26,7 @@ class _RetryingDispatcher:
         self._fail = fail_attempts
         self._tokens_in = tokens_in
         self._tokens_out = tokens_out
+        self.seeds: list[int | None] = []
 
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         return (len(text) + 3) // 4
@@ -39,7 +40,8 @@ class _RetryingDispatcher:
         corpus should fail loudly rather than silently skip detection."""
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None) -> str:
+        self.seeds.append(seed)
         async with self.semaphore:
             for attempt in range(self._fail + 1):
                 if attempt == self._fail:
@@ -450,7 +452,7 @@ class DeadLeafDispatcher:
         pass
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                    chunk: str | None = None) -> str:
+                    chunk: str | None = None, seed: int | None = None) -> str:
         from rlm.errors import DispatchError
 
         self.steps.append({"call_id": call_id, "retry_idx": 0, "status": "error",
@@ -787,3 +789,42 @@ async def test_snapshot_extra_lands_in_config_snapshot(episode_env):
     await env.run()
     snap = env.episode_row()["config_snapshot"]
     assert snap["bench"] == {"arm": "rlm", "run_id": "r-1", "seed": 1, "block": 0}
+
+
+async def test_every_leaf_call_carries_this_episodes_seed(episode_env):
+    """The seed travels with the CALL, not with the dispatcher (S4 Task 12).
+
+    §8's three replicates are three seeds of the WHOLE system. A bench run
+    holds ONE leaf dispatcher across all of them and re-seeds the CONFIG per
+    attempt (`rlm.bench.seeded_config`), so an episode that let C4's
+    construction-time seed stand would decode all three replicates identically
+    while `config_snapshot` recorded that they differed -- three draws of one
+    leaf, reported as three seeds.
+    """
+    d = _RetryingDispatcher(fail_attempts=0)
+    env = episode_env(
+        root_script=[
+            "```repl\nprint(await llm_query('q'))\nprint(await llm_query('r'))\n```",
+            "```repl\nfinal_answer('x')\n```",
+        ],
+        dispatcher=d, leaf_seed=9)
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert env.cfg.scaffold.sampling.leaf.seed == 9
+    assert d.seeds == [9, 9]
+
+
+async def test_a_retried_leaf_call_does_not_change_seed(episode_env):
+    """Every attempt of one call is the same draw being retried. `query` is
+    entered once per call, so this pins the seed at the episode boundary the
+    dispatcher's own attempts loop then holds fixed."""
+    d = _RetryingDispatcher(fail_attempts=2, tokens_in=1, tokens_out=1)
+    env = episode_env(
+        root_script=[
+            "```repl\nprint(await llm_query('q'))\n```",
+            "```repl\nfinal_answer('x')\n```",
+        ],
+        dispatcher=d, leaf_seed=11)
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert d.seeds == [11]

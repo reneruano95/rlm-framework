@@ -663,8 +663,16 @@ class ArmEpisode:
         call_id = str(uuid.uuid4())
         reservation = (self.enforcer.admit(admit_tokens, "leaf", call_id)
                        if admit_tokens is not None else None)
-        kwargs: dict[str, Any] = {"role": "leaf", "call_id": call_id,
-                                  "chunk": chunk}
+        kwargs: dict[str, Any] = {
+            "role": "leaf", "call_id": call_id, "chunk": chunk,
+            # THIS EPISODE'S SEED, PER CALL -- never the one the dispatcher was
+            # built with. §8 re-seeds the CONFIG for each of its three
+            # replicates (`rlm.bench.seeded_config`) while one bench run holds
+            # a single leaf dispatcher across all of them, so a
+            # construction-time seed would give every replicate the same leaf
+            # draw while `config_snapshot` recorded three different ones.
+            "seed": self.cfg.scaffold.sampling.leaf.seed,
+        }
         if slot_id is not None and self.can_pin_slot():
             kwargs["slot_id"] = slot_id
         try:

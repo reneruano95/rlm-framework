@@ -794,6 +794,9 @@ class CannedDispatcher:
         from rlm.dispatcher import MockDispatcher
 
         self._inner = MockDispatcher(dict(fixtures or {}), parallel=parallel)
+        #: The `seed=` every caller passed, in order. §8's seed discipline
+        #: is only real if the seed reaches the dispatcher PER CALL.
+        self.seeds: list[int | None] = []
 
     def __getattr__(self, name):          # semaphore, steps, last_step, ...
         return getattr(self._inner, name)
@@ -802,7 +805,11 @@ class CannedDispatcher:
         return await self._inner.count_tokens(text, role=role)
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None) -> str:
+        # `seed` recorded, never consulted: this double replays fixtures, so
+        # the ASSERTION a test makes about it is that the caller passed the
+        # right one -- not that a draw changed.
+        self.seeds.append(seed)
         import hashlib
 
         from rlm.dispatcher import compose_leaf_user
@@ -858,6 +865,10 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
         raw["scaffold"]["budgets"]["max_total_tokens"] = over["max_total_tokens"]
     if over.get("leaf_port") is not None:
         _point_at_mock_leaf(raw, over["leaf_port"])
+    if over.get("leaf_seed") is not None:
+        # §8's replicate identity, patched on the RAW dict exactly as
+        # `rlm.bench.seeded_config` patches it per attempt.
+        raw["scaffold"]["sampling"]["leaf"]["seed"] = over["leaf_seed"]
     return raw
 
 
@@ -950,14 +961,14 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
                 category="default", answer=None, truncation_cap=None,
                 max_wall_clock_s=None, max_subcalls=None, max_total_tokens=None,
                 max_turns=None, leaf_fixtures=None, dispatcher=None,
-                leaf_port=None, process_manager=None):
+                leaf_port=None, process_manager=None, leaf_seed=None):
         server = FakeRootServer(minimal_cfg_dict, script=root_script)
         raw = _episode_cfg_dict(minimal_cfg_dict, tmp_path=tmp_path,
                                  root_port=server.port, truncation_cap=truncation_cap,
                                  max_wall_clock_s=max_wall_clock_s,
                                  max_subcalls=max_subcalls,
                                  max_total_tokens=max_total_tokens,
-                                 leaf_port=leaf_port)
+                                 leaf_port=leaf_port, leaf_seed=leaf_seed)
         cfg = Config.model_validate(raw)
         task = Task(task_id="fixture-task", text=task_text, context=context,
                     category=category, answer=answer)

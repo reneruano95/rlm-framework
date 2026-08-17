@@ -115,7 +115,16 @@ non-defaulted config -- §6 records it in config_snapshot as what actually
 ran, and the benchmark's seed discipline depends on the seed reaching the
 server. `from_config()` threads it into each role's `DispatchTarget`, and
 `query()` passes it on every /completion call; nothing here defaults to
-near-greedy sampling. `from_config()` builds ONLY a "leaf" target: root
+near-greedy sampling.
+
+THE SEED IS ALSO PER CALL (`query(seed=...)`), because a dispatcher outlives a
+seed. §8 varies the seed of the WHOLE system across three replicates while one
+bench run holds one leaf dispatcher for all of them, so a construction-time-only
+seed would decode every replicate at the first seed while `config_snapshot`
+recorded three -- three draws of one leaf, reported as three seeds. The
+override is what makes the recorded value true; `None` keeps the target's.
+
+`from_config()` builds ONLY a "leaf" target: root
 traffic never goes through LLMDispatcher (see `rlm.rootclient.
 RootConversation`, which talks to a raw `ServerClient` with its own
 `cfg.scaffold.sampling.root`), so a "root" DispatchTarget here would be
@@ -1035,7 +1044,8 @@ class LLMDispatcher:
         return target.markers
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> "str | dict[str, Any]":
+                     chunk: str | None = None,
+                     seed: int | None = None) -> "str | dict[str, Any]":
         """Dispatch one leaf call. Returns the answer STRING, or -- when this
         target asks for the JSON envelope -- the parsed envelope as a dict
         (`rlm.envelope.payload`). Off by default, so every existing caller and
@@ -1060,6 +1070,18 @@ class LLMDispatcher:
         whose entire purpose is to force coverage and punish sampling. A
         partial map still prints an answer, so the failure surfaces as a wrong
         result in the arm being measured, not as an error anyone can see.
+
+        `seed` OVERRIDES the construction-time `target.seed` FOR THIS CALL, and
+        exists because a dispatcher outlives a seed. §8 runs the whole system
+        at three seeds, and a bench run builds ONE leaf dispatcher for all of
+        them (rebuilding per seed would hand a fresh, virgin-pool view of an
+        already-used server to C4 -- an R13 hazard -- and relaunching the leaf
+        at every seed boundary costs 90 extra relaunches). Without a per-call
+        seed the leaf would decode at `sampling.leaf.seed` as it stood when the
+        dispatcher was built, for all three seeds, while `config_snapshot`
+        recorded that it varied: three replicates of one leaf, reported as
+        three seeds. `None` keeps the construction-time value, which is what
+        every non-bench caller wants.
         """
         for attempt in range(_MAX_PREFLIGHT_ROTATIONS + 1):
             generation = self._pool_generation
@@ -1069,7 +1091,8 @@ class LLMDispatcher:
             async with self._admitted():
                 try:
                     return await self._query_once(prompt, role=role,
-                                                   call_id=call_id, chunk=chunk)
+                                                   call_id=call_id, chunk=chunk,
+                                                   seed=seed)
                 except PreflightFailed:
                     # The pre-flight died against a process the scaffold itself
                     # was replacing. That is not this call's fault and must not
@@ -1118,11 +1141,16 @@ class LLMDispatcher:
                 self._idle.set()
 
     async def _query_once(self, prompt: str, *, role: str, call_id: str,
-                           chunk: str | None = None) -> "str | dict[str, Any]":
+                           chunk: str | None = None,
+                           seed: int | None = None) -> "str | dict[str, Any]":
         """One pre-flight-and-dispatch pass, already gated and counted."""
         target = self._targets.get(role)
         if target is None:
             raise DispatchError(f"unknown dispatch role {role!r}")
+        # Resolved ONCE, here, so every attempt of this call decodes at the
+        # same seed: a retry that silently changed it would make the retry a
+        # different draw from the one being retried.
+        seed = target.seed if seed is None else seed
         layout = LAYOUT_QUESTION_ONLY if chunk is None else LAYOUT_CHUNK_QUESTION
         # Where this dispatch's retry_idx sequence starts -- 0 unless a
         # rotation is re-dispatching a call that already recorded attempts.
@@ -1280,7 +1308,8 @@ class LLMDispatcher:
             raise
         try:
             answer, parsed = await self._attempts_loop(
-                target, role, call_id, base, layout, rendered, sent, slot)
+                target, role, call_id, base, layout, rendered, sent, slot,
+                seed=seed)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1304,8 +1333,14 @@ class LLMDispatcher:
 
     async def _attempts_loop(self, target: DispatchTarget, role: str, call_id: str,
                               base: int, layout: str, rendered: str, sent: str,
-                              slot: int) -> tuple[str, "EnvelopeParse | None"]:
+                              slot: int, *,
+                              seed: int) -> tuple[str, "EnvelopeParse | None"]:
         """The retry loop for one call, on one already-acquired slot.
+
+        `seed` is already resolved by `_query_once` (this call's override or
+        the target's) and is required rather than defaulted here, for the same
+        reason `ServerClient.completion` requires it: a decoding parameter that
+        can be forgotten is one that will be.
 
         Returns the answer verbatim plus, when this target asks for the JSON
         envelope, the parsed envelope that came with it. A malformed envelope is
@@ -1339,7 +1374,7 @@ class LLMDispatcher:
                     result = await target.client.completion(
                         rendered, n_predict=target.max_predict,
                         temperature=target.temperature, top_p=target.top_p,
-                        seed=target.seed, stream=True, id_slot=slot)
+                        seed=seed, stream=True, id_slot=slot)
             except asyncio.CancelledError:
                 # A genuine abort: closing the stream already freed the
                 # slot server-side. No final event exists, so slot_id/
@@ -1494,7 +1529,14 @@ class MockDispatcher:
         return (len(text) + 3) // 4
 
     async def query(self, prompt: str, *, role: str, call_id: str,
-                     chunk: str | None = None) -> str:
+                     chunk: str | None = None, seed: int | None = None) -> str:
+        # `seed` is accepted and IGNORED, for interface parity with
+        # `LLMDispatcher.query`: a dry run replays fixtures and decodes
+        # nothing, so there is no draw for a seed to steer -- but every caller
+        # passes one, and a mock that rejected the keyword would make the
+        # dry-run path diverge from the real one at exactly the call site the
+        # dry run exists to exercise.
+        #
         # Keyed on the COMPOSED user string, so a fixture keyed by (role,
         # prompt-hash) still matches whichever form the model used to build
         # the same request (§5 dry-run mode).
