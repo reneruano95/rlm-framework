@@ -39,6 +39,16 @@ The wedges pull apart only in *marginal-effort allocation* (the library rewards 
 - **D5 — The library ships with its measurement record.** R13 and R14 are documented in the library's own docs, bounds and all. The measurement discipline *is* the differentiator; a library that hides known defects of the stack it schedules would spend the exact trust it exists to build. Never write "leak-free" (existing R13 rule, now with a customer-facing reason).
 - **D6 — C4/C5 boundary stays cleanly separable.** It is today; keep it so. Extraction is a packaging exercise, not a refactor.
 
+## 4a. S4 result and what it does to this direction (2026-08-18)
+
+The S4 gate PASSED (RLM 30/30; +30/+13/+29 vs B1/B2/B3, all p ≤ 0.0002) — **and the RLM arm never called the leaf** (`s4/RESULTS.md`, ARCHITECTURE.md §9 S4). Three consequences bear directly on this document:
+
+- **The evidence base for a product claim is now real, and cheaper than forecast.** On the frozen benchmark the scaffold answered at 0.78×/0.10×/0.43× the wall-clock and 0.19×/0.06×/0.13× the tokens of the three baselines. "Private, on-prem, *and* cheaper per answer than the obvious alternatives" is a stronger pitch than the quality-at-a-cost story §2 predicted.
+- **Differentiator #1 is not load-bearing for this result.** §3 names serving co-design on unified memory as the first unoccupied gap, and S0's two-resident contention data as its proof. A single resident root plus a REPL would have produced the same 30/30. The co-design work is not invalidated (the baselines needed the leaf; delegation is unmeasured), but **the appliance's minimum viable shape may be one model, not two** — smaller, cheaper, and easier to support. Do not re-plan around this until the delegation measurement lands; do not sell the two-resident topology as the differentiator until it earns a scored win.
+- **The library wedge is unaffected but re-aimed.** D1–D6 stand. The admission/scheduling layer's value proposition rests on multi-model workloads this benchmark did not produce, so the honest packaging is "the co-residency layer for people running two or more models on one box", not "the layer that made our benchmark win".
+
+**Nothing in §1–§4 is amended by this.** Open-core, library-after-S3, appliance-for-private-orgs all stand; what changes is which technical claim carries the marketing weight, and that stays open until delegation is priced.
+
 ## 5. Consequences for the engineering plan
 
 - **R13 upstream fix is promoted to product-blocking.** In a multi-user org deployment, cross-request slot leakage is a *privacy defect* — one user's document bleeding into another query's answer — not only a benchmark-validity threat. The interim mitigation (never-reuse-a-slot + deterministic detector, 95% upper bound 2.2%) remains the shipping posture and its bound is a number a customer must be shown. The upstream reproducer/issue (`s2/R13-upstream-draft.md`) moves from "worth filing" to scheduled work.
