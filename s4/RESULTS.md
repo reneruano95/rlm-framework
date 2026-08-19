@@ -224,8 +224,11 @@ answer if the benchmark had been only synthesis.
 
 ### The one thing to do next
 
-**Price the delegation path, or stop calling this an RLM runtime.** Two ways,
-both cheap relative to what they'd settle:
+**Price the delegation path.** The runtime is an RLM runtime — `llm_query` is
+wired, works, and was exercised 15,888 times by B2 in this very run. What is
+unmeasured is not the capability but its *value*: whether delegation earns
+anything the root cannot get from code. Two ways to find out, both cheap
+relative to what they would settle:
 
 1. **Author tasks code cannot solve** — semantic judgment over unstructured
    prose, where no parse exists and the root must ask the leaf to *read*.
@@ -236,9 +239,12 @@ both cheap relative to what they'd settle:
    leaf adds — or shows it subtracts — on tasks whose answers we already
    know.
 
-Until one of those runs, the project's own summary of itself should be
-"deterministic scaffold + root-as-programmer, measured", not "recursive
-language model, validated".
+Until one of those runs, claims should track the measurement rather than the
+architecture's name. The runtime **is** an RLM runtime and its delegation path
+works; what this project has *measured* is a deterministic scaffold plus
+root-as-programmer. "Recursive delegation beats these baselines" is the
+sentence the evidence does not yet carry — the name on the tin is not the
+issue, the scope of the claim is.
 
 ### Strategic note for `DIRECTION.md`
 
