@@ -25,3 +25,7 @@ traces/
 # committed.
 s3/results/store/
 s3/results/cfg-*.yaml
+
+# upstream bundle: keep the scripts, issue text and verification data;
+# ignore stray bytecode
+upstream/__pycache__/
