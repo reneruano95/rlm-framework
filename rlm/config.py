@@ -43,7 +43,14 @@ class _Strict(BaseModel):
 
 class ServerConfig(_Strict):
     model: Path
+    #: Root speculative-decoding DECLARATIONS. Exactly the same contract as each
+    #: other: the flags that do the work live in `extra_flags`, and a
+    #: cross-field validator refuses any state where the two disagree. They are
+    #: separate booleans rather than one enum because `--spec-type` is itself a
+    #: comma-separated list upstream, so "which methods are on" is not a
+    #: single-valued question.
     mtp: bool = False
+    dflash: bool = False
     port: int
     backend: str
     backend_dir: Path
@@ -442,34 +449,71 @@ class Config(_Strict):
                 f"got {s.budgets.max_predict.leaf} + {s.chunk.size_tokens}"
             )
 
-        if root.mtp and root.parallel != 1:
+        if (root.mtp or root.dflash) and root.parallel != 1:
             raise ValueError(
-                f"servers.root.mtp=true requires servers.root.parallel == 1 "
-                f"(got {root.parallel})"
+                f"servers.root.mtp/dflash=true requires servers.root.parallel "
+                f"== 1 (got {root.parallel}). MTP is single-slot on this build; "
+                f"DFlash2 is measured upstream to collapse to at or below "
+                f"baseline decode at -np > 1 (llama.cpp#27342), so neither is "
+                f"safe to run against a multi-slot root"
             )
 
-        # `mtp` is a DECLARATION; the flags that actually turn MTP on live in
-        # extra_flags, because `serverproc.launch_argv` refuses to invent flags
-        # in code ("a flag invented in code is a flag config_snapshot cannot
-        # record"). That split is only safe if the two cannot disagree: a
-        # `mtp: true` that emitted nothing would be a silent lie in every
-        # snapshot, and spec flags with `mtp: false` would make §7 #4's
-        # optimization invisible to the scoring query.
-        spec = " ".join(root.extra_flags)
-        declares = "draft-mtp" in spec
-        if root.mtp and not declares:
-            raise ValueError(
-                "servers.root.mtp=true but no '--spec-type ... draft-mtp' in "
-                "servers.root.extra_flags -- nothing would actually enable MTP "
-                "at launch, and config_snapshot would record a run that did "
-                "not happen"
-            )
-        if declares and not root.mtp:
-            raise ValueError(
-                "servers.root.extra_flags asks for '--spec-type draft-mtp' but "
-                "servers.root.mtp is false -- set it true so §7 #4's "
-                "optimization is visible to the trace and to scoring"
-            )
+        # `mtp` and `dflash` are DECLARATIONS; the flags that actually turn
+        # speculative decoding on live in extra_flags, because
+        # `serverproc.launch_argv` refuses to invent flags in code ("a flag
+        # invented in code is a flag config_snapshot cannot record"). That split
+        # is only safe if the two cannot disagree: a declaration that emitted
+        # nothing would be a silent lie in every snapshot, and spec flags with
+        # the declaration false would make §7 #4's optimization invisible to the
+        # scoring query.
+        #
+        # BOTH methods are guarded, deliberately. When the root moved from
+        # `draft-mtp` to `draft-dflash` (s2/DFLASH2.md) a check that only knew
+        # the token "draft-mtp" would have gone VACUOUS -- `mtp: false` plus
+        # DFlash flags satisfies it while reintroducing exactly the silent lie
+        # it exists to prevent. A new `--spec-type` value must arrive here too.
+        spec_tokens = [w for f in root.extra_flags for w in f.split()]
+        spec = " ".join(spec_tokens)
+        for field, token in (("mtp", "draft-mtp"), ("dflash", "draft-dflash")):
+            declared = getattr(root, field)
+            emitted = token in spec
+            if declared and not emitted:
+                raise ValueError(
+                    f"servers.root.{field}=true but no '--spec-type ... {token}' "
+                    f"in servers.root.extra_flags -- nothing would actually "
+                    f"enable it at launch, and config_snapshot would record a "
+                    f"run that did not happen"
+                )
+            if emitted and not declared:
+                raise ValueError(
+                    f"servers.root.extra_flags asks for '--spec-type {token}' "
+                    f"but servers.root.{field} is false -- set it true so §7 #4's "
+                    f"optimization is visible to the trace and to scoring"
+                )
+
+        # DFlash is the one method that needs a SECOND file on disk: the drafter
+        # is a separate GGUF, not a head inside the target quant the way MTP's
+        # is. `--spec-type draft-dflash` without `-md` dies at launch, and a
+        # stale path dies after the 15.7 GB target has already been read. Both
+        # are config errors and belong here, next to the prompt-hash pinning
+        # that exists for the same reason.
+        if root.dflash:
+            draft: str | None = None
+            for i, w in enumerate(spec_tokens[:-1]):
+                if w in ("-md", "--spec-draft-model", "--model-draft"):
+                    draft = spec_tokens[i + 1]
+            if draft is None:
+                raise ValueError(
+                    "servers.root.dflash=true but servers.root.extra_flags "
+                    "carries no '-md/--spec-draft-model <path>' -- DFlash needs "
+                    "a separate drafter GGUF and llama-server refuses to start "
+                    "without one"
+                )
+            if not Path(draft).exists():
+                raise ValueError(
+                    f"servers.root.extra_flags pins a DFlash drafter GGUF that "
+                    f"does not exist: {draft}"
+                )
 
         if s.truncation_cap_chars < MIN_MARKER_CAP:
             raise ValueError(

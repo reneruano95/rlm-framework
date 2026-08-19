@@ -36,22 +36,74 @@ servers:
     # Q4_K_M is 15.66 GB, byte-for-byte the same size as the incumbent quant, so
     # dual residency is unchanged and §4's headroom arithmetic still holds.
     model: 'D:\AI\models\lmstudio-community\Qwen3.8-27B-GGUF\Qwen3.8-27B-Q4_K_M.gguf'
-    # §7 #4 MEASURED 2026-08-15 on this box (`s2/mtp_bench.py`, `s2/MTP.md`),
-    # median decode over 8 runs at temperature 0, 256 tokens, root-shaped
-    # prompts: no speculation 12.87 t/s; `draft-mtp` n-max 2 -> 27.17 t/s
-    # (2.11x); n-max 6 -> 26.33 t/s (2.05x, a wash); adding `ngram-mod` ->
-    # 18.04 t/s (1.40x), i.e. ngram COSTS a third of the gain on this workload
-    # because the root writes fresh code rather than re-emitting a long shared
-    # context. §7 #4's target is >=1.4x; n-max 2 clears it by 1.5x.
-    # OWED, and not satisfiable yet: R4 requires "unchanged benchmark success",
-    # which is an S4 measurement. Byte-identity cannot substitute -- this stack
-    # does not reproduce itself at temperature 0 (baseline self-identity 0/4),
-    # exactly as §8 warns. So MTP is on for speed, and its quality claim is
-    # explicitly unverified until S4 runs.
-    mtp: true
+    # §7 #4, SUPERSEDED 2026-08-19: MTP -> DFlash2 (`s2/dflash2_bench.py`,
+    # `s2/DFLASH2.md`). Same harness, same prompts, same launch line as the
+    # 2026-08-15 MTP measurement; only the speculative flags differ.
+    #
+    # THE INCUMBENT, for the record: `draft-mtp` n-max 2 -> 27.17 t/s (2.11x)
+    # over a 12.87 t/s unspeculated baseline; n-max 6 -> 26.33 t/s (2.05x, a
+    # wash); adding `ngram-mod` -> 18.04 t/s (1.40x), i.e. ngram COSTS a third
+    # of the gain because the root writes fresh code rather than re-emitting a
+    # long shared context. That n-max 6 wash is the signature of MTP's
+    # AUTOREGRESSIVE drafting: each extra draft token costs another drafter
+    # pass, so the extra tokens paid for themselves and no more.
+    #
+    # DFlash2 removes exactly that cost -- it is a block-diffusion drafter, one
+    # forward pass for the whole block. Measured on this box, medians, the
+    # `-r` arms being INDEPENDENT re-measurements rather than re-analyses:
+    #   temperature 0     base 12.84 | mtp-2 26.89 / 27.03 | dflash n4 35.56 /
+    #                     34.35 (1.28-1.32x MTP) | n5 34.75 | n3, n6 ~32 |
+    #                     n2 26.80 (a dead tie with MTP) | n7 24.40 (LOSES)
+    #   temp 0.7 / p 0.8  base 12.85 | mtp-2 26.18 | dflash n4 38.34
+    #                     (2.98x base, 1.46x MTP) | n5 33.60
+    # The second table is the one that governs: 0.7/0.8 is `scaffold.sampling.
+    # root`, i.e. what the root actually runs. §7 #4's target is >=1.4x on
+    # decode; this clears it 2.1x over.
+    #
+    # n-max 4 AND NOT THE UPSTREAM-RECOMMENDED 7. Both the model card and the
+    # PR suggest 7 (the maximum: `n_draft_max = block_size - 1`, block_size 8).
+    # Here 7 is the WORST DFlash2 setting and loses to MTP outright, because
+    # drafter and verifier batches are both `n-max + 1`: n4 does 5 tokens of
+    # work for 3.47 accepted (0.69/unit), n7 does 8 for 4.41 (0.55/unit). On a
+    # bandwidth-bound APU the marginal verified token is not free, so the
+    # setting that maximises ACCEPTANCE LENGTH is not the one that maximises
+    # THROUGHPUT. n4/n5 are within 1.2% of each other, so this is a plateau
+    # with margin on both sides, not a knife-edge.
+    #
+    # OWED, and STILL not satisfiable -- unchanged from the MTP entry, and the
+    # reason this is a speed claim only: R4 requires "unchanged benchmark
+    # success", which is an S4 measurement. Byte-identity cannot substitute --
+    # this stack does not reproduce itself at temperature 0 (baseline
+    # self-identity 0/4; no arm measured exceeded 1/4), exactly as §8 warns.
+    # AND THE S4 GATE PASSED AGAINST `draft-mtp`: those numbers describe a root
+    # this config no longer launches, so S4 is owed a re-run, not an edit.
+    mtp: false
+    dflash: true
     port: 8080
     backend: vulkan
-    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
+    # NOT the pinned b10375 release zip any more, and this is the load-bearing
+    # cost of the DFlash2 swap. The drafter GGUF carries 7 tensors
+    # (`blk.N.attn_conv_base/proj`, `blk.N.ffn_conv_base/proj`,
+    # `selector_predecessor/successor/hidden`) and 4 KV keys
+    # (`dflash.conv_kernel_size/conv_group_size/selector_rank/selector_top_k`)
+    # that ONLY llama.cpp PR #27342 knows, so b10375 and b10488 cannot load it
+    # at all -- a hard load failure, not a degraded path. There is no released
+    # binary with DFlash2 support as of 2026-08-19.
+    #
+    # So this directory is a FROM-SOURCE build of an unmerged PR (`5ecbe1a`,
+    # MSVC 19.51.36252.0, `-DGGML_VULKAN=ON`), where every other backend_dir in
+    # this file is an official `bXXXXX` zip. That is a real provenance
+    # regression and is written down rather than glossed: the branch can be
+    # force-pushed or abandoned, and `rlm validate`'s build_info assertion now
+    # pins `0.1.2-dev (build 1, commit 5ecbe1a)` instead of a release tag.
+    # Revert target: `tools\llamacpp-vulkan` + the MTP flags below, which is a
+    # two-line change and gives back 27.17 t/s.
+    #
+    # THE BUILD IS CONTROLLED FOR, so the gain is not a compiler artifact: this
+    # binary reproduces the pinned one on the arms they share -- unspeculated
+    # 12.84 vs 12.87 t/s (-0.2%), `draft-mtp` n-max 2 26.89/27.03 vs 27.17
+    # (-0.5%), two independent replicates.
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan-dflash2'
     log_path: traces/logs/root-server.log
     ctx: 32768
     parallel: 1
@@ -65,15 +117,35 @@ servers:
     # servers that ran rather than the ones the spec was written against.
     # `-lv 4` is a launch-contract requirement, not an extra flag: D27's
     # cache-type assertion parses the log it produces.
-    # The MTP flags live HERE and not in launch_argv on purpose: serverproc
-    # refuses to invent flags in code, because a flag invented in code is one
-    # config_snapshot cannot record (R11). `servers.root.mtp` above is the
-    # declaration; a cross-field validator keeps the two from disagreeing.
-    # `--spec-draft-n-max 2` is §7 #4's pre-registered bound AND the measured
-    # optimum (2.11x vs 2.05x at 6, within noise of each other -- the bound
-    # costs nothing, so it is kept).
+    # The speculative flags live HERE and not in launch_argv on purpose:
+    # serverproc refuses to invent flags in code, because a flag invented in
+    # code is one config_snapshot cannot record (R11). `servers.root.dflash`
+    # above is the declaration; a cross-field validator keeps the two from
+    # disagreeing, and it now guards `draft-dflash` as well as `draft-mtp` --
+    # a check that only knew "draft-mtp" would have gone VACUOUS on this swap
+    # (`mtp: false` + DFlash flags would satisfy it while reintroducing the
+    # silent lie it exists to prevent).
+    #
+    # `-md` has no MTP counterpart: DFlash needs a SECOND file on disk, because
+    # the drafter is a separate 1.09 GiB GGUF rather than a head inside the
+    # target quant. The validator checks the path exists at config load, since
+    # a stale one otherwise fails only after the 15.7 GB target has been read.
+    #
+    # MEASURED MEMORY COST of that second model, from the launch log: drafter
+    # weights 1,079.61 MiB + draft KV 50.00 MiB (SWA-capped, 2,560 cells x 5
+    # layers) + draft compute 517.92 MiB, and the target's own compute buffer
+    # grows 164.28 -> 416.75 MiB because it now verifies batches instead of
+    # single tokens. ~1.9 GiB all in, which takes §4's dual-residency headroom
+    # from 19.5% to ~16.5% free on the 64 GiB carve -- still above the stated
+    # 15% floor, but the margin is materially thinner and `-np 128` on the leaf
+    # is unchanged, so the floor is the thing to re-check first if the leaf is
+    # ever re-sized. MTP cost zero here; its head was already in the quant.
+    #
+    # DFlash2 needs no flag beyond these: `common_speculative_impl_draft_dflash`
+    # auto-detects v2 from the checkpoint's `dflash.selector_top_k` key.
     extra_flags: ["-lm none", "--no-context-shift",
-                  "--spec-type draft-mtp", "--spec-draft-n-max 2"]
+                  "-md D:\\AI\\models\\z-lab\\Qwen3.8-27B-DFlash2-GGUF\\Qwen3.8-27B-DFlash2-Q4_K_M.gguf",
+                  "--spec-type draft-dflash", "--spec-draft-n-max 4"]
   leaf:
     model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
     port: 8081

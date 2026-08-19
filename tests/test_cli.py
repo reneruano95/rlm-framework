@@ -359,6 +359,41 @@ def test_launch_log_parse_reads_the_build_line_b10375_ACTUALLY_prints(tmp_path):
     assert log_is_current(parsed, {"build_info": "b10375-ba360efe1"}) is True
 
 
+def test_launch_log_parse_binds_to_the_target_not_the_drafter(tmp_path):
+    """A speculative launch (`-md`, s2/DFLASH2.md) builds TWO contexts, so the
+    log carries two kv_cache lines and two flash_attn lines -- target first,
+    drafter second. This parse used to take the LAST of each, so attaching a
+    drafter silently moved §4's assertion off the target and onto the draft
+    cache, which defaults to f16 and would then fail the q8_0 check for the
+    wrong reason. Sample lines are copied verbatim from a live DFlash2 root."""
+    from rlm.cli import parse_launch_log
+
+    log = tmp_path / "root-server.log"
+    log.write_text(
+        "0.00.36 I cmn  common_param: common_params_print_info: build "
+        "10375 (ba360efe1) with Clang 20.1.8 for Windows x86_64\n"
+        "0.10.63 I llama_context: flash_attn            = enabled\n"
+        "0.10.79 I llama_kv_cache: size = 1088.00 MiB ( 32768 cells,  16 "
+        "layers,  1/1 seqs), K (q8_0):  544.00 MiB, V (q8_0):  544.00 MiB\n"
+        # the drafter's own context, logged after the target's
+        "0.13.19 I llama_kv_cache: size =    0.00 MiB ( 32768 cells,   0 "
+        "layers,  1/1 seqs), K (f16):    0.00 MiB, V (f16):    0.00 MiB\n"
+        "0.13.19 I llama_context: flash_attn            = enabled\n"
+        "0.13.19 I llama_kv_cache: size =   50.00 MiB (  2560 cells,   5 "
+        "layers,  1/1 seqs), K (f16):   25.00 MiB, V (f16):   25.00 MiB\n",
+        encoding="utf-8")
+    parsed = parse_launch_log(log)
+    # the target, which is what §4 asserts on
+    assert parsed["type_k"] == "q8_0" and parsed["type_v"] == "q8_0"
+    assert parsed["kv_cells"] == 32768 and parsed["kv_layers"] == 16
+    assert parsed["flash_attn"] == "enabled"
+    # the drafter, recorded rather than silently shadowing the target. The
+    # zero-layer line is a context llama.cpp never allocated and must not be
+    # mistaken for the draft cache.
+    assert parsed["draft_type_k"] == "f16" and parsed["draft_kv_layers"] == 5
+    assert parsed["draft_kv_mib"] == 50.0
+
+
 def test_the_cli_has_exactly_five_verbs():
     """Non-goals are written into the spec: no daemon, no REST API, no web UI,
     no interactive chat mode.

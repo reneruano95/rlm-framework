@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -155,6 +156,7 @@ def test_zero_concurrency_is_refused(minimal_cfg_dict):
 
 def test_mtp_forces_root_single_slot(minimal_cfg_dict):
     minimal_cfg_dict["servers"]["root"]["mtp"] = True
+    minimal_cfg_dict["servers"]["root"]["dflash"] = False
     minimal_cfg_dict["servers"]["root"]["parallel"] = 2
     with pytest.raises(ConfigError, match="mtp"):
         Config.model_validate(minimal_cfg_dict)
@@ -400,6 +402,7 @@ def test_mtp_declared_without_the_flag_is_refused(minimal_cfg_dict):
     every config_snapshot -- §8's whole comparison rests on the snapshot
     describing the run that actually happened (R11)."""
     minimal_cfg_dict["servers"]["root"]["mtp"] = True
+    minimal_cfg_dict["servers"]["root"]["dflash"] = False
     minimal_cfg_dict["servers"]["root"]["parallel"] = 1
     minimal_cfg_dict["servers"]["root"]["extra_flags"] = ["-lm none"]
     with pytest.raises(ConfigError, match="draft-mtp"):
@@ -410,6 +413,7 @@ def test_the_flag_without_the_declaration_is_refused(minimal_cfg_dict):
     """The other direction matters too: MTP running while `mtp: false` would
     make §7 #4's optimization invisible to the trace and to scoring."""
     minimal_cfg_dict["servers"]["root"]["mtp"] = False
+    minimal_cfg_dict["servers"]["root"]["dflash"] = False
     minimal_cfg_dict["servers"]["root"]["parallel"] = 1
     minimal_cfg_dict["servers"]["root"]["extra_flags"] = [
         "-lm none", "--spec-type draft-mtp", "--spec-draft-n-max 2"]
@@ -419,6 +423,7 @@ def test_the_flag_without_the_declaration_is_refused(minimal_cfg_dict):
 
 def test_mtp_declared_with_the_flag_validates(minimal_cfg_dict):
     minimal_cfg_dict["servers"]["root"]["mtp"] = True
+    minimal_cfg_dict["servers"]["root"]["dflash"] = False
     minimal_cfg_dict["servers"]["root"]["parallel"] = 1
     minimal_cfg_dict["servers"]["root"]["extra_flags"] = [
         "-lm none", "--spec-type draft-mtp", "--spec-draft-n-max 2"]
@@ -426,16 +431,86 @@ def test_mtp_declared_with_the_flag_validates(minimal_cfg_dict):
     assert cfg.servers.root.mtp is True
 
 
-def test_the_shipped_config_declares_mtp_and_emits_it(valid_cfg):
-    """The shipped root runs Qwen3.8-27B, whose base quant carries the MTP head
-    (`nextn_predict_layers = 1`) the incumbent's Q4_K_M did not. Measured
-    2.11x root decode at `--spec-draft-n-max 2` (s2/MTP.md). This is a tripwire:
-    dropping either half silently gives back a 2x on the serial, decode-bound
-    part of every episode."""
+def test_the_shipped_config_declares_dflash_and_emits_it(valid_cfg):
+    """SUPERSEDES the MTP tripwire (2026-08-19). The shipped root ran
+    `draft-mtp` at 2.11x from the S5 swap until DFlash2 shipped a drafter for
+    Qwen3.8-27B specifically; measured 1.46x MTP at production sampling
+    (s2/DFLASH2.md). Same tripwire intent as before: dropping either half
+    silently gives back a 3x on the serial, decode-bound part of every episode."""
     root = valid_cfg.servers.root
-    assert root.mtp is True
-    assert any("draft-mtp" in f for f in root.extra_flags)
-    assert root.parallel == 1, "MTP is single-slot on this build"
+    assert root.dflash is True
+    assert root.mtp is False, "the two are alternatives; MTP was superseded"
+    assert any("draft-dflash" in f for f in root.extra_flags)
+    assert not any("draft-mtp" in f for f in root.extra_flags)
+    assert root.parallel == 1, "DFlash2 collapses at -np > 1 (llama.cpp#27342)"
+
+
+def test_the_shipped_config_pins_an_existing_drafter(valid_cfg):
+    """DFlash needs a second GGUF on disk, unlike MTP whose head is inside the
+    target quant. A missing `-md` is a launch-time death; a stale path is a
+    death AFTER the 15.7 GB target has been read. Both are config errors."""
+    root = valid_cfg.servers.root
+    tokens = [w for f in root.extra_flags for w in f.split()]
+    assert "-md" in tokens
+    draft = Path(tokens[tokens.index("-md") + 1])
+    assert draft.exists(), f"pinned DFlash drafter is missing: {draft}"
+
+
+def test_the_shipped_config_uses_the_dflash_capable_build(valid_cfg):
+    """b10375/b10488 CANNOT load a DFlash2 checkpoint -- 7 unknown tensors and 4
+    unknown KV keys, a hard load failure. Pointing the root back at the release
+    zip while `dflash: true` stands would fail at launch, not at load, so this
+    keeps the two facts adjacent."""
+    root = valid_cfg.servers.root
+    assert (root.backend_dir / "llama-server.exe").exists()
+    assert root.dflash is (root.backend_dir.name == "llamacpp-vulkan-dflash2")
+
+
+def test_dflash_declared_without_the_flag_is_refused(minimal_cfg_dict):
+    """The `draft-mtp`-only version of this check went vacuous the moment the
+    root switched methods: `mtp: false` plus DFlash flags satisfied it while
+    reintroducing exactly the silent lie it exists to prevent."""
+    minimal_cfg_dict["servers"]["root"]["dflash"] = True
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 1
+    minimal_cfg_dict["servers"]["root"]["extra_flags"] = ["-lm none"]
+    with pytest.raises(ConfigError, match="draft-dflash"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_the_dflash_flag_without_the_declaration_is_refused(minimal_cfg_dict):
+    minimal_cfg_dict["servers"]["root"]["dflash"] = False
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 1
+    minimal_cfg_dict["servers"]["root"]["extra_flags"] = [
+        "-lm none", "--spec-type draft-dflash", "--spec-draft-n-max 4"]
+    with pytest.raises(ConfigError, match="dflash"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_dflash_without_a_draft_model_is_refused(minimal_cfg_dict):
+    minimal_cfg_dict["servers"]["root"]["dflash"] = True
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 1
+    minimal_cfg_dict["servers"]["root"]["extra_flags"] = [
+        "-lm none", "--spec-type draft-dflash", "--spec-draft-n-max 4"]
+    with pytest.raises(ConfigError, match="-md"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_dflash_with_a_missing_draft_model_is_refused(minimal_cfg_dict):
+    """A stale drafter path must fail at config load, not minutes into a launch."""
+    minimal_cfg_dict["servers"]["root"]["dflash"] = True
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 1
+    minimal_cfg_dict["servers"]["root"]["extra_flags"] = [
+        "-lm none", "-md D:\\nope\\not-a-drafter.gguf",
+        "--spec-type draft-dflash", "--spec-draft-n-max 4"]
+    with pytest.raises(ConfigError, match="does not exist"):
+        Config.model_validate(minimal_cfg_dict)
+
+
+def test_dflash_forces_root_single_slot(minimal_cfg_dict):
+    minimal_cfg_dict["servers"]["root"]["dflash"] = True
+    minimal_cfg_dict["servers"]["root"]["parallel"] = 2
+    with pytest.raises(ConfigError, match="dflash"):
+        Config.model_validate(minimal_cfg_dict)
 
 
 def test_the_wall_clock_budget_carries_the_aggregation_ruling(valid_cfg):

@@ -153,21 +153,50 @@ def parse_launch_log(path: str | os.PathLike) -> dict[str, Any]:
 
     Returns `{}` when the log is missing or carries neither line -- which
     `validate` reports as UNVERIFIED, never as a pass.
+
+    FIRST OCCURRENCE WINS, and that is load-bearing since the DFlash2 swap
+    (2026-08-19, `s2/DFLASH2.md`). A speculative launch with `-md` builds TWO
+    contexts, so the log carries two `llama_kv_cache:` lines and two
+    `flash_attn =` lines: the target's first, then the drafter's. This loop used
+    to `update()` on every match, i.e. LAST wins, so the moment a drafter was
+    attached §4's assertion silently stopped describing the target and started
+    describing the draft cache -- which defaults to f16 and 5 layers and would
+    have failed the q8_0 check for entirely the wrong reason. Measured on the
+    shipped root: target `K (q8_0) 544.00 MiB / 32768 cells / 16 layers`, draft
+    `K (f16) 25.00 MiB / 2560 cells / 5 layers`.
+
+    The draft context is not discarded, it is recorded under `draft_*` -- a
+    silently shadowed value is exactly what this function exists to prevent, and
+    the drafter's own cache types are worth having in the snapshot.
     """
     found: dict[str, Any] = {}
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return found
+    n_kv = n_fa = 0
     for line in text.splitlines():
         m = _KV_LINE.search(line)
         if m:
-            found.update(kv_mib=float(m.group(1)), kv_cells=int(m.group(2)),
+            fields = dict(kv_mib=float(m.group(1)), kv_cells=int(m.group(2)),
                           kv_layers=int(m.group(3)), kv_seqs=int(m.group(5)),
                           type_k=m.group(6).lower(), type_v=m.group(7).lower())
+            # A zero-layer line is llama.cpp reporting a context it did not
+            # actually allocate (the drafter prints one before its real cache);
+            # it names no cache type and must not consume the target slot.
+            if fields["kv_layers"] > 0:
+                if n_kv == 0:
+                    found.update(fields)
+                elif n_kv == 1:
+                    found.update({f"draft_{k}": v for k, v in fields.items()})
+                n_kv += 1
         m = _FA_LINE.search(line)
         if m:
-            found["flash_attn"] = m.group(1).lower()
+            if n_fa == 0:
+                found["flash_attn"] = m.group(1).lower()
+            elif n_fa == 1:
+                found["draft_flash_attn"] = m.group(1).lower()
+            n_fa += 1
         m = _BUILD_LINE.search(line)
         if m:
             found["build_number"] = m.group(1)
