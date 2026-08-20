@@ -139,12 +139,28 @@ wrong cause, which is the failure mode a scored grid cannot absorb.
    first `llm_call` reporting all 128 slots held. It now asserts the pool is
    virgin afterward and refuses loudly instead.
 
-**One hypothesis tested and REFUTED, recorded because a wrong belief is worth
-naming:** tip 4 was changed to "fan out in waves" on the theory that a gather
-wider than the 128-slot pool could not survive. agg-02 disproved it -- 319
-answered calls THROUGH 79 pool-exhaustion events -- and reverting the guidance
-left synth-01 at 1,306.7 s either way. Mid-episode rotation handles wide
-fan-out; the waves only added round-trips.
+**A REASONING ERROR, corrected by the scored run, and recorded because the
+error matters more than the line.** Tip 4 was changed to "fan out in waves" on
+the theory that a gather wider than the 128-slot pool could not survive. It was
+then REVERTED on two arguments, both bad:
+
+  * agg-02 completed 319 answered calls through 79 pool-exhaustion events, so
+    mid-episode rotation looked sufficient -- but those 319 calls were measured
+    WITH the waves in place, so they were evidence FOR the guidance, not against;
+  * removing the waves left synth-01 unchanged at 1,306.7 s -- but synth-01 was
+    already failing for an unrelated reason (it thrashes, re-asking 59 chunks
+    13-17 times each), so it was structurally incapable of showing a difference.
+    A null result on a broken task is not evidence, and treating it as evidence
+    is the whole mistake.
+
+The scored run then produced the controlled comparison on the SAME task, at a
+cost of ~1.5 h of grid time: agg-02 succeeded at 986 s WITH waves (`ec03e7a`)
+and failed at 351 s with `slot_pool_error_drained` WITHOUT them (`c56311a`) --
+same corpus, same build, one prompt line different. Twelve of twelve restricted
+cells errored before it was caught. The waves are restored.
+
+The lesson generalises past this arm: a fix must be verified on the task that
+FAILS, not on whichever task is convenient.
 
 **The interpretive finding, and it is the arm working as designed.** synth-01 is
 killed by the wall clock at BOTH 1,300 s and 2,100 s. The trace says why: 697

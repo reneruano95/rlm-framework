@@ -429,7 +429,7 @@ scaffold:
     # no_cell_extracted -- prose, until the wall clock killed the episode).
     # A prompt that lies about the environment measures prompt mismatch, not
     # the value of delegation, which is the one thing this arm exists to price.
-    root_restricted: { path: prompts/root-restricted.v1.md, sha256: cb6e14e7f16c5abff7ac67ae122fc3c13f27a2b880aaeae4637f868c5702aa3c }
+    root_restricted: { path: prompts/root-restricted.v1.md, sha256: 65af229386acb5972bc26dfb771006c5bce96f73d8065b888f689ea404726c9c }
     # LEAF PREFIX: v1 REMAINS PINNED pending the S2 refusal A/B
     # (`s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
     # refusal-strengthened arm; v1 is the control behind every leaf measurement
