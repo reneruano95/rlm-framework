@@ -446,7 +446,11 @@ class _EpisodeRun:
             BudgetLimits(
                 max_depth=cfg.scaffold.budgets.max_depth,
                 max_subcalls=cfg.scaffold.budgets.max_subcalls,
-                max_wall_clock_s=cfg.scaffold.budgets.max_wall_clock_s,
+                max_wall_clock_s=(
+                    cfg.scaffold.budgets.restricted_max_wall_clock_s
+                    if (restrict_chunks
+                        and cfg.scaffold.budgets.restricted_max_wall_clock_s)
+                    else cfg.scaffold.budgets.max_wall_clock_s),
                 max_total_tokens=cfg.scaffold.budgets.max_total_tokens,
                 max_predict={"root": cfg.scaffold.budgets.max_predict.root,
                              "leaf": cfg.scaffold.budgets.max_predict.leaf},

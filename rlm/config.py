@@ -160,6 +160,21 @@ class Budgets(_Strict):
     #: silently rather than loudly (`s2/R13-mitigations.md` §8.3).
     max_subcalls: int = 522
     max_wall_clock_s: int = 900
+    #: The DELEGATION arm's wall clock, when it must differ from the shared one.
+    #: `None` (every arm but `rlm-restricted`, and every pre-2026-08-20 config)
+    #: means "use max_wall_clock_s", so this is inert unless declared.
+    #:
+    #: It exists because `max_wall_clock_s` was derived for a call volume this
+    #: arm exceeds BY CONSTRUCTION. §8's 1300 s comes from
+    #: `s2/aggregation_options.py`: 604 sub-calls x 2.78 s = 1,199 s plus 8.4%.
+    #: An arm that must delegate for every READ, not only for every question,
+    #: sits at that ceiling on arrival -- measured, synth-01 completed 629 leaf
+    #: calls and was killed still running.
+    #:
+    #: A DIFFERENT BUDGET IS A DIFFERENT MEASUREMENT, and it must be stated
+    #: beside every margin this arm appears in: its episodes are not scored
+    #: under the same kill threshold as rlm/b1/b2/b3.
+    restricted_max_wall_clock_s: int | None = None
     max_total_tokens: int = 1_500_000
     max_predict: MaxPredict
 

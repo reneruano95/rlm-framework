@@ -109,3 +109,61 @@ The pass therefore settles **both** open items in one grid:
   separate, larger piece of work and the v1 freeze stands.
 - Any change to checkers, corpora, or `benchmark.manifest_sha256`. The frozen
   v1 tasks are the reference precisely because their answers are known.
+
+---
+
+## 8. What the smoke found before the scored run (2026-08-20)
+
+`rlm bench --smoke` was run five times while building this arm. It found three
+defects and one interpretive finding that unit tests could not have produced,
+and every one of them failed QUIETLY -- plausible numbers attributed to the
+wrong cause, which is the failure mode a scored grid cannot absorb.
+
+**Defects, all fixed (commit `ec03e7a` and follow-ups):**
+
+1. *The slot pool is per leaf PROCESS, not per episode.* A delegating arm spends
+   all 128 never-reuse slots inside one episode; the next episode on that
+   generation opened dead. B2 -- a SCORED BASELINE, 15,888 leaf calls in S4 --
+   starved behind `rlm-restricted` and recorded `slot_pool_exhausted`. Across 90
+   blocks that reads as ordinary baseline weakness. Delegating arms now restart
+   the leaf and rotate before every episode.
+2. *`ChunkRef.__str__` was aliased to `__repr__`.* `f"...{chunks[i]}..."` then
+   interpolated the placeholder `<chunk 3 of 424>` instead of raising; the root
+   believed it had embedded the document, dropped `chunk=`, and
+   `window_key(None, call_id)` gave every such call its own window -- a slot
+   burned per call to ask about nothing, with the answers scored normally.
+3. *The rotation helper omitted `rotating()`.* Two lines were copied out of
+   `episode.py` without the context manager that quiesces first, and
+   `rotate_pool` REFUSES with a call in flight. After a budget-killed episode
+   the rescue rotation silently did not happen: codeqa-01 opened with its very
+   first `llm_call` reporting all 128 slots held. It now asserts the pool is
+   virgin afterward and refuses loudly instead.
+
+**One hypothesis tested and REFUTED, recorded because a wrong belief is worth
+naming:** tip 4 was changed to "fan out in waves" on the theory that a gather
+wider than the 128-slot pool could not survive. agg-02 disproved it -- 319
+answered calls THROUGH 79 pool-exhaustion events -- and reverting the guidance
+left synth-01 at 1,306.7 s either way. Mid-episode rotation handles wide
+fan-out; the waves only added round-trips.
+
+**The interpretive finding, and it is the arm working as designed.** synth-01 is
+killed by the wall clock at BOTH 1,300 s and 2,100 s. The trace says why: 697
+leaf calls carrying only **59 distinct** payloads -- the same chunks asked 13-17
+times. The root asks each chunk "list every organisation name", collects 326
+names, and tries to intersect them across three registers. In the unrestricted
+arm that is a regex over `chunks` -- a LOCATE task, exactly what root.v3 tip 2
+reserves for code. Forcing delegation converts an exact one-cell scan into a
+300-item text-reconciliation problem that does not converge, and no affordable
+budget fixes that.
+
+So a synthesis kill is not the arm failing to run; it is the measurement. It
+belongs in the verdict as a cost result beside the categories that do complete
+(agg-02 986 s, needle-02 505 s, codeqa-01 323 s), and it is the first direct
+evidence on the question `s4/RESULTS.md` left open -- whether delegation earns
+anything the root cannot get from code.
+
+`restricted_max_wall_clock_s: 2100` is kept anyway, on a separate argument: the
+smoke sampled 4 of 30 tasks, and any task needing 1,400-2,000 s now completes
+instead of dying. It costs ~800 s extra only on episodes that would be killed at
+1,300 s regardless -- ~5 h against the ~13 h the projection leaves under §8's
+60 h budget.

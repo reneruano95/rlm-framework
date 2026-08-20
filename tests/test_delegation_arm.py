@@ -210,3 +210,26 @@ def test_asking_for_a_restricted_prompt_that_is_not_configured_is_refused(valid_
         strategy_paths={"needle": p.strategy_templates.needle.path}).load()
     with pytest.raises(ConfigError, match="root_restricted"):
         bare.render_root("needle", restricted=True)
+
+
+def test_the_restricted_arm_has_its_own_wall_clock(valid_cfg):
+    """§8's 1300 s is derived for 604 sub-calls x 2.78 s. This arm delegates for
+    every READ, not only every question, so it sits at that ceiling on arrival:
+    synth-01 was killed at 1,306 s having completed 629 leaf calls."""
+    b = valid_cfg.scaffold.budgets
+    assert b.restricted_max_wall_clock_s is not None
+    assert b.restricted_max_wall_clock_s > b.max_wall_clock_s
+
+
+def test_the_restricted_wall_clock_covers_the_sub_call_budget(valid_cfg):
+    """The rule the number encodes: the wall clock must not kill an episode
+    BEFORE it can spend the sub-calls §8 already allows it. At the measured
+    2.08 s/call, `max_subcalls` needs ~1,926 s."""
+    b = valid_cfg.scaffold.budgets
+    assert b.restricted_max_wall_clock_s >= b.max_subcalls * 2.08
+
+
+def test_the_shared_wall_clock_is_untouched(valid_cfg):
+    """rlm/b1/b2/b3 keep the pre-registered threshold; only the new arm differs,
+    which is exactly why the difference has to be stated beside its margins."""
+    assert valid_cfg.scaffold.budgets.max_wall_clock_s == 1300

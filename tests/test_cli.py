@@ -1402,6 +1402,24 @@ def test_the_sampler_is_stopped_even_when_teardown_raises(
             every episode, and this double stands in for the real dispatcher on
             the path that reaches them."""
 
+        # The delegating arms now rotate before every episode, via the full
+        # §5 C4 sequence: `rotating()` (quiesce -> replace -> resume) around
+        # restart + `rotate_pool`, then an assertion that the pool really is
+        # virgin. A dispatcher double has to model all three or it no longer
+        # stands in for the real one on the path that reaches them.
+        def rotating(self):
+            import contextlib
+
+            @contextlib.asynccontextmanager
+            async def _cm():
+                yield
+
+            return _cm()
+
+        @property
+        def restart_required(self):
+            return False
+
         async def count_tokens(self, text, *, role="leaf"):
             return 1
 
@@ -1726,6 +1744,24 @@ def test_the_step_log_does_not_grow_across_episodes(valid_config_file, tmp_path,
             (`cli._virgin_resident_pool`), so a dispatcher double that cannot
             be rotated no longer models one."""
             self.rotations += 1
+
+        # The delegating arms now rotate before every episode, via the full
+        # §5 C4 sequence: `rotating()` (quiesce -> replace -> resume) around
+        # restart + `rotate_pool`, then an assertion that the pool really is
+        # virgin. A dispatcher double has to model all three or it no longer
+        # stands in for the real one on the path that reaches them.
+        def rotating(self):
+            import contextlib
+
+            @contextlib.asynccontextmanager
+            async def _cm():
+                yield
+
+            return _cm()
+
+        @property
+        def restart_required(self):
+            return False
 
         async def aclose(self):
             pass

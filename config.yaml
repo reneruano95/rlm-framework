@@ -360,6 +360,31 @@ scaffold:
     # must beat by +3, seeing 25% of the aggregation corpus against 16% at
     # 200K; option B (shrink only, no cap change) would have handed it 34%.
     max_wall_clock_s: 1300
+    # THE DELEGATION ARM'S WALL CLOCK, and only that arm's (2026-08-20).
+    #
+    # 1300 above is derived in `s2/aggregation_options.py` for 604 sub-calls at
+    # the measured 2.78 s/window = 1,199 s, plus 8.4% margin. `rlm-restricted`
+    # exceeds that BY CONSTRUCTION: it must delegate for every READ, not only
+    # for every question, because chunk text is unreadable in its sandbox.
+    # Measured in `rlm bench --smoke`: agg-02 986 s, needle-02 505 s, codeqa-01
+    # 323 s -- and synth-01 killed at 1,306 s having completed 629 leaf calls
+    # and still running. Reverting the prompt's fan-out guidance did not move
+    # it (1,306.7 s both ways), so this is call VOLUME, not strategy.
+    #
+    # 2100 = the arm's own pre-registered sub-call ceiling, priced:
+    # `max_subcalls` 926 x 2.08 s/call (measured, 629 calls in 1,306 s) =
+    # 1,926 s, plus ~10% for the root turns between them. The rule it encodes:
+    # the wall clock must not kill an episode BEFORE it can spend the sub-call
+    # budget §8 already allows it. A kill at 2100 therefore still means
+    # something -- it is not a ceiling raised until nothing can hit it.
+    #
+    # A DIFFERENT BUDGET IS A DIFFERENT MEASUREMENT. This arm's episodes are
+    # not scored under the same kill threshold as rlm/b1/b2/b3, and that has to
+    # be stated beside every margin it appears in. Ruled 2026-08-20 rather than
+    # taken: the alternative -- keep 1300 and report the kills as the cost
+    # result -- was on the table and was declined in favour of a full quality
+    # comparison across all four categories.
+    restricted_max_wall_clock_s: 2100
     max_total_tokens: 1500000
     # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
     # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.
@@ -404,7 +429,7 @@ scaffold:
     # no_cell_extracted -- prose, until the wall clock killed the episode).
     # A prompt that lies about the environment measures prompt mismatch, not
     # the value of delegation, which is the one thing this arm exists to price.
-    root_restricted: { path: prompts/root-restricted.v1.md, sha256: 92b3fffee5184b15a9c0195b5c1112d14470478b50a18fde1b0889db9f4d2bd8 }
+    root_restricted: { path: prompts/root-restricted.v1.md, sha256: cb6e14e7f16c5abff7ac67ae122fc3c13f27a2b880aaeae4637f868c5702aa3c }
     # LEAF PREFIX: v1 REMAINS PINNED pending the S2 refusal A/B
     # (`s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
     # refusal-strengthened arm; v1 is the control behind every leaf measurement

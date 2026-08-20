@@ -1758,9 +1758,34 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
         (`pool_rotating_swap` says the same thing from the other side).
 
         Only the delegating arms pay the ~10 s: `rlm` does not call the leaf.
+
+        Inside `rotating()`, which is quiesce -> replace -> rotate -> resume
+        with the reopen in a `finally`. The first version of this helper called
+        `restart()` and `rotate_pool()` bare, copying two lines out of
+        `episode.py` without the context manager around them -- and
+        `rotate_pool` REFUSES with a call in flight (it would hand a live
+        call's slot index back out to a different window, which is R13). The
+        preceding cell can leave one in flight: a budget-killed episode is torn
+        down mid-dispatch. Without the quiesce this either raises or rotates
+        nothing, and the next episode opens on the drained pool it was supposed
+        to be rescued from.
         """
-        await manager.restart()
-        rlm_dispatcher.rotate_pool()
+        async with rlm_dispatcher.rotating():
+            await manager.restart()
+            rlm_dispatcher.rotate_pool()
+        # ASSERT IT TOOK. Measured 2026-08-20: a codeqa-01 restricted episode
+        # opened with its very FIRST llm_call reporting "all 128 slots have
+        # held a window" -- the rotation above had not delivered a virgin pool,
+        # and the episode died as `slot_pool_error_drained` with 0 answered
+        # windows. That is indistinguishable, in the ledger, from the arm being
+        # bad at the task. A rotation that silently did not happen is the one
+        # failure this helper exists to prevent, so it fails loudly here
+        # instead of 128 doomed calls later.
+        if rlm_dispatcher.restart_required:
+            raise ConfigError(
+                "the leaf pool is still exhausted after a restart+rotate; "
+                "the episode would open on a dead pool and score as a failure "
+                "of the arm rather than of the rotation")
 
     async def b2_arm(task, cfg, *, bench_extra):
         manager = orchestra.b2_process_manager()
