@@ -86,6 +86,18 @@ def approx_tokens(text: str) -> int:
     return (len(text) + 3) // 4
 
 
+def _word_ends(text: str) -> list[int]:
+    """Character offsets one past each whitespace-delimited word.
+
+    Dropped when this bundle was extracted to be standalone, which made
+    `control_truncate` raise `NameError` on its first call and took the whole
+    reproducer down before it generated a single fixture. Restored verbatim
+    from `s1/make_fixtures.py`, the implementation every fixture in this
+    project was actually built with.
+    """
+    return [m.end() for m in re.finditer(r"\S+", text)]
+
+
 def control_truncate(text: str, n_tokens: int,
                       count: Callable[[str], int] | None = None) -> str:
     """Keep the first `n_tokens` tokens of `text`, drop the rest (§9 S1 (a)).

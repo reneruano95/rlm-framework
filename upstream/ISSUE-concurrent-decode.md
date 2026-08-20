@@ -1,4 +1,4 @@
-# Server: answer quality collapses when requests are decoded concurrently (100% -> 6% at two in flight)
+# HIP: answer quality collapses when requests are decoded concurrently (100% -> 6% at two in flight); Vulkan on the same GPU is clean
 
 ## Summary
 
@@ -7,6 +7,25 @@ correctly 32 times out of 32. With **two** in flight — nothing else changed, s
 prompts, same slots, same sampler, same process — it answers correctly 2 times
 out of 32, and 30 of the 32 outputs are degenerate: character loops, 3-token
 stubs, and identifiers truncated mid-string.
+
+**It is the HIP/ROCm backend.** The same model, the same build, the same flags
+and the same reproducer on the **Vulkan** backend of the same GPU are completely
+clean at concurrency 2 — and concurrency there does what it is supposed to do,
+cutting wall-clock while keeping every answer:
+
+| build `b10375-ba360efe1`, same box, same model, same flags | c=1 | c=2 | degenerate @ c=2 | wall c=1 → c=2 |
+|---|---|---|---|---|
+| **HIP / ROCm** | 32/32 | **2/32** | 30 | 48.2 s → 68.9 s (slower) |
+| **Vulkan** | 32/32 | **32/32** | 0 | 177.0 s → 126.4 s (1.40× faster) |
+
+Fisher exact on the c=2 row: **p = 2.0e-13**. Both arms are the *same build*
+(`b10375`), so this isolates the backend and not a version difference — the
+collapse was independently measured on `b10375` and `b10488` under ROCm.
+
+A dense model degrades on HIP too, but far less: `gemma-4-12B-it` Q8_0
+(no `ssm.*` keys) scores 11/32 at c=2 with 4 degenerate, against the hybrid
+MoE leaf's 2/32 with 30 (p = 0.011 between them). So the defect is not confined
+to hybrid/recurrent models, but severity depends strongly on the model.
 
 | concurrency | correct | degenerate | wall (s) | correct/s |
 |---|---|---|---|---|
@@ -24,9 +43,11 @@ no throughput being bought here.
 ## Environment
 
 ```
-build       b10488-9d77fa172   (also reproduced on b10375-ba360efe1)
-backend     HIP / ROCm 7.14, Windows 11, gfx1151 (Radeon 8060S, Strix Halo)
-model       Qwen3.6-35B-A3B UD-Q4_K_M (GGUF arch qwen35moe, hybrid attention + SSM)
+build       b10488-9d77fa172 and b10375-ba360efe1 (collapse on both, under HIP)
+affected    HIP / ROCm 7.14, Windows 11, gfx1151 (Radeon 8060S, Strix Halo)
+clean       Vulkan (AMD proprietary driver), same GPU, same box, build b10375
+models      Qwen3.6-35B-A3B UD-Q4_K_M (arch qwen35moe, hybrid attention + SSM)
+            gemma-4-12B-it Q8_0 (arch gemma4, dense SWA, no ssm.* keys)
 ```
 
 ```
@@ -102,21 +123,35 @@ or <= 2 predicted tokens). All are ~0 in the serial condition.
   96.9%.
 * **Thermal and memory** — a serial run started 13 s after a long eviction storm
   scored 31/32; memory is identical at concurrency 1 and 2 while quality falls.
+* **`--no-kv-unified`, i.e. the ubatch split mode.** With that flag,
+  `llama_memory_hybrid::init_batch` splits with `sequential = !unified`, which
+  admits only consecutive increasing seq_ids into a ubatch
+  (`src/llama-batch.cpp`), so it was the obvious suspect. It is not the cause:
+  dropping the flag reproduces the collapse exactly.
 
-## The one lead I have
+  | | concurrency 1 | concurrency 2 |
+  |---|---|---|
+  | `--no-kv-unified` | 32 / 32 | **2 / 32** |
+  | unified KV | 32 / 32 | **2 / 32** |
+
+  Fisher p = 1.0 at both levels. This is also a third independent reproduction
+  of the collapse on the same build.
+
+## The `--no-cont-batching` observation (predates the backend finding)
 
 At concurrency 2, `--no-cont-batching` restores correctness from 9/32 to
 **27/32** (Fisher p = 1.08e-05 against the batched arm), which is statistically
 indistinguishable from serial's 31/32 (p = 0.196). It does **not** hold at
 concurrency 8 (7/128).
 
-My reading — offered tentatively, I have not read the server source — is that
-`--no-cont-batching` does not stop concurrent sequences sharing a decode batch;
+My reading is that `--no-cont-batching` does not stop concurrent sequences
+sharing a decode batch;
 it stops *new* requests being inserted into a batch already running. At two in
 flight that is nearly enough to serialise them (and the wall clock agrees: the
 "concurrent" arm is *slower* than serial). At eight, sequences still share decode
-batches and the corruption returns. That would put the defect in multi-sequence
-decode rather than in batch admission.
+batches and the corruption returns. That puts the defect in multi-sequence
+decode rather than in batch admission -- consistent with the backend result
+above, since the Vulkan arm shares decode batches too and stays clean.
 
 One more detail that may or may not matter: the corruption is **bursty, not
 per-call**. Correct answers arrive in contiguous runs of roughly 5-25 requests
