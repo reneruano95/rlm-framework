@@ -413,7 +413,21 @@ async def _llm_query_template(question, *, chunk=None, role="leaf"):
     and step logging all live on the OTHER side of this pipe, where model code
     cannot reach them. The signature is closed (no `**kw`): the payload's
     fields are the scaffold's, not something a cell can extend.
+
+    In the restricted (delegation) arm `chunk` is a `ChunkRef` rather than a
+    string, and carries only an index -- the corpus never entered this process.
+    It is detected by attribute rather than by `isinstance` on purpose: this
+    function's globals are rebuilt to hold only BRIDGE and LOOP (see
+    `_build_injected`), and reaching a class here would put a fourth, writable
+    name in a namespace a cell can edit. Spoofing the attribute buys nothing --
+    it selects a chunk index, and every index is already selectable -- and the
+    parent range-checks it before resolving.
     """
+    ref = getattr(chunk, "_rlm_chunk_index", None)
+    if ref is not None:
+        return await BRIDGE.request(
+            "llm_query", {"question": question, "chunk": None,
+                          "chunk_ref": ref, "role": role})
     return await BRIDGE.request(
         "llm_query", {"question": question, "chunk": chunk, "role": role})
 
@@ -472,6 +486,53 @@ class AnswerGuard(dict):
 
 
 AnswerGuard.__module__ = "rlm_sandbox"
+
+
+class ChunkRef:
+    """An opaque handle to one corpus chunk: passable to `llm_query`, unreadable.
+
+    The delegation arm (`docs/superpowers/plans/2026-08-20-delegation-arm.md`)
+    prices what `llm_query` adds by making it the ONLY route to chunk content.
+
+    The isolation is structural rather than enforced: a ChunkRef holds an
+    integer and nothing else, because in this mode the corpus is never sent
+    into the sandbox at all. There is no text here to guard. The denials below
+    exist only so that a root reaching for the old habits -- `chunks[0][:200]`,
+    `"foo" in chunks[i]`, `chunks[i].lower()` -- gets a message naming the path
+    it should take, instead of a bare AttributeError it may misread as a bug in
+    its own code and retry.
+
+    `repr` deliberately still works: the root must be able to see what it holds
+    and how many there are in order to plan over them.
+    """
+
+    __slots__ = ("_rlm_chunk_index", "_n")
+
+    _HINT = ("chunk content is not readable in this arm; pass the handle to the "
+             "sub-model instead: await llm_query(question, chunk=chunks[i])")
+
+    def __init__(self, index: int, n: int) -> None:
+        object.__setattr__(self, "_rlm_chunk_index", index)
+        object.__setattr__(self, "_n", n)
+
+    def __repr__(self) -> str:
+        return f"<chunk {self._rlm_chunk_index} of {self._n}>"
+
+    __str__ = __repr__
+
+    def _deny(self, *_a, **_k):
+        raise TypeError(ChunkRef._HINT)
+
+    # The string/sequence surface a scanning root reaches for first. Equality
+    # and hashing are deliberately NOT denied: comparing or de-duplicating two
+    # handles reveals no content, and breaking them would break ordinary
+    # container use (and some interpreter internals) for nothing.
+    __len__ = __iter__ = __contains__ = __getitem__ = _deny
+    __add__ = __radd__ = __mod__ = _deny
+
+    def __getattr__(self, name: str):
+        # catches .lower() / .split() / .find() / .encode() and anything else
+        raise TypeError(f"{ChunkRef._HINT} (no attribute {name!r})")
 
 # D24: the authoritative values. USER_NS is re-primed from this dict before
 # every cell, so a rebind inside a cell survives only until that cell ends.
@@ -651,6 +712,14 @@ async def _handle(kind: str, payload):
         name, value = payload["name"], payload["value"]
         if name in _RESERVED and name not in _SETTABLE_RESERVED:
             raise SandboxPolicyError(f"{name!r} is scaffold plumbing and cannot be set")
+        # The delegation arm asks for handles, not text. The protocol carries
+        # JSON, so the parent cannot hand over objects: it sends a count and the
+        # handles are built HERE. That is also why the corpus does not cross --
+        # in this mode there is no chunk text on this side of the pipe at all.
+        if (name == "chunks" and isinstance(value, dict)
+                and "__opaque_chunks__" in value):
+            n = int(value["__opaque_chunks__"])
+            value = [ChunkRef(i, n) for i in range(n)]
         if name in _SETTABLE_RESERVED:
             _RESERVED[name] = value
         USER_NS[name] = value

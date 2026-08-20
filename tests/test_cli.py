@@ -741,14 +741,26 @@ SMOKE_TASKS = "needle-02,agg-02"
 FOUR_TASKS = ("needle-02", "agg-02", "synth-01", "codeqa-01")
 
 
+#: §8's four scored arms. Pinned explicitly here since `rlm-restricted` joined
+#: ARM_ORDER (the delegation arm): every test below asserts GATE and ESCALATION
+#: arithmetic, which is defined over RLM vs the three baselines, and letting a
+#: fifth arm into the grid would change those numbers without changing anything
+#: the tests are about. The new arm's registration, ordering and relaunch cost
+#: are covered in `test_bench.py` and `test_delegation_arm.py` instead.
+GATE_ARMS = "rlm,b1,b2,b3"
+
+
 def _bench_argv(config_file, tmp_path, *extra):
     """Every path a bench run writes to, redirected into tmp: the ledger
     (whose default is the pre-registered `s4/results/ledger.jsonl`) and the
     report. A test that wrote either into the repo would be a test that
     contaminated the artifact S4 is scored from."""
-    return ["bench", "--config", str(config_file),
+    argv = ["bench", "--config", str(config_file),
             "--ledger", str(tmp_path / "ledger.jsonl"),
             "--report", str(tmp_path / "RESULTS.md"), *extra]
+    if "--arm" not in argv:
+        argv += ["--arm", GATE_ARMS]
+    return argv
 
 
 # --------------------------------------------------------------------------- #
@@ -1548,6 +1560,7 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
         trace=SimpleNamespace(mark_superseded=lambda *a: None,
                               update_episode_metrics=lambda *a, **k: None),
         arm_runners={"rlm": _runner("rlm", resident),
+                     "rlm-restricted": _runner("rlm-restricted", resident),
                      "b2": _runner("b2", resident),
                      "b1": _runner("b1", bench_leaf),
                      "b3": _runner("b3", bench_leaf)},
@@ -1561,12 +1574,13 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
     for block in build_blocks(manifest, [1])[:2]:
         records += await run_block(block, list(ARM_ORDER), ctx)
 
-    assert len(records) == 8
+    assert len(records) == 10
     assert all(str(r["outcome"]) == "success" for r in records), \
         [(r["arm"], r["outcome"], r["reason"]) for r in records]
     # Block 2's B1/B3 are the cells the defect killed.
-    assert [(r["arm"], str(r["outcome"])) for r in records[4:]] == [
-        ("rlm", "success"), ("b2", "success"), ("b1", "success"), ("b3", "success")]
+    assert [(r["arm"], str(r["outcome"])) for r in records[5:]] == [
+        ("rlm", "success"), ("rlm-restricted", "success"), ("b2", "success"),
+        ("b1", "success"), ("b3", "success")]
     # …and each rotation followed a real swap, in both directions.
     assert orchestra.swaps == ["bench", "resident", "bench"]
     assert bench_leaf.rotations == 2 and resident.rotations == 1

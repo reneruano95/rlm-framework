@@ -2,14 +2,14 @@
 two rules that make a 39-hour run survivable — resume and rerun-once.
 
 WHAT THIS MODULE IS ALLOWED TO TOUCH. It is the shape of a composition root
-(it sequences four arms across two server profiles), but it is NOT one: the
+(it sequences the arms across two server profiles), but it is NOT one: the
 dependency rule (spec §5, linted by `tests/test_import_rules.py`) exempts
 exactly two modules — `rlm/episode.py` and `rlm/cli.py` — and widening that
 list is the drift `rlm/episode.py`'s docstring forbids. So `rlm/bench.py` is
 listed as ISOLATED instead, and everything that reaches a model server or a
 process arrives as an INJECTED callable on `BenchCtx`:
 
-  * the four arms (`arm_runners`) — Task 10 builds them from `run_episode`
+  * the arms (`arm_runners`) — Task 10 builds them from `run_episode`
     and `run_b1/b2/b3` with the dispatcher, root client, registry and process
     manager already closed over;
   * `load_task_fn` — `Task.from_file` lives in `rlm/episode.py`, which reaches
@@ -65,14 +65,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: §8's pre-registered within-block order. RLM and B2 run on the resident
 #: topology; B1 and B3 share the one `bench_leaf` relaunch, on their own slots
 #: (the v0.2.6 correction: two documents on one slot is R13's smallest repro).
-ARM_ORDER: tuple[str, ...] = ("rlm", "b2", "b1", "b3")
+#: `rlm-restricted` sits next to `rlm` deliberately: it runs on the RESIDENT
+#: profile too, so adding it costs no extra relaunch and §8's two-per-block
+#: bound is unchanged.
+ARM_ORDER: tuple[str, ...] = ("rlm", "rlm-restricted", "b2", "b1", "b3")
 
 #: The two server profiles a block moves between. Names, not configs: which
 #: flags each one launches with belongs to whoever owns the process (Task 10),
 #: and this module only ever says WHICH one an arm needs.
 RESIDENT_PROFILE = "resident"
 BENCH_PROFILE = "bench"
-ARM_PROFILE: dict[str, str] = {"rlm": RESIDENT_PROFILE, "b2": RESIDENT_PROFILE,
+ARM_PROFILE: dict[str, str] = {"rlm": RESIDENT_PROFILE,
+                               "rlm-restricted": RESIDENT_PROFILE,
+                               "b2": RESIDENT_PROFILE,
                                "b1": BENCH_PROFILE, "b3": BENCH_PROFILE}
 
 #: The §6 outcome_reason for an arm that REFUSED before opening an episode row
@@ -197,8 +202,8 @@ def bench_extra(run_id: str, block: int, seed: int, arm: str) -> dict[str, Any]:
     arm concept at all, so the RLM arm's has to come from here.
     """
     extra: dict[str, Any] = {"run_id": run_id, "block": block, "seed": seed}
-    if arm == "rlm":
-        extra["arm"] = "rlm"
+    if arm in ("rlm", "rlm-restricted"):
+        extra["arm"] = arm
     return extra
 
 

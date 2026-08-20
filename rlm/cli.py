@@ -1672,7 +1672,7 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
                       rlm_dispatcher, leaf_dispatcher, root_client,
                       scaffold_instance_id: str, scaffold_git_sha: str,
                       benchmark_version: str | None) -> dict[str, Any]:
-    """§8's four arms, each closed over everything `rlm/bench.py` may not
+    """§8's arms, each closed over everything `rlm/bench.py` may not
     import. This IS `BenchCtx.arm_runners`.
 
     THE FOUR ARE NOT SYMMETRIC, and every asymmetry below is a ruling:
@@ -1760,7 +1760,28 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
         finally:
             reset_dispatcher_steps(leaf_dispatcher)
 
-    return {"rlm": rlm_arm, "b2": b2_arm, "b1": b1_arm, "b3": b3_arm}
+    async def rlm_restricted_arm(task, cfg, *, bench_extra):
+        """`rlm`, with `llm_query` as the only route to chunk content.
+
+        Identical to `rlm_arm` in every other respect -- same dispatcher, same
+        process manager, same topology, so it adds no relaunch to a block --
+        and differs in the one flag whose effect the arm exists to measure.
+        See `docs/superpowers/plans/2026-08-20-delegation-arm.md`.
+        """
+        try:
+            return await run_episode(
+                task, cfg, dispatcher=rlm_dispatcher, trace=trace,
+                lifecycle=lifecycle, snapshot_extra={"bench": bench_extra},
+                process_manager=orchestra.episode_process_manager(),
+                scaffold_instance_id=scaffold_instance_id,
+                scaffold_git_sha=scaffold_git_sha,
+                benchmark_version=benchmark_version,
+                restrict_chunks=True)
+        finally:
+            reset_dispatcher_steps(rlm_dispatcher)
+
+    return {"rlm": rlm_arm, "rlm-restricted": rlm_restricted_arm,
+            "b2": b2_arm, "b1": b1_arm, "b3": b3_arm}
 
 
 def pool_rotating_swap(orchestra, *, resident_dispatcher, bench_dispatcher):
@@ -2704,7 +2725,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     b = common(sub.add_parser("bench", help="run §8's benchmark grid and score it"))
     b.add_argument("--arm", default=None,
-                   help="comma-separated subset of rlm,b1,b2,b3 (default: all "
+                   help="comma-separated subset of rlm,rlm-restricted,b1,b2,b3 (default: all "
                         "four, always in §8's pre-registered within-block order)")
     b.add_argument("--seeds", default=None,
                    help="comma-separated base seeds (default: benchmark.seeds)")

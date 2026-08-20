@@ -368,6 +368,33 @@ class _TokenCounter:
 # --------------------------------------------------------------------------- #
 
 
+def resolve_chunk_ref(ref: Any, chunks: list[str]) -> str:
+    """Turn a delegation-arm handle index into the chunk text it names.
+
+    RANGE-CHECKED, NEVER CLAMPED. A ref the scaffold did not issue is a bug in
+    the emitting cell; answering about chunk 0 instead would come back as an
+    ordinary answer and be SCORED as one, which is the failure mode §8 cannot
+    detect after the fact. The error goes back to the cell, where the root can
+    act on it, exactly like the type errors beside it.
+
+    `bool` is excluded explicitly because it is an `int` subclass in Python, and
+    `chunk=True` resolving to chunk 1 is precisely the silent wrong answer this
+    function exists to refuse.
+    """
+    if not isinstance(ref, int) or isinstance(ref, bool):
+        raise RlmError(
+            f"llm_query(chunk=...) handle must carry an integer index, got "
+            f"{type(ref).__name__}")
+    if not chunks:
+        raise RlmError(
+            "llm_query(chunk=...) got a handle but this episode has no chunks")
+    if not 0 <= ref < len(chunks):
+        raise RlmError(
+            f"llm_query(chunk=...) handle index {ref} is outside the corpus "
+            f"(0..{len(chunks) - 1})")
+    return chunks[ref]
+
+
 @dataclass
 class _Breach:
     """Whatever terminated the episode, recorded ONCE at the moment it
@@ -386,9 +413,16 @@ class _EpisodeRun:
                  scaffold_instance_id: str, scaffold_git_sha: str,
                  benchmark_version: str | None,
                  process_manager: Any = None,
-                 snapshot_extra: dict | None = None) -> None:
+                 snapshot_extra: dict | None = None,
+                 restrict_chunks: bool = False) -> None:
         self.task = task
         self.cfg = cfg
+        #: Delegation arm: hand the sandbox opaque handles instead of chunk
+        #: text, so `llm_query` is the only route to content. Defaults OFF --
+        #: this same runner serves S1 and S3, and the arm must be inert unless
+        #: the bench asks for it.
+        self.restrict_chunks = restrict_chunks
+        self._chunks: list[str] = []
         self.dispatcher = dispatcher
         # Who owns the leaf PROCESS (rlm.serverproc.ProcessManager), or None
         # when nobody does -- the servers were launched outside `rlm run`, and
@@ -494,6 +528,11 @@ class _EpisodeRun:
         payload = payload or {}
         question = payload.get("question")
         chunk = payload.get("chunk")
+        # Delegation arm: the cell passed a handle, so the text is resolved
+        # HERE and never existed on the sandbox side.
+        ref = payload.get("chunk_ref")
+        if ref is not None:
+            chunk = resolve_chunk_ref(ref, self._chunks)
         # The bridge carries whatever JSON the cell wrote, so the types are
         # checked HERE rather than discovered as a TypeError inside C4. The
         # message goes back to the emitting cell, where the root can act on it.
@@ -823,6 +862,10 @@ class _EpisodeRun:
         # place the whole corpus is known; without it C4 records "not checked"
         # rather than clean, which is the honest degradation.
         self.dispatcher.set_corpus(chunks)
+        # The delegation arm resolves `chunk_ref` indices against this list,
+        # scaffold-side (I1). Kept whether or not the arm is on, so the two
+        # paths differ in one place only -- what `setvar` sends.
+        self._chunks = chunks
         # Recorded in the trace (via config_snapshot), not the lifecycle log:
         # this is episode data, and I4 makes the trace store its sole home. No
         # allow-listed lifecycle kind covers it, and inventing one would make
@@ -857,8 +900,17 @@ class _EpisodeRun:
             session.on_final_answer(self._on_final_answer)
 
             # I2: the corpus crosses into the sandbox HERE and nowhere else.
-            await session.setvar("context", context_text)
-            await session.setvar("chunks", chunks)
+            # In the delegation arm it does not cross at all: `chunks` becomes a
+            # count the child turns into opaque handles, and `context` is
+            # withheld, because leaving the whole corpus readable would make the
+            # handles decorative. `llm_query` is then the only route to content,
+            # which is the thing that arm exists to price.
+            if self.restrict_chunks:
+                await session.setvar("context", "")
+                await session.setvar("chunks", {"__opaque_chunks__": len(chunks)})
+            else:
+                await session.setvar("context", context_text)
+                await session.setvar("chunks", chunks)
 
             conv = RootConversation(root, cfg,
                                      system=self.registry.render_root(self.task.category))
@@ -1070,6 +1122,9 @@ class _EpisodeRun:
                 "answer": self.task.answer,
                 "context_chars": len(context_text),
                 "chunks": len(chunks),
+                # R11: an arm invisible to the snapshot is an arm §8 cannot
+                # score, and this flag changes what the sandbox can see.
+                "restrict_chunks": self.restrict_chunks,
                 # C2's real cost: O(log n) /tokenize round trips per boundary.
                 # Charged against the wall clock (start_clock precedes it) and
                 # recorded here so it is measurable rather than guessed at.
@@ -1169,7 +1224,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                        scaffold_git_sha: str = "",
                        benchmark_version: str | None = None,
                        process_manager: Any = None,
-                       snapshot_extra: dict | None = None) -> EpisodeResult:
+                       snapshot_extra: dict | None = None,
+                       restrict_chunks: bool = False) -> EpisodeResult:
     """Run ONE episode end to end and return its §6 outcome.
 
     `dispatcher`, `trace` and `lifecycle` are injected because their lifetimes
@@ -1212,7 +1268,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                            scaffold_git_sha=scaffold_git_sha,
                            benchmark_version=benchmark_version,
                            process_manager=process_manager,
-                           snapshot_extra=snapshot_extra)
+                           snapshot_extra=snapshot_extra,
+                           restrict_chunks=restrict_chunks)
         try:
             return await run.execute(manager, root)
         except asyncio.CancelledError:
