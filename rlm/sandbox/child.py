@@ -518,10 +518,20 @@ class ChunkRef:
     def __repr__(self) -> str:
         return f"<chunk {self._rlm_chunk_index} of {self._n}>"
 
-    __str__ = __repr__
-
     def _deny(self, *_a, **_k):
         raise TypeError(ChunkRef._HINT)
+
+    # `__str__` and `__format__` DENY, and this is the one denial that is not
+    # merely about error quality. They were aliased to `__repr__` at first so a
+    # root could inspect a handle -- but that makes the most natural thing a
+    # root writes, f"...{chunks[i]}...", silently interpolate the placeholder
+    # text "<chunk 3 of 424>". The root then believes it embedded the document,
+    # sends the question with NO `chunk=`, and `window_key(None, call_id)`
+    # hands every such call a window of its own -- one never-reused slot burned
+    # per call, for a question about a placeholder. It would not error; it would
+    # quietly produce answers about nothing and score them. `repr()` still
+    # works, which is all the inspection planning needs.
+    __str__ = __format__ = _deny
 
     # The string/sequence surface a scanning root reaches for first. Equality
     # and hashing are deliberately NOT denied: comparing or de-duplicating two

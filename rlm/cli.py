@@ -761,9 +761,15 @@ def episode_config(snapshot: dict) -> tuple[Config, Any]:
     # agree with; the `or {}` keeps a pre-S4 snapshot (no baselines block at
     # all) rebuilding exactly as it did before.
     baseline_refs = prompts.get("baselines") or {}
+    # Same rule again for the delegation arm's root prompt (2026-08-20). Absent
+    # from every snapshot recorded before it, present in every `rlm-restricted`
+    # one, and a rebuild that skipped it would replay those as prompt DRIFT.
+    restricted_ref = prompts.get("root_restricted")
     try:
         registry = PromptRegistry.from_files(
             root_path=Path(prompts["root"]["path"]),
+            root_restricted_path=(Path(restricted_ref["path"])
+                                  if restricted_ref else None),
             leaf_prefix_path=Path(prompts["leaf_prefix"]["path"]),
             leaf_envelope_path=(Path(envelope_ref["path"]) if envelope_ref else None),
             strategy_paths={cat: Path(ref["path"])
@@ -1729,14 +1735,43 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
         finally:
             reset_dispatcher_steps(rlm_dispatcher)
 
+    async def _virgin_resident_pool(manager) -> None:
+        """Start a DELEGATING episode on a leaf whose every slot is virgin.
+
+        THE DEFECT THIS CLOSES (measured, `rlm bench --smoke` 2026-08-20).
+        R13's pool is per leaf PROCESS, not per episode, and `rotate_pool` was
+        only ever called on a profile SWAP. That was sufficient while the only
+        heavy delegator was B2, which is separated from the next block's B2 by
+        the B1/B3 swap -- and while the `rlm` arm made ZERO leaf calls, which
+        S4 measured it doing in all 90 episodes.
+
+        `rlm-restricted` breaks both assumptions: it delegates for every chunk
+        read, spends all 128 slots inside one episode, and sits on the RESIDENT
+        profile next to B2 with no swap between them. The smoke showed the
+        consequence exactly -- rlm-restricted/agg-02 drained the pool, then
+        needle-02 opened on the drained generation and died with 0 answered
+        windows, and B2/agg-02 starved behind it with `slot_pool_exhausted`.
+        A SCORED BASELINE was being failed by the arm that ran before it.
+
+        A restart, not merely a `rotate_pool()`: adopting a virgin pool for a
+        process that never restarted is R13 reintroduced by its own mitigation
+        (`pool_rotating_swap` says the same thing from the other side).
+
+        Only the delegating arms pay the ~10 s: `rlm` does not call the leaf.
+        """
+        await manager.restart()
+        rlm_dispatcher.rotate_pool()
+
     async def b2_arm(task, cfg, *, bench_extra):
+        manager = orchestra.b2_process_manager()
+        await _virgin_resident_pool(manager)
         try:
             return await run_b2(
                 task, cfg, dispatcher=rlm_dispatcher, root_client=root_client,
                 trace=trace, registry=registry, bench_extra=bench_extra,
                 scaffold_instance_id=scaffold_instance_id,
                 scaffold_git_sha=scaffold_git_sha,
-                process_manager=orchestra.b2_process_manager())
+                process_manager=manager)
         finally:
             reset_dispatcher_steps(rlm_dispatcher)
 
@@ -1764,15 +1799,19 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
         """`rlm`, with `llm_query` as the only route to chunk content.
 
         Identical to `rlm_arm` in every other respect -- same dispatcher, same
-        process manager, same topology, so it adds no relaunch to a block --
-        and differs in the one flag whose effect the arm exists to measure.
+        topology, same profile -- and differs in the one flag whose effect the
+        arm exists to measure. It DOES pay a leaf restart first (see
+        `_virgin_resident_pool`), which `rlm_arm` does not need because that arm
+        never calls the leaf.
         See `docs/superpowers/plans/2026-08-20-delegation-arm.md`.
         """
+        manager = orchestra.episode_process_manager()
+        await _virgin_resident_pool(manager)
         try:
             return await run_episode(
                 task, cfg, dispatcher=rlm_dispatcher, trace=trace,
                 lifecycle=lifecycle, snapshot_extra={"bench": bench_extra},
-                process_manager=orchestra.episode_process_manager(),
+                process_manager=manager,
                 scaffold_instance_id=scaffold_instance_id,
                 scaffold_git_sha=scaffold_git_sha,
                 benchmark_version=benchmark_version,

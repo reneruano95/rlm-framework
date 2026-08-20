@@ -392,6 +392,19 @@ scaffold:
     # never taught the API it is graded on. v1/v2 remain on disk, unmodified and
     # unpinned, as the recorded S1 arms; s1/run_s1.py re-pins them itself.
     root: { path: prompts/root.v3.md, sha256: 3fb653e3eacafa50b53d12c08cc70982fe4a6ad19bf01cffbf7966771917b6b6 }
+    # The `rlm-restricted` (delegation) arm's root prompt, and ONLY that arm's:
+    # `root.v3` above stays pinned for `rlm`, unedited, because the S4
+    # re-validation depends on it. Derived from v3 with five passages changed,
+    # all of them statements that are FALSE once chunks are opaque handles --
+    # the two environment bullets, the truncation paragraph, tip 1, tip 2 and
+    # tip 4. Tip 2 is the load-bearing one: v3 says "a regex, a keyword scan, a
+    # count over `chunks` is free and exact", which in that arm raises, and a
+    # root told to scan and unable to just stops emitting code (measured in the
+    # 2026-08-20 smoke: 83 of 149 steps in codeqa-01 were repl_exec/rejected/
+    # no_cell_extracted -- prose, until the wall clock killed the episode).
+    # A prompt that lies about the environment measures prompt mismatch, not
+    # the value of delegation, which is the one thing this arm exists to price.
+    root_restricted: { path: prompts/root-restricted.v1.md, sha256: 92b3fffee5184b15a9c0195b5c1112d14470478b50a18fde1b0889db9f4d2bd8 }
     # LEAF PREFIX: v1 REMAINS PINNED pending the S2 refusal A/B
     # (`s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
     # refusal-strengthened arm; v1 is the control behind every leaf measurement

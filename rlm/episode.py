@@ -913,7 +913,9 @@ class _EpisodeRun:
                 await session.setvar("chunks", chunks)
 
             conv = RootConversation(root, cfg,
-                                     system=self.registry.render_root(self.task.category))
+                                     system=self.registry.render_root(
+                                         self.task.category,
+                                         restricted=self.restrict_chunks))
             # The clock is already running (it started before C2 chunking); the
             # watchdog is what makes it enforceable against a cell that never
             # returns.

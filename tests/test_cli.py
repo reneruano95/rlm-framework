@@ -622,11 +622,29 @@ class _FakeOrchestra:
         self.last_relaunch_s = 11.5
         return 11.5
 
+    class _Manager:
+        """`LeafProcessManager`'s surface, recording the restart.
+
+        Was a sentinel string until the delegating arms began restarting the
+        leaf before every episode (`cli._virgin_resident_pool`): R13's pool is
+        per leaf PROCESS, and a delegating arm spends all 128 slots inside one
+        episode, so the next episode on that generation -- B2, a SCORED
+        baseline -- opened on a drained pool and starved. Measured in
+        `rlm bench --smoke`, 2026-08-20."""
+
+        def __init__(self, orchestra, label):
+            self._orchestra = orchestra
+            self.label = label
+
+        async def restart(self):
+            self._orchestra.events.append(("leaf_restart", self.label))
+            self._orchestra.leaf_proc = object()   # new process, virgin pool
+
     def episode_process_manager(self):
-        return "episode-process-manager"
+        return _FakeOrchestra._Manager(self, "episode")
 
     def b2_process_manager(self):
-        return "b2-process-manager"
+        return _FakeOrchestra._Manager(self, "b2")
 
     async def stop_all(self):
         self.events.append(("stop_all", None))
@@ -694,11 +712,16 @@ class _ArmRecorder:
     def outcome_for(self, arm, task_id):
         return self._outcomes.get((arm, task_id), Outcome.SUCCESS)
 
-    def entry(self, arm):
+    def entry(self, fallback_arm):
         async def run(task, cfg, **kw):
             extra = kw.get("bench_extra")
             if extra is None:
                 extra = dict((kw.get("snapshot_extra") or {}).get("bench") or {})
+            # The CLI stamps the arm into `bench_extra`, and TWO arms now come
+            # through `run_episode` -- `rlm` and `rlm-restricted`. Labelling by
+            # the patched function alone would record both as "rlm" and make
+            # the delegation arm invisible to every assertion here.
+            arm = extra.get("arm") or fallback_arm
             self.calls.append({
                 "arm": arm, "task_id": task.task_id, "seed": extra.get("seed"),
                 "block": extra.get("block"), "run_id": extra.get("run_id"),
@@ -935,21 +958,28 @@ def test_each_arm_is_handed_its_own_profile_and_process_manager(
     cannot.
     """
     arms = _ArmRecorder().patch(monkeypatch)
-    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "needle-02"))
+    # ALL FIVE here, overriding `_bench_argv`'s gate-arms default: this test is
+    # about topology and process-manager wiring, which the delegation arm has
+    # too, not about the gate arithmetic that default exists to protect.
+    main(_bench_argv(valid_config_file, tmp_path, "--smoke", "--tasks", "needle-02",
+                     "--arm", "rlm,rlm-restricted,b2,b1,b3"))
 
     by_arm = {c["arm"]: c for c in arms.calls}
     cfg = load_config(valid_config_file)
     resident, bench_leaf = cfg.servers.leaf, cfg.servers.bench_leaf
     assert resident.parallel != bench_leaf.parallel       # or this proves nothing
-    for arm in ("rlm", "b2"):
+    for arm in ("rlm", "rlm-restricted", "b2"):
         assert by_arm[arm]["leaf_parallel"] == resident.parallel
         assert by_arm[arm]["leaf_ctx"] == resident.ctx
     for arm in ("b1", "b3"):
         assert by_arm[arm]["leaf_parallel"] == bench_leaf.parallel
         assert by_arm[arm]["leaf_ctx"] == bench_leaf.ctx
 
-    assert by_arm["rlm"]["kwargs"]["process_manager"] == "episode-process-manager"
-    assert by_arm["b2"]["kwargs"]["process_manager"] == "b2-process-manager"
+    # `.label`, not identity: the managers became real objects when the
+    # delegating arms started restarting the leaf per episode.
+    assert by_arm["rlm"]["kwargs"]["process_manager"].label == "episode"
+    assert by_arm["rlm-restricted"]["kwargs"]["process_manager"].label == "episode"
+    assert by_arm["b2"]["kwargs"]["process_manager"].label == "b2"
     assert by_arm["b2"]["kwargs"]["root_client"] is not None
     # §8's v0.2.6 slot pin: B1 on slot 0, B3 on slot 1 of the bench profile.
     # The CLI passes no `slot_id` at all -- the pin is pre-registered as each
@@ -1367,6 +1397,11 @@ def test_the_sampler_is_stopped_even_when_teardown_raises(
         async def aclose(self):
             raise RuntimeError("transport already closed")
 
+        def rotate_pool(self):
+            """A no-op, but it has to EXIST: the delegating arms rotate before
+            every episode, and this double stands in for the real dispatcher on
+            the path that reaches them."""
+
         async def count_tokens(self, text, *, role="leaf"):
             return 1
 
@@ -1684,6 +1719,13 @@ def test_the_step_log_does_not_grow_across_episodes(valid_config_file, tmp_path,
         def __init__(self):
             self.steps: list[dict] = []
             self._recorded: dict[str, int] = {}
+            self.rotations = 0
+
+        def rotate_pool(self):
+            """The delegating arms rotate before every episode now
+            (`cli._virgin_resident_pool`), so a dispatcher double that cannot
+            be rotated no longer models one."""
+            self.rotations += 1
 
         async def aclose(self):
             pass

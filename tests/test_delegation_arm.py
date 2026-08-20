@@ -63,6 +63,9 @@ async def test_opaque_chunks_carry_no_text(session):
     "chunks[0].split()",
     "list(chunks[0])",
     "chunks[0] + 'x'",
+    "f'ask about {chunks[0]}'",     # the placeholder-interpolation trap
+    "'{}'.format(chunks[0])",
+    "str(chunks[0])",
 ])
 async def test_reaching_for_chunk_text_is_refused_with_the_route(session, expr):
     """Every scanning habit a root has must fail loudly AND name `llm_query`.
@@ -72,6 +75,31 @@ async def test_reaching_for_chunk_text_is_refused_with_the_route(session, expr):
     out = await session.exec_cell(f"print({expr})")
     assert "TypeError" in out.traceback
     assert "llm_query" in out.traceback
+
+
+@pytestmark_win
+async def test_a_handle_cannot_be_interpolated_into_a_question(session):
+    """The trap that makes this arm silently measure nothing.
+
+    With `__str__` aliased to `__repr__`, f"...{chunks[i]}..." interpolates the
+    PLACEHOLDER "<chunk 0 of 2>" instead of raising. The root then thinks it
+    embedded the document, sends the question with no `chunk=`, and
+    `window_key(None, call_id)` gives every such call its own window -- one
+    never-reused slot burned per call, to ask about a placeholder. No error is
+    raised anywhere and the answers get scored."""
+    await session.setvar("chunks", {"__opaque_chunks__": 2})
+    out = await session.exec_cell(
+        "q = f'what is in {chunks[0]}?'\nprint(q)")
+    assert "TypeError" in out.traceback
+    assert "<chunk 0 of 2>" not in out.stdout
+
+
+@pytestmark_win
+async def test_repr_still_works_so_the_root_can_plan(session):
+    """Denial is about content, not about knowing what you hold."""
+    await session.setvar("chunks", {"__opaque_chunks__": 7})
+    out = await session.exec_cell("print(repr(chunks[3])); print(len(chunks))")
+    assert out.stdout.splitlines() == ["<chunk 3 of 7>", "7"]
 
 
 @pytestmark_win
@@ -134,3 +162,51 @@ def test_a_non_integer_handle_is_refused(bad):
     from rlm.episode import resolve_chunk_ref
     with pytest.raises(RlmError, match="integer index"):
         resolve_chunk_ref(bad, ["alpha", "beta"])
+
+
+# --------------------------------------------------------------------------- #
+# the restricted arm's own root prompt
+# --------------------------------------------------------------------------- #
+
+
+def test_the_shipped_config_pins_a_restricted_root_prompt(valid_cfg):
+    """Without it the arm runs on root.v3, whose tip 2 tells the root to scan
+    `chunks` -- which this arm makes raise. Measured consequence: 83 of 149
+    steps in the smoke's codeqa-01 episode were prose, not code."""
+    ref = valid_cfg.scaffold.prompts.root_restricted
+    assert ref is not None
+    assert ref.sha256, "an unpinned prompt is a prompt that can drift silently"
+    assert ref.path != valid_cfg.scaffold.prompts.root.path
+
+
+def test_the_restricted_prompt_does_not_tell_the_root_to_scan(valid_cfg):
+    """The one passage that has to differ. root.v3 says a regex or keyword scan
+    over `chunks` is 'free and exact'; here it raises."""
+    reg = valid_cfg.prompt_registry().load()
+    restricted = reg.render_root("needle", restricted=True)
+    plain = reg.render_root("needle")
+    assert "free and exact" in plain
+    assert "free and exact" not in restricted
+    assert "ChunkRef" in restricted and "ChunkRef" not in plain
+    assert restricted != plain
+
+
+def test_the_plain_root_prompt_is_untouched(valid_cfg):
+    """root.v3 is the `rlm` arm's prompt and the S4 re-validation depends on it
+    being byte-identical to what S4 ran."""
+    reg = valid_cfg.prompt_registry().load()
+    assert reg.hashes()["root.file"] == valid_cfg.scaffold.prompts.root.sha256
+
+
+def test_asking_for_a_restricted_prompt_that_is_not_configured_is_refused(valid_cfg):
+    """Silently falling back to root.v3 would run the arm on a prompt that
+    lies about its environment -- prompt mismatch scored as a delegation
+    result."""
+    from rlm.config import PromptRegistry
+    from rlm.errors import ConfigError
+    p = valid_cfg.scaffold.prompts
+    bare = PromptRegistry.from_files(
+        root_path=p.root.path, leaf_prefix_path=p.leaf_prefix.path,
+        strategy_paths={"needle": p.strategy_templates.needle.path}).load()
+    with pytest.raises(ConfigError, match="root_restricted"):
+        bare.render_root("needle", restricted=True)

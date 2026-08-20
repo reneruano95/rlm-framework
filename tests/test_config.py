@@ -275,6 +275,9 @@ def test_all_null_sha256_validates_fine_even_though_files_dont_exist(tmp_path, m
     prompts["root"] = {"path": str(missing), "sha256": None}
     prompts["leaf_prefix"] = {"path": str(missing), "sha256": None}
     prompts["leaf_envelope"] = {"path": str(missing), "sha256": None}
+    # The delegation arm's root prompt is a prompt ref like any other, so the
+    # "unpinned means unchecked" property has to hold for it too.
+    prompts["root_restricted"] = {"path": str(missing), "sha256": None}
     for cat in prompts["strategy_templates"]:
         prompts["strategy_templates"][cat] = {"path": str(missing), "sha256": None}
     # S4's baseline slots are prompt refs like any other, so they get the same

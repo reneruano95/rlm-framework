@@ -230,6 +230,9 @@ class PromptsCfg(_Strict):
     #: behind every leaf measurement recorded so far -- usable as an arm of the
     #: A/B without being edited. `null` when the envelope is not in use.
     leaf_envelope: PromptRef | None = None
+    #: The `rlm-restricted` arm's root prompt (the delegation arm). `null`
+    #: everywhere that arm is not run, including every pre-2026-08-20 snapshot.
+    root_restricted: PromptRef | None = None
     strategy_templates: StrategyTemplates
     #: `None` on a pre-S4 config (and in a pre-S4 `config_snapshot`, which must
     #: keep replaying). Every slot declared here must ALSO appear in
@@ -571,6 +574,8 @@ class Config(_Strict):
         prompts = self.scaffold.prompts
         envelope = ([("leaf_envelope", prompts.leaf_envelope)]
                     if prompts.leaf_envelope is not None else [])
+        restricted = ([("root_restricted", prompts.root_restricted)]
+                      if prompts.root_restricted is not None else [])
         baselines = ([(f"baselines.{name}", getattr(prompts.baselines, name))
                       for name in BASELINE_NAMES]
                      if prompts.baselines is not None else [])
@@ -578,6 +583,7 @@ class Config(_Strict):
             ("root", prompts.root),
             ("leaf_prefix", prompts.leaf_prefix),
             *envelope,
+            *restricted,
             ("strategy_templates.needle", prompts.strategy_templates.needle),
             ("strategy_templates.aggregation", prompts.strategy_templates.aggregation),
             ("strategy_templates.synthesis", prompts.strategy_templates.synthesis),
@@ -620,6 +626,10 @@ class Config(_Strict):
             root_sha256=prompts.root.sha256,
             leaf_prefix_path=prompts.leaf_prefix.path,
             leaf_prefix_sha256=prompts.leaf_prefix.sha256,
+            root_restricted_path=(prompts.root_restricted.path
+                                  if prompts.root_restricted is not None else None),
+            root_restricted_sha256=(prompts.root_restricted.sha256
+                                    if prompts.root_restricted is not None else None),
             leaf_envelope_path=(prompts.leaf_envelope.path
                                 if prompts.leaf_envelope else None),
             leaf_envelope_sha256=(prompts.leaf_envelope.sha256
@@ -734,6 +744,12 @@ class PromptRegistry:
     #: vary independently and `leaf-prefix.v1.md` never has to be edited.
     leaf_envelope_path: Path | None = None
     leaf_envelope_sha256: str | None = None
+    #: The `rlm-restricted` arm's root prompt. Optional, and absent on every
+    #: pre-delegation-arm config and snapshot, which `cli.episode_config`
+    #: rebuilds this registry from -- replay of an older episode must keep
+    #: working without it.
+    root_restricted_path: Path | None = None
+    root_restricted_sha256: str | None = None
     #: §8's baseline-arm prompts (S4), keyed by `BaselineName`. Empty on a
     #: pre-S4 config -- and on a pre-S4 SNAPSHOT, which `cli.episode_config`
     #: rebuilds this registry from, so replay of an old episode must keep
@@ -743,6 +759,7 @@ class PromptRegistry:
 
     def __post_init__(self) -> None:
         self._root_body: str | None = None
+        self._root_restricted_body: str | None = None
         self._leaf_prefix_body: str | None = None
         self._leaf_envelope_body: str | None = None
         self._strategy_bodies: dict[str, str] = {}
@@ -762,6 +779,8 @@ class PromptRegistry:
         strategy_sha256: dict[str, str] | None = None,
         leaf_envelope_path: Path | None = None,
         leaf_envelope_sha256: str | None = None,
+        root_restricted_path: Path | None = None,
+        root_restricted_sha256: str | None = None,
         baseline_paths: dict[str, Path] | None = None,
         baseline_sha256: dict[str, str] | None = None,
     ) -> "PromptRegistry":
@@ -774,6 +793,8 @@ class PromptRegistry:
             strategy_sha256=dict(strategy_sha256 or {}),
             leaf_envelope_path=leaf_envelope_path,
             leaf_envelope_sha256=leaf_envelope_sha256,
+            root_restricted_path=root_restricted_path,
+            root_restricted_sha256=root_restricted_sha256,
             baseline_paths=dict(baseline_paths or {}),
             baseline_sha256=dict(baseline_sha256 or {}),
         )
@@ -805,6 +826,11 @@ class PromptRegistry:
             self._leaf_envelope_body = self._load_one(
                 "leaf_envelope", self.leaf_envelope_path, self.leaf_envelope_sha256
             )
+        if self.root_restricted_path is not None:
+            self._root_restricted_body = self._load_one(
+                "root_restricted", self.root_restricted_path,
+                self.root_restricted_sha256
+            )
         for category, path in self.strategy_paths.items():
             pinned = self.strategy_sha256.get(category)
             self._strategy_bodies[category] = self._load_one(
@@ -821,11 +847,22 @@ class PromptRegistry:
         if not self._loaded:
             self.load()
 
-    def render_root(self, category: str) -> str:
+    def render_root(self, category: str, *, restricted: bool = False) -> str:
         """root body + '\\n\\n' + the strategy block for `category`.
 
         Raises ConfigError for an unknown category (I1: the model never
         chooses its own strategy — only a config-declared category is valid).
+
+        `restricted` selects the `rlm-restricted` arm's root body, which is a
+        SEPARATE pinned file and never an edit of the pinned one: root.v3 is the
+        `rlm` arm's prompt and the S4 re-validation depends on it being
+        untouched. Refused loudly when that arm asks and no restricted prompt is
+        configured — silently falling back to root.v3 would run the arm on a
+        prompt whose tip 2 says "a regex, a keyword scan, a count over `chunks`
+        is free and exact", which in that arm raises `TypeError`. Measured
+        consequence of exactly that: 83 of 149 steps in the smoke's codeqa-01
+        episode were `repl_exec / rejected / no_cell_extracted` — the root
+        stopped emitting code and talked until the wall clock killed it.
         """
         self._ensure_loaded()
         if category not in self._strategy_bodies:
@@ -833,7 +870,16 @@ class PromptRegistry:
                 f"{category!r} is not a declared strategy category; the model "
                 "never chooses its own strategy (spec §5, I1)"
             )
-        return f"{self._root_body}\n\n{self._strategy_bodies[category]}"
+        body = self._root_body
+        if restricted:
+            if self._root_restricted_body is None:
+                raise ConfigError(
+                    "the restricted arm needs scaffold.prompts.root_restricted; "
+                    "falling back to the pinned root prompt would tell the root "
+                    "to scan chunks this arm makes unreadable"
+                )
+            body = self._root_restricted_body
+        return f"{body}\n\n{self._strategy_bodies[category]}"
 
     def leaf_prefix(self) -> str:
         self._ensure_loaded()
