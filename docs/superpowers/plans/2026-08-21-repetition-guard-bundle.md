@@ -883,7 +883,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Produces: `RootScaffoldCfg.history_mode: Literal["prefix_plus_raw", "raw"] = "prefix_plus_raw"`.
-- Produces: `rootclient.split_reasoning(raw: str) -> tuple[str, str]` → `(reasoning, content)`: if `raw` (after leading whitespace) starts with `<think>` and contains `</think>`, reasoning is the text between them and content is everything after the LAST `</think>` (leading newlines stripped); otherwise `("", raw)`.
+- Produces: `rootclient.split_reasoning(raw: str, *, open_block: bool = False) -> tuple[str, str]` → `(reasoning, content)`. `history_message` passes `open_block=assistant_prefix(rendered).rstrip().endswith("<think>")`: with thinking ON the generation prompt ends in an open `<think>
+` and the completion carries only the closing tag, so the split is at the first `</think>` (reasoning stripped, content after the template's `
+
+`); otherwise a LEADING `<think>…</think>` in the completion is split off; else `("", raw)`. (Execution ruling 2026-08-21 — the first draft assumed a leading tag, which the thinking-ON shape never has.)
 - Produces: `rootclient.history_message(rendered: str, raw: str, mode: str) -> dict` → `{"role": "assistant", "content": assistant_prefix(rendered) + raw}` for `prefix_plus_raw`; for `raw`: `{"role": "assistant", "content": content}` plus `"reasoning_content": reasoning` only when reasoning is non-empty. **Both `RootConversation.turn()` and `rlm replay` call this one function** — that is what keeps them identical.
 - Produces: `RootTurn.prefix_extended: bool | None` — `None` on turn 1, else whether `rendered` started with the previous turn's `rendered + raw.strip()` — the template renders every message's content through `|trim` (`tests/fixtures/repetition/qwen38_chat_template.jinja:103`), so a completion's leading/trailing whitespace never reaches the history. The episode logs ONE lifecycle event `{"kind": "root_history", "state": "diverged"}` the first time it is `False` (a monitor for §7 #3c, never a failure — with thinking on, Qwen's template keeps reasoning but re-trims whitespace, so divergence there is expected and documented).
 
@@ -1015,17 +1018,34 @@ Expected: FAIL — import errors for `split_reasoning` / `history_message`, unkn
 _LEADING_THINK_RE = re.compile(r"^\s*<think>(.*?)</think>\s*", re.DOTALL)
 
 
-def split_reasoning(raw: str) -> tuple[str, str]:
-    """(reasoning, content) for a raw completion. With thinking off the model
-    emits no tags and reasoning is ''. With thinking on the reply opens with
-    `<think>…</think>`; the template re-renders that as its own block from
-    `reasoning_content`, so the content must not carry it twice."""
+def split_reasoning(raw: str, *, open_block: bool = False) -> tuple[str, str]:
+    """(reasoning, content) for a raw completion.
+
+    With thinking OFF the prompt closes the think block before the model
+    speaks, the model emits no tags, and reasoning is ''. With thinking ON
+    the prompt ends in an OPEN `<think>
+`, so the completion carries the
+    reasoning, then `</think>`, then the answer -- and never an opening
+    tag; `open_block=True` says so and the split happens at the first
+    `</think>`. A leading `<think>...</think>` in the completion itself is
+    also honoured (belt and braces; the template would double it otherwise).
+    The template re-renders reasoning inside its own think block and trims
+    both parts, so with the model's `
+</think>
+
+` the re-render is a
+    byte-for-byte extension either way."""
+    if open_block:
+        head, sep, tail = raw.partition("</think>")
+        if sep:
+            return head.strip(), tail.lstrip("
+")
+        return "", raw
     m = _LEADING_THINK_RE.match(raw)
     if not m:
         return "", raw
-    reasoning = m.group(1).strip()
-    content = raw[m.end():]
-    return reasoning, content
+    return m.group(1).strip(), raw[m.end():]
+
 
 
 def history_message(rendered: str, raw: str, mode: str) -> dict[str, str]:
@@ -1038,7 +1058,8 @@ def history_message(rendered: str, raw: str, mode: str) -> dict[str, str]:
         return {"role": "assistant", "content": assistant_prefix(rendered) + raw}
     if mode != "raw":
         raise ValueError(f"unknown history_mode {mode!r}")
-    reasoning, content = split_reasoning(raw)
+    reasoning, content = split_reasoning(
+        raw, open_block=assistant_prefix(rendered).rstrip().endswith("<think>"))
     msg = {"role": "assistant", "content": content}
     if reasoning:
         msg["reasoning_content"] = reasoning
