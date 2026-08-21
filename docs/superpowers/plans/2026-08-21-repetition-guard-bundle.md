@@ -151,7 +151,7 @@ for ep, first, run in [("9d9e47fb", 9, 70), ("0c1c397d", 5, 111)]:
           "| identical pair before onset:", earlier_repeat)
 EOF
 ```
-Expected: `9d9e47fb loop cell first at turn 9 | occurrences: 71 | views identical across repeats: True | identical pair before onset: False` and `0c1c397d … turn 5 … 112 … True … False`. ("70×" and "111×" in the write-ups count the repeats *after* the first instance; the fixture holds the first instance too. `identical pair before onset: False` is what lets Task 2's fixture test assert the correction lands exactly at onset + 1.)
+Expected: `9d9e47fb loop cell first at turn 9 | occurrences: 71 | views identical across repeats: True | identical pair before onset: False` and `0c1c397d … turn 5 … 111 … True … False`. ("70×" in the write-up counts the repeats *after* the first instance, and `9d9e47fb` holds all 71; `0c1c397d`'s 112th occurrence was the turn the wall clock killed, stored `cancelled`, so the fixture holds 111. `identical pair before onset: False` is what lets Task 2's fixture test assert the correction lands exactly at onset + 1.)
 
 - [ ] **Step 4: Save the chat template**
 
@@ -340,10 +340,13 @@ Add the method after `note_root_usage`:
         self._last_turn_key = key
         if self._identical_run >= cap:
             self._breach(Outcome.BUDGET_KILL, "max_identical_turns")
-        return self._identical_run == cap - 1
+        # The correction exists only when there is a repeat to correct: at
+        # cap 2 the first repeat is already the kill, and `run == cap - 1`
+        # would otherwise fire on the FIRST occurrence of every pair.
+        return cap >= 3 and self._identical_run == cap - 1
 ```
 
-(`_breach` raises; the `return` after it is reached only below the cap.)
+(`_breach` raises; the `return` after it is reached only below the cap. Review ruling 2026-08-21: the `cap >= 3` guard was added after a reviewer showed the original `run == cap - 1` annotated every fresh pair at cap 2.)
 
 - [ ] **Step 4: Run the budget tests**
 
@@ -357,8 +360,7 @@ Append to `tests/test_config.py`:
 ```python
 def test_max_identical_turns_ships_at_three_and_refuses_one(minimal_cfg_dict):
     """v0.3.16: the shipped config opts in at 3 (correct at 2, kill at 3);
-    1 would kill on the first repeat with no correction, which the spec does
-    not allow -- 0 (disabled) or >= 2."""
+    1 would kill on the first occurrence of any cell -- 0 (disabled) or >= 2."""
     cfg = Config.model_validate(minimal_cfg_dict)
     assert cfg.scaffold.budgets.max_identical_turns == 3
     raw = copy.deepcopy(minimal_cfg_dict)
@@ -384,8 +386,9 @@ In `rlm/config.py`, class `Budgets(_Strict)`: insert the new field and validator
     max_total_tokens: int = 1_500_000
     #: v0.3.16 (s2/REPLAY-LOOP-AB.md). The same (cell, observation) pair on
     #: consecutive root turns: correct at max-1, kill at max as
-    #: budget_kill/max_identical_turns. 0 disables; 1 is refused because it
-    #: would kill on the first repeat with no correction.
+    #: budget_kill/max_identical_turns. 0 disables; 1 is refused because the
+    #: first occurrence of any cell already satisfies `run >= 1` and would
+    #: kill every turn; 2 kills on the first repeat with no correction.
     max_identical_turns: int = 3
     max_predict: MaxPredict
 
@@ -495,7 +498,7 @@ async def test_the_same_cell_with_a_changing_observation_is_not_a_loop(episode_e
         "```repl\nn += 1\nprint(n)\n```",
         "```repl\nn += 1\nprint(n)\n```",
         "```repl\nfinal_answer(n)\n```",
-    ], answer="5")
+    ], answer="4")   # four increments -- the plan originally said "5"; corrected in execution
     res = await env.run()
     assert res.outcome == Outcome.SUCCESS
     assert all("[scaffold]" not in (s["observation_view"] or "")
@@ -799,6 +802,7 @@ This task deliberately lands BEFORE the history-mode fix: its test documents the
 Append to `tests/test_rootclient.py`:
 
 ```python
+@pytest.mark.xfail(strict=True, reason="doubled think block until history_mode raw lands (Task 6)")
 async def test_history_renders_one_think_block_per_past_turn(fake_root_server):
     """Qwen3.8's template emits its OWN empty think block in front of every
     past assistant turn (tests/fixtures/repetition/qwen38_chat_template.jinja).
@@ -848,7 +852,7 @@ def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
 - [ ] **Step 3: Run the suite's fake-server consumers and the new test**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_rootclient.py tests/test_dispatcher.py tests/test_episode.py tests/test_cli.py -q`
-Expected: everything that passed before still passes (no existing test asserts the exact history shape — `test_conversation_growth_is_append_only` checks only a 200-char prefix), and the NEW test FAILS at `past.count("<think>") == 1` with `2` — the defect, reproduced by the fake.
+Expected: everything that passed before still passes (no existing test asserts the exact history shape — `test_conversation_growth_is_append_only` checks only a 200-char prefix), and the NEW test is reported XFAIL; run it once with `--runxfail` to see it fail at `past.count("<think>") == 1` with `2` — the defect, reproduced by the fake. (Execution ruling 2026-08-21: the test is committed as a strict xfail rather than a plain failure so every commit keeps a green suite; Task 6 removes the decorator.)
 
 - [ ] **Step 4: Commit**
 
@@ -1125,6 +1129,8 @@ ALLOWED_KINDS = frozenset({
 ```
 
 - [ ] **Step 4: Run the full suite**
+
+First remove the `@pytest.mark.xfail(...)` decorator Task 5 placed on `test_history_renders_one_think_block_per_past_turn` (strict xfail would otherwise FAIL the run once the test passes).
 
 Run: `.venv/Scripts/python.exe -m pytest tests -q -x`
 Expected: PASS, including Task 5's `test_history_renders_one_think_block_per_past_turn` (now green under the shipped `raw` mode).
