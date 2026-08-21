@@ -1196,10 +1196,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 Run (servers down first — `tasklist | grep llama-server` must be empty):
 ```bash
-.venv/Scripts/rlm.exe validate --config config.yaml
-.venv/Scripts/rlm.exe run bench/tasks/synth-01.json --config config.yaml
+.venv/Scripts/rlm.exe validate --no-server-probe --config config.yaml   # validate probes live servers otherwise; rlm run does the handshake itself
+.venv/Scripts/rlm.exe bench --arm rlm --smoke --tasks synth-01 --config config.yaml --ledger traces/smoke-v0316-ledger.jsonl --report traces/smoke-v0316.md
 ```
-(`rlm run` launches and owns both servers for the episode; confirm the exact task-file path with `ls bench/tasks | head`.)
+(Execution ruling 2026-08-21: `rlm run` never launches the root — both servers are operator-managed for it — so the smoke uses `rlm bench --smoke`, which owns both servers from `config.yaml`'s launch lines with a throwaway run_id; the scratch `--ledger` keeps §8's pre-registered ledger untouched. Take the episode id from the scratch ledger.)
 Expected: `validate` passes; the episode ends `success` (synth-01 solved in 70–90 s in every non-loop seed) and its lifecycle log (`traces/lifecycle.jsonl`, last lines) contains **no** `"kind": "root_history", "state": "diverged"` event — i.e. with the real Qwen3.8 template, every render was a byte-for-byte extension of the previous one under `raw`.
 
 - [ ] **Step 2: Inspect the stored render**
