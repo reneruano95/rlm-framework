@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 from rlm.errors import ConfigError
 from rlm.truncate import MIN_MARKER_CAP
@@ -176,7 +176,19 @@ class Budgets(_Strict):
     #: under the same kill threshold as rlm/b1/b2/b3.
     restricted_max_wall_clock_s: int | None = None
     max_total_tokens: int = 1_500_000
+    #: v0.3.16 (s2/REPLAY-LOOP-AB.md). The same (cell, observation) pair on
+    #: consecutive root turns: correct at max-1, kill at max as
+    #: budget_kill/max_identical_turns. 0 disables; 1 is refused because it
+    #: would kill on the first repeat with no correction.
+    max_identical_turns: int = 3
     max_predict: MaxPredict
+
+    @field_validator("max_identical_turns")
+    @classmethod
+    def _identical_turns_zero_or_at_least_two(cls, v: int) -> int:
+        if v == 1 or v < 0:
+            raise ValueError("max_identical_turns must be 0 (disabled) or >= 2")
+        return v
 
 
 class Retries(_Strict):

@@ -55,6 +55,12 @@ class Budgets:
     max_wall_clock_s: int = 900
     max_total_tokens: int = 1_500_000
     max_predict: dict[str, int] = field(default_factory=dict)
+    #: v0.3.16: the same (cell, observation) pair repeating on consecutive
+    #: root turns is a budget. 0 disables. At max-1 the scaffold corrects,
+    #: at max it kills -- measured (s2/REPLAY-LOOP-AB.md): once a cell has
+    #: repeated once the root re-emits it ~64% of the time, once it has
+    #: repeated a few times ~92%, and it never calls final_answer from there.
+    max_identical_turns: int = 0
 
 
 @dataclass(frozen=True)
@@ -107,6 +113,9 @@ class BudgetEnforcer:
         self._callbacks: list[Callable[[BudgetBreach], None]] = []
 
         self._clock_start: float | None = None
+
+        self._last_turn_key: tuple[str, str] | None = None
+        self._identical_run = 0
 
     # ------------------------------------------------------------------ #
     # breach plumbing
@@ -233,6 +242,29 @@ class BudgetEnforcer:
             return
         if used / window >= self._root_window_kill_fraction:
             self._breach(Outcome.CONTEXT_EXHAUSTED, "root_window")
+
+    def note_turn(self, cell: str, view: str) -> bool:
+        """v0.3.16 `max_identical_turns`: count consecutive root turns whose
+        (cell, observation) pair is identical. Returns True when a scaffold
+        correction is due (the pair has now occurred max-1 times in a row);
+        raises BudgetBreach(budget_kill, "max_identical_turns") at max.
+
+        `cell` is compared stripped (fence whitespace is not a decision);
+        `view` is the C3 observation BEFORE any scaffold note is appended --
+        the caller must pass the un-annotated view, or the note it appended
+        last turn would make every repeat look different and the budget would
+        never fire. 0 disables.
+        """
+        self._ensure_not_breached()
+        cap = self.budgets.max_identical_turns
+        if cap <= 0:
+            return False
+        key = (cell.strip(), view)
+        self._identical_run = self._identical_run + 1 if key == self._last_turn_key else 1
+        self._last_turn_key = key
+        if self._identical_run >= cap:
+            self._breach(Outcome.BUDGET_KILL, "max_identical_turns")
+        return self._identical_run == cap - 1
 
     def start_clock(self) -> None:
         self._clock_start = time.monotonic()

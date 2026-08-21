@@ -386,6 +386,16 @@ scaffold:
     # comparison across all four categories.
     restricted_max_wall_clock_s: 2100
     max_total_tokens: 1500000
+    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md. The root re-emitting the SAME
+    # cell and getting the SAME observation is a loop the model does not leave
+    # on its own: measured, once a cell has repeated once it repeats again ~64%
+    # of the time, after a few repeats ~92%, and final_answer is never called
+    # from there. Two production episodes ran 70 and 111 identical turns until
+    # context_exhausted / wall_clock (s4/RESULTS-dflash2-rlm-only.md). This is
+    # a C5 budget like the others: at max-1 consecutive identical turns the
+    # scaffold appends a correction to the observation; at max the episode
+    # ends budget_kill / max_identical_turns. 0 disables.
+    max_identical_turns: 3
     # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
     # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.
     # The leaf distribution (n=9: 1,1,7,7,7,7,7,31,35) is NOT usable: every

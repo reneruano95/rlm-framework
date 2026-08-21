@@ -144,3 +144,97 @@ TestBudgetMachine = BudgetMachine.TestCase
 # "Hypothesis profiles/seeds pinned in CI", spec §5 Testing).
 TestBudgetMachine.settings = settings(max_examples=200, stateful_step_count=40,
                                       deadline=None, derandomize=True)
+
+
+import json
+from pathlib import Path
+
+FIXTURES = Path(__file__).parent / "fixtures" / "repetition"
+
+
+def _guarded(max_identical_turns: int = 3) -> BudgetEnforcer:
+    return BudgetEnforcer(Budgets(1, 32, 900, 1_000_000, {"root": 1024, "leaf": 512},
+                                  max_identical_turns=max_identical_turns))
+
+
+def test_identical_turns_correct_at_max_minus_one_and_kill_at_max():
+    """Spec §5 C5 (v0.3.16): the SAME (cell, observation) pair repeating is a
+    budget. At max-1 consecutive occurrences the scaffold corrects; at max it
+    kills as budget_kill/max_identical_turns -- the existing outcome, the
+    existing reason convention."""
+    b = _guarded(3)
+    assert b.note_turn("print(1)", "[stdout]\n1") is False      # first occurrence
+    assert b.note_turn("print(1)", "[stdout]\n1") is True       # 2nd == max-1: correct
+    with pytest.raises(BudgetBreach) as exc:
+        b.note_turn("print(1)", "[stdout]\n1")                  # 3rd == max: kill
+    assert exc.value.outcome == Outcome.BUDGET_KILL
+    assert exc.value.reason == "max_identical_turns"
+
+
+def test_a_different_cell_or_a_different_observation_resets_the_count():
+    """CONTROLLER RULING (task-2 brief defect): the brief's version called
+    note_turn a third time on ("print(2)", "[stdout]\\n3") before this final
+    assert, making it the pair's 3rd consecutive occurrence -- which, at
+    max_identical_turns=3, is exactly what test_identical_turns_correct_at_
+    max_minus_one_and_kill_at_max (above) proves raises BudgetBreach, not
+    returns True. The extra call is dropped so this exercises the 2nd
+    occurrence after the reset, mirroring lines 1-2's unasserted-then-True
+    shape for the "different cell" reset three lines up."""
+    b = _guarded(3)
+    b.note_turn("print(1)", "[stdout]\n1")
+    assert b.note_turn("print(1)", "[stdout]\n1") is True
+    assert b.note_turn("print(2)", "[stdout]\n2") is False       # different cell: reset
+    b.note_turn("print(2)", "[stdout]\n2")
+    assert b.note_turn("print(2)", "[stdout]\n3") is False       # same cell, new output: reset
+    assert b.note_turn("print(2)", "[stdout]\n3") is True        # counting again from the reset
+
+
+def test_cells_are_compared_stripped_and_views_exactly():
+    b = _guarded(3)
+    b.note_turn("print(1)\n", "v")
+    assert b.note_turn("  print(1)", "v") is True                # whitespace around the cell is not a difference
+    b2 = _guarded(3)
+    b2.note_turn("print(1)", "v")
+    assert b2.note_turn("print(1)", "v ") is False               # the observation is compared byte for byte
+
+
+def test_zero_disables_the_identical_turns_budget():
+    b = _guarded(0)
+    for _ in range(50):
+        assert b.note_turn("print(1)", "v") is False
+
+
+def test_no_turns_are_noted_after_a_breach():
+    b = _guarded(2)
+    b.note_turn("x", "v")
+    with pytest.raises(BudgetBreach):
+        b.note_turn("x", "v")
+    with pytest.raises(BudgetBreach):
+        b.note_turn("y", "w")                                    # still refusing, never warn-and-continue
+
+
+@pytest.mark.parametrize("episode, onset_turn", [("9d9e47fb", 9), ("0c1c397d", 5)])
+def test_the_recorded_loops_are_killed_at_the_third_identical_turn(episode, onset_turn):
+    """The two production loops (s4/RESULTS-dflash2-rlm-only.md), replayed
+    through the enforcer: the correction lands on the first repeat and the
+    kill on the second, i.e. turn onset+2 instead of turn 79 / 116.
+
+    CONTROLLER RULING (task-2 brief defect): the brief wrote
+    `exc.value.reason` inside a plain `except BudgetBreach as exc:` clause.
+    `.value` is an `ExceptionInfo` attribute that only exists when the
+    exception is caught via `pytest.raises(...) as exc`; a plain `except`
+    binds `exc` to the exception instance itself, which carries `.reason`
+    directly (rlm/errors.py). Fixed to `exc.reason`."""
+    turns = json.loads((FIXTURES / f"{episode}.json").read_text(encoding="utf-8"))["turns"]
+    b = _guarded(3)
+    corrected_at = killed_at = None
+    for t in turns:
+        try:
+            if b.note_turn(t["cell"], t["observation_view"]) and corrected_at is None:
+                corrected_at = t["turn"]
+        except BudgetBreach as exc:
+            killed_at = t["turn"]
+            assert exc.reason == "max_identical_turns"
+            break
+    assert corrected_at == onset_turn + 1
+    assert killed_at == onset_turn + 2
