@@ -817,7 +817,8 @@ async def test_history_renders_one_think_block_per_past_turn(fake_root_server):
     second = await conv.turn()
     past = second.rendered.split("<|im_start|>assistant\n")[1]      # the first turn, as history
     assert past.count("<think>") == 1, past[:120]
-    assert second.rendered.startswith(first.rendered + first.raw + "<|im_end|>\n")
+    assert second.rendered.startswith(first.rendered + first.raw.strip() + "<|im_end|>
+")   # the template trims content
 ```
 
 - [ ] **Step 2: Make the fake faithful**
@@ -884,7 +885,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Produces: `RootScaffoldCfg.history_mode: Literal["prefix_plus_raw", "raw"] = "prefix_plus_raw"`.
 - Produces: `rootclient.split_reasoning(raw: str) -> tuple[str, str]` → `(reasoning, content)`: if `raw` (after leading whitespace) starts with `<think>` and contains `</think>`, reasoning is the text between them and content is everything after the LAST `</think>` (leading newlines stripped); otherwise `("", raw)`.
 - Produces: `rootclient.history_message(rendered: str, raw: str, mode: str) -> dict` → `{"role": "assistant", "content": assistant_prefix(rendered) + raw}` for `prefix_plus_raw`; for `raw`: `{"role": "assistant", "content": content}` plus `"reasoning_content": reasoning` only when reasoning is non-empty. **Both `RootConversation.turn()` and `rlm replay` call this one function** — that is what keeps them identical.
-- Produces: `RootTurn.prefix_extended: bool | None` — `None` on turn 1, else whether `rendered` started with the previous turn's `rendered + raw`. The episode logs ONE lifecycle event `{"kind": "root_history", "state": "diverged"}` the first time it is `False` (a monitor for §7 #3c, never a failure — with thinking on, Qwen's template keeps reasoning but re-trims whitespace, so divergence there is expected and documented).
+- Produces: `RootTurn.prefix_extended: bool | None` — `None` on turn 1, else whether `rendered` started with the previous turn's `rendered + raw.strip()` — the template renders every message's content through `|trim` (`tests/fixtures/repetition/qwen38_chat_template.jinja:103`), so a completion's leading/trailing whitespace never reaches the history. The episode logs ONE lifecycle event `{"kind": "root_history", "state": "diverged"}` the first time it is `False` (a monitor for §7 #3c, never a failure — with thinking on, Qwen's template keeps reasoning but re-trims whitespace, so divergence there is expected and documented).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -925,7 +926,8 @@ async def test_raw_mode_extends_the_previous_render_byte_for_byte(fake_root_serv
     conv = fake_root_server.conversation(system="SYS", history_mode="raw")
     conv.append_user("one"); first = await conv.turn()
     conv.append_user("two"); second = await conv.turn()
-    assert second.rendered.startswith(first.rendered + first.raw + "<|im_end|>\n")
+    assert second.rendered.startswith(first.rendered + first.raw.strip() + "<|im_end|>
+")   # the template trims content
     assert second.prefix_extended is True
 ```
 
@@ -1063,7 +1065,10 @@ def history_message(rendered: str, raw: str, mode: str) -> dict[str, str]:
 ```python
         extended = None
         if self._prev_rendered is not None:
-            extended = rendered.startswith(self._prev_rendered + (self._prev_raw or ""))
+            # The template renders every message's content through `|trim`
+            # (Qwen3.8 template line 103), so the previous turn's completion
+            # reappears stripped -- that is the byte-for-byte contract.
+            extended = rendered.startswith(self._prev_rendered + self._prev_raw.strip())
         self.messages.append(history_message(rendered, raw, self._history_mode))
         self._prev_rendered, self._prev_raw = rendered, raw
 
@@ -1093,6 +1098,8 @@ and change the import at `rlm/cli.py:95` to `from rlm.rootclient import extract_
 ```
 
 and initialise `self._history_diverged = False` in `__init__` next to `self._final_emitted = False`.
+
+`tests/conftest.py` — make the fake trim content for every role, as the real template does (Task 5's reviewer caught the gap; `qwen38_chat_template.jinja:103`): in `_render_chatml`, bind `content = (m.get("content") or "").strip()` at the top of the loop body and use `content` in place of `m['content']` in both the assistant branch and the user/system branch. Task 5's test `test_history_renders_one_think_block_per_past_turn` asserts with `first.raw.strip()` per the ruling above — update it if it still reads `first.raw`.
 
 `rlm/lifecycle.py` — add the kind to the allowlist (the set at lines 15–25):
 
