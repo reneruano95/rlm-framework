@@ -22,6 +22,9 @@ ALLOWED_KINDS = frozenset({
     "sandbox_spawn",
     "sandbox_death",
     "operator_abort",
+    # v0.3.16: a root render that is not a byte-for-byte extension of the
+    # previous one (scaffold.root.history_mode monitor); once per episode.
+    "root_history",
 })
 
 

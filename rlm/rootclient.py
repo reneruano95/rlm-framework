@@ -69,6 +69,39 @@ def assistant_prefix(rendered: str) -> str:
     return rendered[idx + len(_ASSISTANT_MARKER):] if idx != -1 else ""
 
 
+_LEADING_THINK_RE = re.compile(r"^\s*<think>(.*?)</think>\s*", re.DOTALL)
+
+
+def split_reasoning(raw: str) -> tuple[str, str]:
+    """(reasoning, content) for a raw completion. With thinking off the model
+    emits no tags and reasoning is ''. With thinking on the reply opens with
+    `<think>…</think>`; the template re-renders that as its own block from
+    `reasoning_content`, so the content must not carry it twice."""
+    m = _LEADING_THINK_RE.match(raw)
+    if not m:
+        return "", raw
+    reasoning = m.group(1).strip()
+    content = raw[m.end():]
+    return reasoning, content
+
+
+def history_message(rendered: str, raw: str, mode: str) -> dict[str, str]:
+    """The assistant message appended to the root's history for the turn whose
+    request rendered as `rendered` and whose completion was `raw`, under
+    `scaffold.root.history_mode`. THE one definition: `RootConversation.turn`
+    and `rlm replay` both call it, which is what makes the offline
+    re-derivation exact (§6 state rule)."""
+    if mode == "prefix_plus_raw":
+        return {"role": "assistant", "content": assistant_prefix(rendered) + raw}
+    if mode != "raw":
+        raise ValueError(f"unknown history_mode {mode!r}")
+    reasoning, content = split_reasoning(raw)
+    msg = {"role": "assistant", "content": content}
+    if reasoning:
+        msg["reasoning_content"] = reasoning
+    return msg
+
+
 def turn_seed(base: int, turn: int, schedule: str) -> int:
     """The sampling seed for root turn `turn` (1-based) under
     `scaffold.root.seed_schedule`. `fixed` reproduces the pre-v0.3.16
@@ -130,6 +163,7 @@ class RootTurn:
     view_hash: str
     rendered: str
     usage: CompletionResult
+    prefix_extended: bool | None = None
 
 
 class RootConversation:
@@ -153,6 +187,9 @@ class RootConversation:
         self._top_p = root_sampling.top_p
         self._seed = root_sampling.seed
         self._seed_schedule = cfg.scaffold.root.seed_schedule
+        self._history_mode = cfg.scaffold.root.history_mode
+        self._prev_rendered: str | None = None
+        self._prev_raw: str | None = None
         self._turns = 0
         self.messages: list[dict[str, Any]] = []
         if system is not None:
@@ -181,13 +218,19 @@ class RootConversation:
         stripped = strip_reasoning(raw)
         cell = extract_cell(stripped, self._languages, self._select)
 
-        # D26: reconstruct the assistant history message as exactly what the
-        # token stream contained -- the template's own tail after the LAST
-        # assistant marker (e.g. a pre-closed think block), followed by the
-        # model's raw completion -- so the NEXT turn's render is a
-        # byte-for-byte prefix extension of this one.
-        self.messages.append(
-            {"role": "assistant", "content": assistant_prefix(rendered) + raw})
+        # D26: the history message is `history_message(rendered, raw, mode)` --
+        # under `raw`, the template supplies the think block and the next
+        # render is the previous render + raw, byte for byte (v0.3.16); under
+        # `prefix_plus_raw` the pre-amendment rule is reproduced for old
+        # episodes.
+        extended = None
+        if self._prev_rendered is not None:
+            # The template renders every message's content through `|trim`
+            # (Qwen3.8 template line 103), so the previous turn's completion
+            # reappears stripped -- that is the byte-for-byte contract.
+            extended = rendered.startswith(self._prev_rendered + self._prev_raw.strip())
+        self.messages.append(history_message(rendered, raw, self._history_mode))
+        self._prev_rendered, self._prev_raw = rendered, raw
 
         return RootTurn(raw=raw, cell=cell, view_hash=view_hash,
-                         rendered=rendered, usage=result)
+                         rendered=rendered, usage=result, prefix_extended=extended)

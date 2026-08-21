@@ -485,6 +485,7 @@ class _EpisodeRun:
         self._breach: _Breach | None = None
         self._final_value: Any = None
         self._final_emitted = False
+        self._history_diverged = False
         self._final_parent: int | None = None
         self._final_ref: str | None = None
         # step_idx -> {root_view_hash, root_request_ref} for each root turn, so
@@ -987,6 +988,11 @@ class _EpisodeRun:
                                       error=repr(exc))
                 await self._trip(Outcome.ERROR, SERVER_UNREACHABLE)
                 return
+
+            if rt.prefix_extended is False and not self._history_diverged:
+                self._history_diverged = True
+                self.lifecycle.event("root_history", state="diverged", turn=turn,
+                                      history_mode=cfg.scaffold.root.history_mode)
 
             idx = self._alloc()
             request_blob = tracemod.pack_blob({

@@ -316,6 +316,15 @@ class RootScaffoldCfg(_Strict):
     #: seed*1000 + turn, distinct per turn, reproducible from the snapshot.
     seed_schedule: Literal["fixed", "per_turn"] = "fixed"
 
+    #: v0.3.16. How the root's own reply is stored in its conversation history.
+    #: `prefix_plus_raw` (the pre-amendment rule, the default so old snapshots
+    #: replay exactly): assistant_prefix(rendered) + raw -- which, because the
+    #: chat template prepends its OWN think block to every past assistant turn,
+    #: rendered two empty think blocks per turn. `raw`: the model's completion,
+    #: with any reasoning split into `reasoning_content`; the template then
+    #: renders exactly what the model saw and generated.
+    history_mode: Literal["prefix_plus_raw", "raw"] = "prefix_plus_raw"
+
 
 class LeafScaffoldCfg(_Strict):
     """The leaf's counterpart to `scaffold.root` (today: the thinking flag

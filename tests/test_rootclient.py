@@ -108,12 +108,6 @@ async def test_fixed_schedule_keeps_the_old_behaviour(fake_root_server, minimal_
     assert fake_root_server.last_completion_body["seed"] == base
 
 
-# CONTROLLER RULING: the brief calls for this test to land failing at commit
-# time; that would leave a red suite in history. Decorated xfail(strict=True)
-# instead -- the red->green discipline still holds (Task 6 must delete this
-# decorator, at which point an unexpectedly-passing xfail would itself fail
-# the run), but every commit's suite stays green.
-@pytest.mark.xfail(strict=True, reason="doubled think block until history_mode raw lands (Task 6)")
 async def test_history_renders_one_think_block_per_past_turn(fake_root_server):
     """Qwen3.8's template emits its OWN empty think block in front of every
     past assistant turn (tests/fixtures/repetition/qwen38_chat_template.jinja).
@@ -128,4 +122,45 @@ async def test_history_renders_one_think_block_per_past_turn(fake_root_server):
     second = await conv.turn()
     past = second.rendered.split("<|im_start|>assistant\n")[1]      # the first turn, as history
     assert past.count("<think>") == 1, past[:120]
-    assert second.rendered.startswith(first.rendered + first.raw + "<|im_end|>\n")
+    # CONTROLLER RULING: the template applies `|trim` to every message's
+    # content (qwen38_chat_template.jinja:103), so the previous completion
+    # reappears stripped, not verbatim.
+    assert second.rendered.startswith(first.rendered + first.raw.strip() + "<|im_end|>\n")
+
+
+from rlm.rootclient import history_message, split_reasoning
+
+
+def test_split_reasoning_separates_a_leading_think_block():
+    assert split_reasoning("<think>\nplan\n</think>\n\n```repl\nx\n```") == ("plan", "```repl\nx\n```")
+    assert split_reasoning("```repl\nx\n```") == ("", "```repl\nx\n```")
+    assert split_reasoning("<think>\n\n</think>\n\nA") == ("", "A")
+
+
+def test_history_message_under_each_mode():
+    rendered = "<|im_start|>user\nq<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    old = history_message(rendered, "```repl\nx\n```", "prefix_plus_raw")
+    assert old == {"role": "assistant", "content": "<think>\n\n</think>\n\n```repl\nx\n```"}
+    new = history_message(rendered, "```repl\nx\n```", "raw")
+    assert new == {"role": "assistant", "content": "```repl\nx\n```"}
+    thinking = history_message(rendered, "<think>\nplan\n</think>\n\nA", "raw")
+    assert thinking == {"role": "assistant", "content": "A", "reasoning_content": "plan"}
+
+
+async def test_prefix_plus_raw_mode_still_doubles_the_block(fake_root_server):
+    """The OLD rule, kept selectable because every episode in the store was
+    recorded under it and replay must reproduce their arrays exactly."""
+    conv = fake_root_server.conversation(system="SYS", history_mode="prefix_plus_raw")
+    conv.append_user("one"); first = await conv.turn()
+    conv.append_user("two"); second = await conv.turn()
+    past = second.rendered.split("<|im_start|>assistant\n")[1]
+    assert past.count("<think>") == 2
+    assert second.prefix_extended is False and first.prefix_extended is None
+
+
+async def test_raw_mode_extends_the_previous_render_byte_for_byte(fake_root_server):
+    conv = fake_root_server.conversation(system="SYS", history_mode="raw")
+    conv.append_user("one"); first = await conv.turn()
+    conv.append_user("two"); second = await conv.turn()
+    assert second.rendered.startswith(first.rendered + first.raw.strip() + "<|im_end|>\n")   # the template trims content
+    assert second.prefix_extended is True

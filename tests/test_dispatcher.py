@@ -248,7 +248,11 @@ async def test_two_leaf_calls_share_a_byte_identical_rendered_prefix(
     head1 = r1[:r1.index(p1)]
     head2 = r2[:r2.index(p2)]
     assert head1 == head2, "the leaf prefix drifted between two calls"
-    assert leaf_prefix in head1, "the shared head is not the registry prefix"
+    # CONTROLLER RULING (Task 6, v0.3.16): the real template trims EVERY
+    # message's content, including system (qwen38_chat_template.jinja:103),
+    # so the fake's `_render_chatml` now trims too (it did not before Task 6
+    # exposed the gap) -- the registry prefix reappears stripped, not verbatim.
+    assert leaf_prefix.strip() in head1, "the shared head is not the registry prefix"
     # …and the two renders diverge EXACTLY where the user content starts:
     # nothing call-specific (a counter, an id, a length) leaked in ahead of it.
     assert os.path.commonprefix([r1, r2]) == head1
@@ -570,7 +574,9 @@ async def test_the_prefix_token_length_is_measured_once_and_exposed(mock_server,
 
     rendered = mock_server.rendered_prompts[0]
     head = rendered[:rendered.rfind("a question about a chunk")]
-    assert leaf_prefix in head
+    # CONTROLLER RULING (Task 6, v0.3.16): the real template trims EVERY
+    # message's content, including system (qwen38_chat_template.jinja:103).
+    assert leaf_prefix.strip() in head
     want = len(await _tokenize(mock_server, head, with_pieces=False))
     assert d.prefix_tokens("leaf") == want
     assert d.last_step["prefix_tokens"] == want
@@ -1276,7 +1282,9 @@ async def test_the_rendered_head_sha256_is_pinned_on_the_first_call(mock_server,
 
     rendered = mock_server.rendered_prompts[0]
     head = rendered[:rendered.rfind("a question about a chunk")]
-    assert leaf_prefix in head
+    # CONTROLLER RULING (Task 6, v0.3.16): the real template trims EVERY
+    # message's content, including system (qwen38_chat_template.jinja:103).
+    assert leaf_prefix.strip() in head
     want = hashlib.sha256(head.encode("utf-8")).hexdigest()
     assert d.prefix_sha256("leaf") == want
     assert d.last_step["prefix_sha256"] == want

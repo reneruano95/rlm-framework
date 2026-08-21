@@ -510,6 +510,16 @@ scaffold:
     # distinct per turn, still a pure function of the episode seed the bench
     # assigns, still recorded by config_snapshot. `fixed` is the old rule.
     seed_schedule: per_turn
+    # v0.3.16 (2026-08-21). The chat template renders EVERY past assistant turn
+    # with its own `<think>\n\n</think>\n\n` before the content; storing
+    # assistant_prefix(rendered) + raw put a second one in front of every past
+    # turn in every S4 and re-validation request (stimuli in
+    # s2/results/replay-loop-ab/: 17 think blocks for 9 assistant markers).
+    # `raw` stores the completion itself, so the next render is the previous
+    # render + the model's tokens, byte for byte, and the history is what the
+    # model actually saw. `prefix_plus_raw` is the old rule, which `rlm replay`
+    # still applies to every episode whose snapshot carries it (or no key).
+    history_mode: raw
   leaf:
     # S1 F3: every leaf reply in the gate was an empty `<think></think>` block
     # (the untemplated leaf path). At chunk scale the reasoning trace is decode

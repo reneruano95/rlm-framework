@@ -669,3 +669,12 @@ def test_root_seed_schedule_ships_per_turn_and_defaults_fixed(minimal_cfg_dict):
     raw = copy.deepcopy(minimal_cfg_dict)
     del raw["scaffold"]["root"]["seed_schedule"]          # every pre-v0.3.16 snapshot
     assert Config.model_validate(raw).scaffold.root.seed_schedule == "fixed"
+
+
+def test_history_mode_ships_raw_and_defaults_to_the_old_rule(minimal_cfg_dict):
+    import copy
+    from rlm.config import Config
+    assert Config.model_validate(minimal_cfg_dict).scaffold.root.history_mode == "raw"
+    raw = copy.deepcopy(minimal_cfg_dict)
+    del raw["scaffold"]["root"]["history_mode"]           # every pre-v0.3.16 snapshot
+    assert Config.model_validate(raw).scaffold.root.history_mode == "prefix_plus_raw"

@@ -39,3 +39,10 @@ def test_never_raises_into_the_caller(tmp_path):
     lc = Lifecycle(tmp_path / "nonexistent-dir" / "lc.jsonl", stream=io.StringIO())
     lc.event("quiesce_wait", seconds=1)  # must degrade, not explode
     lc.close()
+
+
+def test_root_history_is_a_lifecycle_kind():
+    """v0.3.16: the history-divergence monitor is a lifecycle event, and
+    Lifecycle.event refuses unknown kinds with ValueError."""
+    from rlm.lifecycle import ALLOWED_KINDS
+    assert "root_history" in ALLOWED_KINDS

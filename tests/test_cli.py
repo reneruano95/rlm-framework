@@ -1931,3 +1931,34 @@ def test_an_unreadable_plan_refuses_rather_than_losing_the_pre_figures(tmp_path)
     bad.write_text("{not json", encoding="utf-8")
     with pytest.raises(ConfigError, match="pre-escalation figures"):
         cli.load_escalation_plan(bad)
+
+
+def test_replay_reconstructs_under_the_snapshots_history_mode(mock_episode_env, capsys, tmp_path):
+    """The reconstruction rule is read from the EPISODE's config_snapshot:
+    an episode recorded under prefix_plus_raw replays under prefix_plus_raw
+    even when the live config says raw, and vice versa. Two turns, so the
+    second turn's stored array actually contains an assistant message built
+    by history_message() -- a one-turn episode would never compare one."""
+    import yaml
+    two_turn = ["```repl\nprint(1)\n```", "```repl\nfinal_answer('42')\n```"]
+
+    def run_with(config_file: Path) -> str:
+        # FakeRootServer serves script[turns] and never resets `turns` on its
+        # own; a second `rlm run` against a spent script gets HTTP 500.
+        mock_episode_env.server.script = list(two_turn)
+        mock_episode_env.server.turns = 0
+        main(["run", str(mock_episode_env.task_file), "--config", str(config_file)])
+        return mock_episode_env.last_episode_id()
+
+    raw_cfg = yaml.safe_load(Path(mock_episode_env.config_file).read_text(encoding="utf-8"))
+    raw_cfg["scaffold"]["root"]["history_mode"] = "prefix_plus_raw"
+    old_cfg = tmp_path / "config-old-history.yaml"
+    old_cfg.write_text(yaml.safe_dump(raw_cfg, sort_keys=False), encoding="utf-8")
+    old_episode = run_with(old_cfg)
+    new_episode = run_with(Path(mock_episode_env.config_file))
+    for episode_id in (old_episode, new_episode):
+        # replay always takes the LIVE config file on the command line; the
+        # rule must come from the snapshot regardless of which file that is
+        rc = main(["replay", episode_id, "--config", str(mock_episode_env.config_file)])
+        assert rc == 0
+        assert "message array: OK" in capsys.readouterr().out

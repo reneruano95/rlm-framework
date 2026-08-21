@@ -92,7 +92,7 @@ from rlm.errors import (
 )
 from rlm.lifecycle import Lifecycle
 from rlm.power import PowerSampler, read_pkg_temp_c
-from rlm.rootclient import assistant_prefix, extract_cell
+from rlm.rootclient import extract_cell, history_message
 from rlm.serverproc import LlamaServerProcess
 from rlm.sandbox import winproc
 from rlm.sandbox.manager import SandboxManager, install_bootstrap
@@ -835,12 +835,8 @@ def _rederive_messages(cfg: Config, registry, episode: dict, steps: list[dict],
         messages.append({"role": "user", "content": content})
         arrays.append([dict(m) for m in messages])
         rendered = _rendered(blob_root, step["root_request_ref"])
-        messages.append({
-            "role": "assistant",
-            # D26: the template's own tail after the last assistant marker,
-            # plus the model's raw reply. Both come from the trace.
-            "content": assistant_prefix(rendered) + (step["action_payload"] or ""),
-        })
+        messages.append(history_message(
+            rendered, step["action_payload"] or "", cfg.scaffold.root.history_mode))
     return arrays
 
 

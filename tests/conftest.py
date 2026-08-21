@@ -217,12 +217,13 @@ def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
     off and `<think>\\n` with it on."""
     parts = []
     for m in messages:
+        content = (m.get("content") or "").strip()
         if m["role"] == "assistant":
             reasoning = (m.get("reasoning_content") or "").strip()
             parts.append(f"<|im_start|>assistant\n<think>\n{reasoning}\n</think>\n\n"
-                         f"{m['content']}<|im_end|>\n")
+                         f"{content}<|im_end|>\n")
         else:
-            parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n")
+            parts.append(f"<|im_start|>{m['role']}\n{content}<|im_end|>\n")
     parts.append("<|im_start|>assistant\n")
     parts.append("<think>\n" if enable_thinking else "<think>\n\n</think>\n\n")
     return "".join(parts)
