@@ -660,3 +660,12 @@ def test_max_identical_turns_ships_at_three_and_refuses_one(minimal_cfg_dict):
         Config.model_validate(raw)          # Config.model_validate re-raises pydantic errors as ConfigError
     raw["scaffold"]["budgets"]["max_identical_turns"] = 0
     assert Config.model_validate(raw).scaffold.budgets.max_identical_turns == 0
+
+
+def test_root_seed_schedule_ships_per_turn_and_defaults_fixed(minimal_cfg_dict):
+    import copy
+    from rlm.config import Config
+    assert Config.model_validate(minimal_cfg_dict).scaffold.root.seed_schedule == "per_turn"
+    raw = copy.deepcopy(minimal_cfg_dict)
+    del raw["scaffold"]["root"]["seed_schedule"]          # every pre-v0.3.16 snapshot
+    assert Config.model_validate(raw).scaffold.root.seed_schedule == "fixed"

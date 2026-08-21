@@ -501,6 +501,15 @@ scaffold:
   root:
     enable_thinking: false
     window_tokens: 32768
+    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md §4. Until now the root was
+    # sampled with the SAME seed on every turn of an episode. When two
+    # consecutive turns see near-identical histories -- a cell re-run against
+    # an unchanged observation -- the sampler then makes the same choices, and
+    # a per-turn repeat probability of ~64% (measured with varied seeds)
+    # became 70/70 and 111/111 in production. `per_turn` = seed*1000 + turn:
+    # distinct per turn, still a pure function of the episode seed the bench
+    # assigns, still recorded by config_snapshot. `fixed` is the old rule.
+    seed_schedule: per_turn
   leaf:
     # S1 F3: every leaf reply in the gate was an empty `<think></think>` block
     # (the untemplated leaf path). At chunk scale the reasoning trace is decode

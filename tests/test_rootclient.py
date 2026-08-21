@@ -67,4 +67,40 @@ async def test_root_sampling_params_reach_the_server(fake_root_server, minimal_c
     expected = minimal_cfg_dict["scaffold"]["sampling"]["root"]
     assert body["temperature"] == expected["temperature"]
     assert body["top_p"] == expected["top_p"]
-    assert body["seed"] == expected["seed"]
+    assert body["seed"] == expected["seed"] * 1000 + 1  # per_turn schedule (v0.3.16): turn 1
+
+
+from rlm.rootclient import turn_seed
+
+
+def test_turn_seed_is_the_base_when_fixed_and_derived_when_per_turn():
+    assert turn_seed(2, 1, "fixed") == 2
+    assert turn_seed(2, 7, "fixed") == 2
+    assert turn_seed(2, 1, "per_turn") == 2001
+    assert turn_seed(2, 7, "per_turn") == 2007
+    assert turn_seed(3, 1, "per_turn") != turn_seed(2, 1, "per_turn")
+
+
+async def test_per_turn_schedule_changes_the_seed_every_turn(fake_root_server, minimal_cfg_dict):
+    """v0.3.16: the same seed on every turn makes two near-identical turns
+    sample identically, which is how a 64% repeat became 70/70 and 111/111 in
+    production. With the shipped schedule each turn gets its own seed."""
+    conv = fake_root_server.conversation(system="SYS")
+    base = minimal_cfg_dict["scaffold"]["sampling"]["root"]["seed"]
+    conv.append_user("one")
+    await conv.turn()
+    first = fake_root_server.last_completion_body["seed"]
+    conv.append_user("two")
+    await conv.turn()
+    second = fake_root_server.last_completion_body["seed"]
+    assert (first, second) == (base * 1000 + 1, base * 1000 + 2)
+
+
+async def test_fixed_schedule_keeps_the_old_behaviour(fake_root_server, minimal_cfg_dict):
+    conv = fake_root_server.conversation(system="SYS", seed_schedule="fixed")
+    base = minimal_cfg_dict["scaffold"]["sampling"]["root"]["seed"]
+    conv.append_user("one")
+    await conv.turn()
+    conv.append_user("two")
+    await conv.turn()
+    assert fake_root_server.last_completion_body["seed"] == base

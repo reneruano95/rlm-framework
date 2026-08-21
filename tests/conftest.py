@@ -732,7 +732,8 @@ class FakeRootServer:
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
-    def conversation(self, *, system: str | None = None, enable_thinking: bool | None = None):
+    def conversation(self, *, system: str | None = None, enable_thinking: bool | None = None,
+                     seed_schedule: str | None = None, history_mode: str | None = None):
         from rlm.dispatcher import ServerClient
         from rlm.rootclient import RootConversation
 
@@ -740,6 +741,10 @@ class FakeRootServer:
         raw["servers"]["root"]["port"] = self.port
         if enable_thinking is not None:
             raw["scaffold"]["root"]["enable_thinking"] = enable_thinking
+        if seed_schedule is not None:
+            raw["scaffold"]["root"]["seed_schedule"] = seed_schedule
+        if history_mode is not None:
+            raw["scaffold"]["root"]["history_mode"] = history_mode
         cfg = Config.model_validate(raw)
         client = ServerClient(self.base_url, timeout=5.0)
         self._clients.append(client)

@@ -311,6 +311,10 @@ class CellExtraction(_Strict):
 class RootScaffoldCfg(_Strict):
     enable_thinking: bool = False
     window_tokens: int
+    #: v0.3.16. `fixed` (pre-amendment behaviour, the default so old snapshots
+    #: validate to what they ran): the same seed on every turn. `per_turn`:
+    #: seed*1000 + turn, distinct per turn, reproducible from the snapshot.
+    seed_schedule: Literal["fixed", "per_turn"] = "fixed"
 
 
 class LeafScaffoldCfg(_Strict):

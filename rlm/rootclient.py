@@ -69,6 +69,20 @@ def assistant_prefix(rendered: str) -> str:
     return rendered[idx + len(_ASSISTANT_MARKER):] if idx != -1 else ""
 
 
+def turn_seed(base: int, turn: int, schedule: str) -> int:
+    """The sampling seed for root turn `turn` (1-based) under
+    `scaffold.root.seed_schedule`. `fixed` reproduces the pre-v0.3.16
+    behaviour; `per_turn` gives every turn its own seed while staying a pure
+    function of (episode seed, turn index), so the snapshot still determines
+    the run. The stride is 1,000: turns beyond it would collide with the next
+    base seed's schedule, and a 32K root window cannot hold 1,000 turns --
+    deliberately not asserted, because an exception here would surface as a
+    mislabelled `server_unreachable` in the turn loop."""
+    if schedule == "fixed":
+        return base
+    return base * 1000 + turn
+
+
 def strip_reasoning(text: str) -> str:
     """Belt-and-braces reasoning strip (D16). With enable_thinking=false the
     model emits no think tags at all -- the prompt already closed the
@@ -138,6 +152,8 @@ class RootConversation:
         self._temperature = root_sampling.temperature
         self._top_p = root_sampling.top_p
         self._seed = root_sampling.seed
+        self._seed_schedule = cfg.scaffold.root.seed_schedule
+        self._turns = 0
         self.messages: list[dict[str, Any]] = []
         if system is not None:
             self.messages.append({"role": "system", "content": system})
@@ -155,9 +171,11 @@ class RootConversation:
         )
         view_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
+        self._turns += 1
+        seed = turn_seed(self._seed, self._turns, self._seed_schedule)
         result = await self._client.completion(
             rendered, n_predict=self._max_predict, temperature=self._temperature,
-            top_p=self._top_p, seed=self._seed, stream=True)
+            top_p=self._top_p, seed=seed, stream=True)
         raw = result.content
 
         stripped = strip_reasoning(raw)
