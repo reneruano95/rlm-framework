@@ -828,3 +828,65 @@ async def test_a_retried_leaf_call_does_not_change_seed(episode_env):
     res = await env.run()
     assert res.outcome == Outcome.SUCCESS
     assert d.seeds == [11]
+
+
+_SAME = "```repl\nprint('same')\n```"
+
+
+async def test_three_identical_turns_end_as_budget_kill_max_identical_turns(episode_env):
+    """v0.3.16: the loop that cost 1,154 s and 1,308 s in production now costs
+    three turns. The 2nd identical turn carries the scaffold correction in ITS
+    observation; the 3rd is the kill."""
+    env = episode_env(root_script=[_SAME, _SAME, _SAME, "```repl\nfinal_answer('x')\n```"])
+    res = await env.run()
+    assert res.outcome == Outcome.BUDGET_KILL
+    assert res.reason == "max_identical_turns"
+    turns = [s for s in env.steps() if s["action_type"] == "repl_exec"]
+    assert len(turns) == 3, "the kill must land on the third identical turn, not later"
+    assert "[scaffold]" not in (turns[0]["observation_view"] or "")
+    assert "identical" in turns[1]["observation_view"] and "final_answer" in turns[1]["observation_view"]
+    assert env.episode_row()["outcome_reason"] == "max_identical_turns"
+
+
+async def test_a_root_that_takes_the_correction_finishes_normally(episode_env):
+    env = episode_env(root_script=[_SAME, _SAME, "```repl\nfinal_answer('same')\n```"],
+                      answer="same")
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    turns = [s for s in env.steps() if s["action_type"] == "repl_exec"]
+    assert sum("[scaffold]" in (t["observation_view"] or "") for t in turns) == 1
+
+
+async def test_the_same_cell_with_a_changing_observation_is_not_a_loop(episode_env):
+    """A polling cell is legitimate: same code, new output every time.
+
+    CONTROLLER RULING (task-3 brief defect): the brief's script increments
+    `n` four times from 0 (1, 2, 3, 4) and then asserts `answer="5"`. The
+    root's `final_answer(n)` therefore reports 4, not 5, so the episode ended
+    `checker_failed` regardless of the guard under test. Fixed to `answer="4"`
+    to match what the scripted cells actually produce.
+    """
+    env = episode_env(root_script=[
+        "```repl\nn = 0\n```",
+        "```repl\nn += 1\nprint(n)\n```",
+        "```repl\nn += 1\nprint(n)\n```",
+        "```repl\nn += 1\nprint(n)\n```",
+        "```repl\nn += 1\nprint(n)\n```",
+        "```repl\nfinal_answer(n)\n```",
+    ], answer="4")
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert all("[scaffold]" not in (s["observation_view"] or "")
+               for s in env.steps() if s["action_type"] == "repl_exec")
+
+
+async def test_the_correction_is_the_observation_the_root_saw(episode_env):
+    """State rule: the NEXT root request must contain the stored observation_view
+    verbatim (note included) -- replay rebuilds the array from that column."""
+    env = episode_env(root_script=[_SAME, _SAME, "```repl\nfinal_answer('same')\n```"])
+    await env.run()
+    turns = [s for s in env.steps() if s["action_type"] == "repl_exec"]
+    corrected_view = turns[1]["observation_view"]
+    assert "[scaffold]" in corrected_view                      # the annotated view is the stored one
+    next_request = env.blob(turns[2]["root_request_ref"])
+    assert corrected_view.encode("utf-8") in next_request        # …and it is what the next request carried

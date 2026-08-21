@@ -90,6 +90,7 @@ CHECKER_FAILED = "checker_failed"
 OPERATOR_ABORT = "operator_abort"
 SERVER_UNREACHABLE = "server_unreachable"
 NO_CELL_EXTRACTED = "no_cell_extracted"
+MAX_IDENTICAL_TURNS = "max_identical_turns"
 #: A planned slot-pool rotation could not be completed (§5 C4). Distinct from
 #: `server_unreachable` on purpose: the leaf may be perfectly reachable and
 #: still be the WRONG leaf -- a process that came back with different flags is
@@ -313,6 +314,25 @@ def no_cell_observation(cfg: Config) -> str:
         "print(len(chunks))\n"
         "```\n\n"
         "Prose is never read as an answer. Submit with final_answer(value)."
+    )
+
+
+def repetition_observation(cfg: Config) -> str:
+    """The scaffold-authored note appended to the observation when the root
+    has just re-run the SAME cell and got the SAME output (v0.3.16, C5
+    `max_identical_turns`). It is part of `observation_view` -- what the root
+    actually saw -- so `rlm replay` rebuilds the next request from the stored
+    column without knowing the guard exists. Generated from config so the
+    threshold it names can never disagree with the one that fires.
+    """
+    cap = cfg.scaffold.budgets.max_identical_turns
+    return (
+        "[scaffold]\n"
+        "That cell is identical to your previous cell and produced identical "
+        "output. Re-running it will not change anything, and the episode ends "
+        f"without an answer at {cap} identical turns in a row.\n\n"
+        "If you have the answer, submit it now with final_answer(value). "
+        "Otherwise write a different cell."
     )
 
 
@@ -1037,6 +1057,20 @@ class _EpisodeRun:
                 return
 
             view = observation_view(out, cap)          # C3, scaffold-side (I1)
+            # v0.3.16 C5 `max_identical_turns`, on the UN-annotated view: the
+            # note appended below must not make the next repeat look different.
+            correct = False
+            if not self._final_emitted:
+                try:
+                    correct = self.enforcer.note_turn(rt.cell, view)
+                except BudgetBreach as breach:
+                    self._put({**base, "status": StepStatus.OK, "observation_view": view},
+                               {"root_request_ref": request_blob,
+                                "observation_full_ref": _full_observation(out)})
+                    await self._trip(breach.outcome, breach.reason)
+                    return
+            if correct:
+                view = f"{view}\n\n{repetition_observation(cfg)}"
             self._put({**base, "status": StepStatus.OK, "observation_view": view},
                        {"root_request_ref": request_blob,
                         "observation_full_ref": _full_observation(out)})
