@@ -173,6 +173,9 @@ excluded. But "S4's 0/90 was chance" is no longer a defensible reading.
   deterministic, no model input), costs a loop ~30 s instead of 1,154–1,308 s,
   and must land as a spec amendment (§5 C5, §6 outcome enum, a version bump)
   with a unit test that feeds the two recorded histories through the guard.
+  *(Shipped 2026-08-21 as `budget_kill / max_identical_turns` — the existing
+  outcome and the existing reason convention, so no schema, verdict or bench
+  change; see ARCHITECTURE.md v0.3.16.)*
   The one design question it leaves is whether the corrective observation
   should be tried at all: at the established prompts the root never recovered
   on its own in 100 replies, but a scaffold message is new input the replay

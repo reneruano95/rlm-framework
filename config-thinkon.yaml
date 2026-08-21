@@ -1,4 +1,4 @@
-# VARIANT OF config.yaml -- IDENTICAL except scaffold.root.enable_thinking.
+# VARIANT OF config.yaml -- identical except scaffold.root.enable_thinking IN THE v0.3.16 SCAFFOLD KEYS; NOTE the root-server block still describes the pre-DFlash2 (MTP, b10375) root and the 900 s wall clock -- it predates the 2026-08-19 swap and must be refreshed before any thinking A/B is run (see docs/research/2026-08-20-rlm-paper-fidelity-and-next-steps.md §7).
 # Exists so the S1 re-run can A/B the root's thinking with NO code change
 # and no edit to the shipped config. s2/ROOT-THINKING.md measured thinking
 # ON as worth +3/8 answers single-turn but as destroying multi-turn prefix
@@ -218,6 +218,9 @@ scaffold:
     max_subcalls: 926
     max_wall_clock_s: 900
     max_total_tokens: 1500000
+    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md: kills a same-cell/same-
+    # observation loop at this many consecutive identical root turns. 0 disables.
+    max_identical_turns: 3
     # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
     # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.
     # The leaf distribution (n=9: 1,1,7,7,7,7,7,31,35) is NOT usable: every
@@ -303,6 +306,12 @@ scaffold:
   root:
     enable_thinking: true   # S1 RE-RUN ARM ONLY -- see s2/ROOT-THINKING.md
     window_tokens: 32768
+    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md §4: seed*1000 + turn, distinct
+    # per turn instead of the old fixed per-episode seed.
+    seed_schedule: per_turn
+    # v0.3.16 (2026-08-21): the completion alone, template re-renders the think
+    # block itself, so the next render is a byte-for-byte prefix extension.
+    history_mode: raw
   leaf:
     # S1 F3: every leaf reply in the gate was an empty `<think></think>` block
     # (the untemplated leaf path). At chunk scale the reasoning trace is decode

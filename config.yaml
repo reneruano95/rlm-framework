@@ -395,6 +395,9 @@ scaffold:
     # a C5 budget like the others: at max-1 consecutive identical turns the
     # scaffold appends a correction to the observation; at max the episode
     # ends budget_kill / max_identical_turns. 0 disables.
+    # A different budget is a different measurement: episodes from before
+    # v0.3.16 are not under this threshold and must not share a grid with
+    # episodes after it.
     max_identical_turns: 3
     # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
     # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.

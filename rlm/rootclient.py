@@ -86,7 +86,11 @@ def split_reasoning(raw: str, *, open_block: bool = False) -> tuple[str, str]:
     also honoured (belt and braces; the template would double it otherwise).
     The template re-renders reasoning inside its own think block and trims
     both parts, so with the model's `\\n</think>\\n\\n` the re-render is a
-    byte-for-byte extension either way."""
+    byte-for-byte extension either way.
+
+    Splits at the FIRST `</think>`, unlike `strip_reasoning` (D16), which
+    keeps the tail after the LAST: that one finds the cell the model meant,
+    this one restores the history the template will re-render."""
     if open_block:
         head, sep, tail = raw.partition("</think>")
         if sep:
@@ -137,7 +141,10 @@ def strip_reasoning(text: str) -> str:
     `<think>...</think>` if present, then split on the LAST `</think>` and
     keep the tail (the prompt may have opened a block the model never
     closed, or closed one the model reopens). Never regex `<think>` out of
-    the middle."""
+    the middle.
+
+    Counterpart: `split_reasoning` splits at the FIRST close tag for history
+    reconstruction."""
     text = _THINK_BLOCK_RE.sub("", text)
     if "</think>" in text:
         text = text.rsplit("</think>", 1)[1]
@@ -242,6 +249,9 @@ class RootConversation:
             # The template renders every message's content through `|trim`
             # (Qwen3.8 template line 103), so the previous turn's completion
             # reappears stripped -- that is the byte-for-byte contract.
+            # (The tests assert the stronger `+ "<|im_end|>\n"` form; this
+            # check is the prefix only, so it can never report a false
+            # divergence.)
             extended = rendered.startswith(self._prev_rendered + self._prev_raw.strip())
         self.messages.append(history_message(rendered, raw, self._history_mode))
         self._prev_rendered, self._prev_raw = rendered, raw

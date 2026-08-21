@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from rlm import trace as tracemod
+from rlm.budget import MAX_IDENTICAL_TURNS
 from rlm.budget import Budgets as BudgetLimits
 from rlm.budget import BudgetEnforcer
 from rlm.chunker import ChunkConfig, split
@@ -90,7 +91,6 @@ CHECKER_FAILED = "checker_failed"
 OPERATOR_ABORT = "operator_abort"
 SERVER_UNREACHABLE = "server_unreachable"
 NO_CELL_EXTRACTED = "no_cell_extracted"
-MAX_IDENTICAL_TURNS = "max_identical_turns"
 #: A planned slot-pool rotation could not be completed (§5 C4). Distinct from
 #: `server_unreachable` on purpose: the leaf may be perfectly reachable and
 #: still be the WRONG leaf -- a process that came back with different flags is
@@ -1065,6 +1065,9 @@ class _EpisodeRun:
             view = observation_view(out, cap)          # C3, scaffold-side (I1)
             # v0.3.16 C5 `max_identical_turns`, on the UN-annotated view: the
             # note appended below must not make the next repeat look different.
+            # An extraction-miss turn (`rt.cell is None`, above) is not noted,
+            # so the run counts consecutive EXECUTED turns -- a loop
+            # interrupted by a prose-only reply is still a loop.
             correct = False
             if not self._final_emitted:
                 try:

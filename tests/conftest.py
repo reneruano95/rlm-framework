@@ -894,6 +894,8 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
         # §8's replicate identity, patched on the RAW dict exactly as
         # `rlm.bench.seeded_config` patches it per attempt.
         raw["scaffold"]["sampling"]["leaf"]["seed"] = over["leaf_seed"]
+    if over.get("history_mode") is not None:
+        raw["scaffold"]["root"]["history_mode"] = over["history_mode"]
     return raw
 
 
@@ -986,14 +988,16 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
                 category="default", answer=None, truncation_cap=None,
                 max_wall_clock_s=None, max_subcalls=None, max_total_tokens=None,
                 max_turns=None, leaf_fixtures=None, dispatcher=None,
-                leaf_port=None, process_manager=None, leaf_seed=None):
+                leaf_port=None, process_manager=None, leaf_seed=None,
+                history_mode=None):
         server = FakeRootServer(minimal_cfg_dict, script=root_script)
         raw = _episode_cfg_dict(minimal_cfg_dict, tmp_path=tmp_path,
                                  root_port=server.port, truncation_cap=truncation_cap,
                                  max_wall_clock_s=max_wall_clock_s,
                                  max_subcalls=max_subcalls,
                                  max_total_tokens=max_total_tokens,
-                                 leaf_port=leaf_port, leaf_seed=leaf_seed)
+                                 leaf_port=leaf_port, leaf_seed=leaf_seed,
+                                 history_mode=history_mode)
         cfg = Config.model_validate(raw)
         task = Task(task_id="fixture-task", text=task_text, context=context,
                     category=category, answer=answer)

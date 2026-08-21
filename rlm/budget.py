@@ -45,6 +45,13 @@ from typing import Callable
 
 from rlm.errors import BudgetBreach, Outcome
 
+#: §6 outcome_reason for a `max_identical_turns` kill. Named as a constant,
+#: here rather than in `rlm.episode`, because this is the one place it is
+#: ever raised (`note_turn`'s `_breach()` call below) -- every other module
+#: that names it (`rlm.episode`, tests, replay tooling) imports THIS symbol
+#: rather than a second string literal that merely happens to match it.
+MAX_IDENTICAL_TURNS = "max_identical_turns"
+
 
 @dataclass(frozen=True)
 class Budgets:
@@ -246,14 +253,17 @@ class BudgetEnforcer:
     def note_turn(self, cell: str, view: str) -> bool:
         """v0.3.16 `max_identical_turns`: count consecutive root turns whose
         (cell, observation) pair is identical. Returns True when a scaffold
-        correction is due (the pair has now occurred max-1 times in a row);
-        raises BudgetBreach(budget_kill, "max_identical_turns") at max.
+        correction is due: the pair has now occurred max-1 times in a row AND
+        max >= 3 -- at max == 2 the first repeat is already the kill, so no
+        correction is ever due. Raises BudgetBreach(budget_kill,
+        "max_identical_turns") at max.
 
         `cell` is compared stripped (fence whitespace is not a decision);
         `view` is the C3 observation BEFORE any scaffold note is appended --
         the caller must pass the un-annotated view, or the note it appended
         last turn would make every repeat look different and the budget would
-        never fire. 0 disables.
+        never fire. 0 never counts (a prior breach still re-raises, as
+        everywhere in this enforcer).
         """
         self._ensure_not_breached()
         cap = self.budgets.max_identical_turns
@@ -263,7 +273,7 @@ class BudgetEnforcer:
         self._identical_run = self._identical_run + 1 if key == self._last_turn_key else 1
         self._last_turn_key = key
         if self._identical_run >= cap:
-            self._breach(Outcome.BUDGET_KILL, "max_identical_turns")
+            self._breach(Outcome.BUDGET_KILL, MAX_IDENTICAL_TURNS)
         # The correction exists only when there is a repeat to correct: at
         # cap 2 the first repeat is already the kill, and `run == cap - 1`
         # would otherwise fire on the FIRST occurrence of every pair.

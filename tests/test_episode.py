@@ -890,3 +890,27 @@ async def test_the_correction_is_the_observation_the_root_saw(episode_env):
     assert "[scaffold]" in corrected_view                      # the annotated view is the stored one
     next_request = env.blob(turns[2]["root_request_ref"])
     assert corrected_view.encode("utf-8") in next_request        # …and it is what the next request carried
+
+
+_TWO_THEN_FINAL = ["```repl\nprint(1)\n```", "```repl\nprint(2)\n```",
+                   "```repl\nfinal_answer('x')\n```"]
+
+
+async def test_a_render_that_is_not_a_prefix_extension_is_logged_once(episode_env):
+    """v0.3.16 monitor. Under the OLD history rule the stored assistant message
+    carries the prompt's think block and the template prepends its own, so
+    turn 2's render is not an extension of turn 1's: exactly one
+    `root_history / diverged` lifecycle event, on turn 2, and the episode is
+    not a failure. Under `raw` the render extends and nothing is logged."""
+    old = episode_env(root_script=list(_TWO_THEN_FINAL), history_mode="prefix_plus_raw")
+    res = await old.run()
+    assert res.outcome == Outcome.SUCCESS
+    events = [e for e in old.lifecycle_events() if e.get("kind") == "root_history"]
+    assert len(events) == 1, events
+    assert events[0]["state"] == "diverged" and events[0]["turn"] == 2
+    assert events[0]["history_mode"] == "prefix_plus_raw"
+
+    new = episode_env(root_script=list(_TWO_THEN_FINAL), history_mode="raw")
+    res = await new.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert not [e for e in new.lifecycle_events() if e.get("kind") == "root_history"]
