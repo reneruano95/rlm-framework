@@ -1,0 +1,10 @@
+import re
+from collections import Counter
+def names(doc):
+    return re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", doc)
+cnt = Counter()
+for d in docs:
+    for c in names(d):
+        cnt[c]+=1
+for k,v in cnt.most_common(40):
+    print(v,k)
