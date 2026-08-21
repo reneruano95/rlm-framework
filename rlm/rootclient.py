@@ -25,14 +25,16 @@ Sampling: every /completion call carries `cfg.scaffold.sampling.root`
 `rlm.dispatcher.ServerClient.completion`'s (deliberately absent) defaults.
 
 D26 append-only: `append_user` only ever appends; nothing already sent is
-ever rewritten. `turn()` reconstructs the assistant history message as
-exactly what the token stream contained -- the template's own text between
-the last `<|im_start|>assistant\n` marker and the model's raw completion --
-so a later render is a byte-for-byte prefix extension of an earlier one
-(measured: cache_n = prev_len-4 over 6 turns, recipes §serverapi). Getting
-this wrong (e.g. re-deriving the think-block text independently) would
-silently break prefix-cache reuse without ever showing up as a test
-failure on message *content* alone.
+ever rewritten. `turn()` builds the assistant history message with
+`history_message(rendered, raw, mode)`: under `prefix_plus_raw` (the
+pre-amendment rule, kept so old snapshots replay exactly) that is the
+template's own text after the last assistant marker plus the model's raw
+completion, verbatim; under `raw` (shipped default) it is the model's
+completion alone, reasoning split into `reasoning_content` via
+`split_reasoning`, and the template re-renders the think block itself --
+either way the template trims every message's content, so the next render
+is a byte-for-byte extension of the previous one (measured: cache_n =
+prev_len-4 over 6 turns, recipes §serverapi).
 """
 from __future__ import annotations
 
@@ -72,17 +74,28 @@ def assistant_prefix(rendered: str) -> str:
 _LEADING_THINK_RE = re.compile(r"^\s*<think>(.*?)</think>\s*", re.DOTALL)
 
 
-def split_reasoning(raw: str) -> tuple[str, str]:
-    """(reasoning, content) for a raw completion. With thinking off the model
-    emits no tags and reasoning is ''. With thinking on the reply opens with
-    `<think>…</think>`; the template re-renders that as its own block from
-    `reasoning_content`, so the content must not carry it twice."""
+def split_reasoning(raw: str, *, open_block: bool = False) -> tuple[str, str]:
+    """(reasoning, content) for a raw completion.
+
+    With thinking OFF the prompt closes the think block before the model
+    speaks, the model emits no tags, and reasoning is ''. With thinking ON
+    the prompt ends in an OPEN `<think>\\n`, so the completion carries the
+    reasoning, then `</think>`, then the answer -- and never an opening
+    tag; `open_block=True` says so and the split happens at the first
+    `</think>`. A leading `<think>...</think>` in the completion itself is
+    also honoured (belt and braces; the template would double it otherwise).
+    The template re-renders reasoning inside its own think block and trims
+    both parts, so with the model's `\\n</think>\\n\\n` the re-render is a
+    byte-for-byte extension either way."""
+    if open_block:
+        head, sep, tail = raw.partition("</think>")
+        if sep:
+            return head.strip(), tail.lstrip("\n")
+        return "", raw
     m = _LEADING_THINK_RE.match(raw)
     if not m:
         return "", raw
-    reasoning = m.group(1).strip()
-    content = raw[m.end():]
-    return reasoning, content
+    return m.group(1).strip(), raw[m.end():]
 
 
 def history_message(rendered: str, raw: str, mode: str) -> dict[str, str]:
@@ -95,7 +108,8 @@ def history_message(rendered: str, raw: str, mode: str) -> dict[str, str]:
         return {"role": "assistant", "content": assistant_prefix(rendered) + raw}
     if mode != "raw":
         raise ValueError(f"unknown history_mode {mode!r}")
-    reasoning, content = split_reasoning(raw)
+    reasoning, content = split_reasoning(
+        raw, open_block=assistant_prefix(rendered).rstrip().endswith("<think>"))
     msg = {"role": "assistant", "content": content}
     if reasoning:
         msg["reasoning_content"] = reasoning

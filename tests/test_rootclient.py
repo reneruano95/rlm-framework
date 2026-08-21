@@ -164,3 +164,28 @@ async def test_raw_mode_extends_the_previous_render_byte_for_byte(fake_root_serv
     conv.append_user("two"); second = await conv.turn()
     assert second.rendered.startswith(first.rendered + first.raw.strip() + "<|im_end|>\n")   # the template trims content
     assert second.prefix_extended is True
+
+
+def test_split_reasoning_with_an_open_block_splits_at_the_first_close_tag():
+    assert split_reasoning("plan\n</think>\n\nA", open_block=True) == ("plan", "A")
+    assert split_reasoning("no close tag at all", open_block=True) == ("", "no close tag at all")
+    assert split_reasoning("<think>\nplan\n</think>\n\nA") == ("plan", "A")     # closed-prompt shape still honoured
+
+
+async def test_raw_mode_with_thinking_on_extends_byte_for_byte(fake_root_server):
+    """Thinking ON: the prompt ends in an open `<think>\n`; the model's reply
+    carries `plan\n</think>\n\nA`. Under `raw` the history stores
+    reasoning_content='plan', content='A', and the template re-renders exactly
+    the prompt tail + the reply -- so the next render extends the previous one."""
+    fake_root_server.script = ["plan\n</think>\n\nA", "```repl\nfinal_answer(1)\n```"]
+    conv = fake_root_server.conversation(system="SYS", enable_thinking=True, history_mode="raw")
+    conv.append_user("one"); first = await conv.turn()
+    conv.append_user("two"); second = await conv.turn()
+    assert conv.messages[2] == {"role": "assistant", "content": "A", "reasoning_content": "plan"}
+    assert second.rendered.startswith(first.rendered + first.raw.strip() + "<|im_end|>\n")
+    assert second.prefix_extended is True
+
+
+def test_history_message_refuses_an_unknown_mode():
+    with pytest.raises(ValueError):
+        history_message("x", "y", "bogus")
