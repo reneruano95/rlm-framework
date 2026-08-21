@@ -1,6 +1,8 @@
 # tests/test_rootclient.py
 import hashlib
 
+import pytest
+
 from rlm.rootclient import extract_cell, strip_reasoning
 
 
@@ -104,3 +106,26 @@ async def test_fixed_schedule_keeps_the_old_behaviour(fake_root_server, minimal_
     conv.append_user("two")
     await conv.turn()
     assert fake_root_server.last_completion_body["seed"] == base
+
+
+# CONTROLLER RULING: the brief calls for this test to land failing at commit
+# time; that would leave a red suite in history. Decorated xfail(strict=True)
+# instead -- the red->green discipline still holds (Task 6 must delete this
+# decorator, at which point an unexpectedly-passing xfail would itself fail
+# the run), but every commit's suite stays green.
+@pytest.mark.xfail(strict=True, reason="doubled think block until history_mode raw lands (Task 6)")
+async def test_history_renders_one_think_block_per_past_turn(fake_root_server):
+    """Qwen3.8's template emits its OWN empty think block in front of every
+    past assistant turn (tests/fixtures/repetition/qwen38_chat_template.jinja).
+    Storing assistant_prefix(rendered) + raw therefore rendered TWO blocks per
+    turn in every S4 and re-validation request (v0.3.16 finding). After the
+    fix the history carries exactly one, and the next render is the previous
+    render + the raw completion, byte for byte (D26 as intended)."""
+    conv = fake_root_server.conversation(system="SYS")
+    conv.append_user("one")
+    first = await conv.turn()
+    conv.append_user("two")
+    second = await conv.turn()
+    past = second.rendered.split("<|im_start|>assistant\n")[1]      # the first turn, as history
+    assert past.count("<think>") == 1, past[:120]
+    assert second.rendered.startswith(first.rendered + first.raw + "<|im_end|>\n")

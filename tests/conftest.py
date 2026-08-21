@@ -205,12 +205,24 @@ def _tokenize_response(body: dict) -> dict:
 
 
 def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
-    """Qwen3.6's own ChatML shape (recipes §serverapi). Shared by both fake
-    servers: since the S2 leaf-template fix, the LEAF renders through
-    /apply-template too (D14), not just the root."""
+    """Qwen3.8-27B's ChatML shape (tests/fixtures/repetition/qwen38_chat_template.jinja),
+    the branches the scaffold exercises. Shared by both fake servers: since the
+    S2 leaf-template fix, the LEAF renders through /apply-template too (D14).
+
+    The load-bearing detail: every PAST assistant message is rendered with the
+    template's own `<think>\\n{reasoning_content}\\n</think>\\n\\n` in front of
+    `content` (preserve_thinking undefined -> the preserving branch), and
+    `content` is emitted verbatim -- the template never parses think tags out
+    of it. The generation prompt is `<think>\\n\\n</think>\\n\\n` with thinking
+    off and `<think>\\n` with it on."""
     parts = []
     for m in messages:
-        parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n")
+        if m["role"] == "assistant":
+            reasoning = (m.get("reasoning_content") or "").strip()
+            parts.append(f"<|im_start|>assistant\n<think>\n{reasoning}\n</think>\n\n"
+                         f"{m['content']}<|im_end|>\n")
+        else:
+            parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n")
     parts.append("<|im_start|>assistant\n")
     parts.append("<think>\n" if enable_thinking else "<think>\n\n</think>\n\n")
     return "".join(parts)
