@@ -1,0 +1,401 @@
+{
+ "episode_id": "9d9e47fb-9501-429f-a05c-31df2e01e158",
+ "task_id": "synth-01",
+ "turns": [
+  {
+   "turn": 1,
+   "cell": "print(len(context), len(chunks))\nseps = [m.start() for m in re.finditer(r\"=== DOCUMENT BREAK ===\", context)]\nprint(seps)\nprint(repr(context[:200]))",
+   "observation_view": "[stdout]\n98939 59\n\n[traceback]\nTraceback (most recent call last):\n  File \"<cell:1>\", line 2, in <module>\n    seps = [m.start() for m in re.finditer(r\"=== DOCUMENT BREAK ===\", context)]\n                               ^^\nNameError: name 're' is not defined. Did you forget to import 're'"
+  },
+  {
+   "turn": 2,
+   "cell": "import re\nseps = [m.start() for m in re.finditer(r\"=== DOCUMENT BREAK ===\", context)]\nprint(seps)\nprint(repr(context[:300]))",
+   "observation_view": "[stdout]\n[32933, 65759]\n'REGISTER 1 of 3\\n\\n[ENT-400000] Sturngirtdorne Warrant Office\\nStatus: OPEN\\nDisposition: custody passed from the Sturngirtdorne Warrant Office to the Hespryesomehurst Escrow Hall; release was upheld and withholding was denied.\\nNotes: quire docket warrant tithe annexe tithe vellum muniment schedule rubr'\n"
+  },
+  {
+   "turn": 3,
+   "cell": "import re\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\nprint(len(docs))\nfor i, d in enumerate(docs):\n    # find all organization-like names\n    names = re.findall(r\"[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\", d)\n    from collections import Counter\n    c = Counter(names)\n    print(f\"--- doc {i} top 15 ---\")\n    for n, cnt in c.most_common(15):\n        print(cnt, n)",
+   "observation_view": "[stdout]\n3\n--- doc 0 top 15 ---\n92 Disposition\n91 Notes\n2 Myrrorrerygriff Tithe Barn\n1 Sturngirtdorne Warrant Office\nStatus\n1 Sturngirtdorne Warrant Office\n1 Hespryesomehurst Escrow Hall\n1 Ophkestrelleigh Bonding Yard\nStatus\n1 Druskfallowmere Assay Office\n1 Ophkestrelleigh Bonding Yard\n1 Ophgirtcleave Bonding Yard\nStatus\n1 Hespambrygriff Tithe Barn\n1 Ophgirtcleave Bonding Yard\n1 Ophambrymere Tithe Barn\nStatus\n1 Lissomcrowetofts Warrant Office\n1 Ophambrymere Tithe Barn\n--- doc 1 top 15 ---\n93 Disposition\n92 Notes\n1 Tavvlammerscar Assay Office\nStatus\n1 Tavvlammerscar Assay Office\n1 Ophfallowmere Chancery Annexe\n1 Rookeambrymere Muniment Room\nStatus\n1 Irmupwellgriff Assay Office\n1 Rookeambrymere Muniment Room\n1 Lissomorrerytofts Tithe Barn\nStatus\n1 Lissomorrerytofts Tithe Barn\n1 Emberlygirtwardine Warrant Office\n1 Hesptarnleigh Chancery Annexe\nStatus\n1 Glinpelltofts Muniment Room\n1 Hesptarnleigh Chancery Annexe\n1 Sturndelvetofts Ledgerhouse\nStatus\n--- doc 2 top 15 ---\n91 Disposition\n90 Notes\n1 Praskgirtmere Muniment Room\nStatus\n1 Praskgirtmere Muniment Room\n1 Brillemmerscar Ledgerhouse\n1 Quillpelldorne Warrant Office\nStatus\n1 Lissomgirttofts Assay Office\n1 Quillpelldorne Warrant Office\n1 Zurnlammertofts Muniment Room\nStatus\n1 Zurnlammertofts Muniment Room\n1 Hespfallowscar Tithe Barn\n1 Emberlydelvetofts Tithe Barn\nStatus\n1 Ophnetheryatt Escrow Hall\n1 Emberlydelvetofts Tithe Barn\n1 Fraynkestrelmere Bonding Yard\nStatus\n"
+  },
+  {
+   "turn": 4,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\nall_names = Counter()\nfor d in docs:\n    names = re.findall(r\"[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\", d)\n    for n in names:\n        if n in (\"Disposition\",\"Notes\",\"Status\",\"Myrrorrerygriff Tithe Barn\"):\n            continue\n        all_names[n] += 1\nprint(all_names.most_common(20))",
+   "observation_view": "[stdout]\n[('Glincrowetofts Bonding Yard\\nStatus', 3), ('Brillemmerscar Ledgerhouse', 2), ('Sturngirtdorne Warrant Office\\nStatus', 1), ('Sturngirtdorne Warrant Office', 1), ('Hespryesomehurst Escrow Hall', 1), ('Ophkestrelleigh Bonding Yard\\nStatus', 1), ('Druskfallowmere Assay Office', 1), ('Ophkestrelleigh Bonding Yard', 1), ('Ophgirtcleave Bonding Yard\\nStatus', 1), ('Hespambrygriff Tithe Barn', 1), ('Ophgirtcleave Bonding Yard', 1), ('Ophambrymere Tithe Barn\\nStatus', 1), ('Lissomcrowetofts Warrant Office', 1), ('Ophambrymere Tithe Barn', 1), ('Irmmarrowcleave Bonding Yard\\nStatus', 1), ('Rooketarndorne Muniment Room', 1), ('Irmmarrowcleave Bonding Yard', 1), ('Tavvfallowgriff Escrow Hall\\nStatus', 1), ('Tavvfallowgriff Escrow Hall', 1), ('Glinorrerygriff Warrant Office', 1)]\n"
+  },
+  {
+   "turn": 5,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\nall_names = Counter()\nfor d in docs:\n    names = re.findall(r\"[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\", d)\n    for n in names:\n        n = n.replace(\"\\nStatus\",\"\").strip()\n        if n in (\"Disposition\",\"Notes\",\"Status\"):\n            continue\n        all_names[n] += 1\nprint(all_names.most_common(20))",
+   "observation_view": "[stdout]\n[('Myrrorrerygriff Tithe Barn', 3), ('Glincrowetofts Bonding Yard', 3), ('Sturngirtdorne Warrant Office', 2), ('Ophkestrelleigh Bonding Yard', 2), ('Ophgirtcleave Bonding Yard', 2), ('Ophambrymere Tithe Barn', 2), ('Irmmarrowcleave Bonding Yard', 2), ('Tavvfallowgriff Escrow Hall', 2), ('Hespupwellgriff Warrant Office', 2), ('Zurntarnscar Ledgerhouse', 2), ('Sturnvergescar Chancery Annexe', 2), ('Cynetarngriff Ledgerhouse', 2), ('Quillupwellcleave Assay Office', 2), ('Emberlytarnleigh Assay Office', 2), ('Yeldpellmere Bonding Yard', 2), ('Nethupwellleigh Warrant Office', 2), ('Wrenhallowtofts Bonding Yard', 2), ('Cynecroweyatt Tithe Barn', 2), ('Glinhallowcleave Warrant Office', 2), ('Emberlypelltofts Muniment Room', 2)]\n"
+  },
+  {
+   "turn": 6,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\n# Count occurrences per doc\nfor i, d in enumerate(docs):\n    names = re.findall(r\"[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\", d)\n    cleaned = [n.replace(\"\\nStatus\",\"\").strip() for n in names]\n    cleaned = [n for n in cleaned if n not in (\"Disposition\",\"Notes\",\"Status\")]\n    c = Counter(cleaned)\n    print(f\"doc {i}: total {len(cleaned)}, unique {len(c)}\")\n    for n, cnt in c.most_common(5):\n        print(\"  \", cnt, n)",
+   "observation_view": "[stdout]\ndoc 0: total 274, unique 182\n   3 Myrrorrerygriff Tithe Barn\n   2 Sturngirtdorne Warrant Office\n   2 Ophkestrelleigh Bonding Yard\n   2 Ophgirtcleave Bonding Yard\n   2 Ophambrymere Tithe Barn\ndoc 1: total 277, unique 185\n   2 Tavvlammerscar Assay Office\n   2 Rookeambrymere Muniment Room\n   2 Lissomorrerytofts Tithe Barn\n   2 Hesptarnleigh Chancery Annexe\n   2 Sturndelvetofts Ledgerhouse\ndoc 2: total 271, unique 181\n   2 Praskgirtmere Muniment Room\n   2 Quillpelldorne Warrant Office\n   2 Zurnlammertofts Muniment Room\n   2 Emberlydelvetofts Tithe Barn\n   2 Fraynkestrelmere Bonding Yard\n"
+  },
+  {
+   "turn": 7,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\n# Look at the structure of one entry\nprint(repr(docs[0][:1500]))",
+   "observation_view": "[stdout]\n'REGISTER 1 of 3\\n\\n[ENT-400000] Sturngirtdorne Warrant Office\\nStatus: OPEN\\nDisposition: custody passed from the Sturngirtdorne Warrant Office to the Hespryesomehurst Escrow Hall; release was upheld and withholding was denied.\\nNotes: quire docket warrant tithe annexe tithe vellum muniment schedule rubric escrow foolscap vellum escrow muniment.\\n\\n[ENT-400001] Ophkestrelleigh Bonding Yard\\nStatus: SEALED\\nDisposition: custody passed from the Druskfallowmere Assay Office to the Ophkestrelleigh Bonding Yard; release was upheld and withholding was denied.\\nNotes: muniment warrant counterfoil docket vellum docket chancery errata assay quire chancery muniment quire ledger foolscap muniment assay chancery.\\n\\n[ENT-400002] Ophgirtcleave Bonding Yard\\nStatus: OPEN\\nDisposition: custody passed from the Hespambrygriff Tithe Barn to the Ophgirtcleave Bonding Yard; the refusal postdates the grant.\\nNotes: tally counterfoil assay ledger counterfoil annexe schedule rubric vellum rubric bond muniment chancery muniment quire assay chancery foolscap tally ledger vellum foolscap.\\n\\n[ENT-400003] Ophambrymere Tithe Barn\\nStatus: SEALED\\nDisposition: custody passed from the Lissomcrowetofts Warrant Office to the Ophambrymere Tithe Barn; the later ruling denied what the earlier ruling allowed.\\nNotes: muniment escrow quire annexe ledger errata foolscap vellum bond quire muniment foolscap assay rubric chancery warrant schedule tally assay escrow bond tithe foolscap annexe annexe ledger.\\n\\n[ENT-400004] Irmmarrowcleave'\n"
+  },
+  {
+   "turn": 8,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\n# Parse entries: [ENT-XXXXXX] Name\n# The Name is the entry's subject\n# Also Disposition mentions \"from X to Y\"\n# Let's collect all names mentioned in each doc (subject + from + to)\ndef all_orgs(doc):\n    # subject names\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    # from/to in dispositions\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\n# Intersection\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 9,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 10,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 11,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 12,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 13,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 14,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 15,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 16,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 17,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 18,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 19,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 20,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 21,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 22,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 23,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 24,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 25,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 26,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 27,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 28,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 29,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 30,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 31,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 32,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 33,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 34,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 35,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 36,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 37,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 38,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 39,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 40,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 41,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 42,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 43,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 44,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 45,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 46,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 47,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 48,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 49,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 50,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 51,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 52,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 53,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 54,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 55,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 56,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 57,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 58,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 59,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 60,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 61,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 62,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 63,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 64,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 65,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 66,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 67,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 68,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 69,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 70,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 71,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 72,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 73,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 74,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 75,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 76,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 77,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 78,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  },
+  {
+   "turn": 79,
+   "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
+   "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
+  }
+ ]
+}

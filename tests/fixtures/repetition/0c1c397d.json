@@ -1,0 +1,581 @@
+{
+ "episode_id": "0c1c397d-9501-41b7-82ac-f6e2e8138ebf",
+ "task_id": "synth-07",
+ "turns": [
+  {
+   "turn": 1,
+   "cell": "print(len(context), len(chunks))\nseps = [m.start() for m in re.finditer(r\"=== DOCUMENT BREAK ===\", context)]\nprint(seps)\nprint(repr(context[:200]))",
+   "observation_view": "[stdout]\n98470 60\n\n[traceback]\nTraceback (most recent call last):\n  File \"<cell:1>\", line 2, in <module>\n    seps = [m.start() for m in re.finditer(r\"=== DOCUMENT BREAK ===\", context)]\n                               ^^\nNameError: name 're' is not defined. Did you forget to import 're'"
+  },
+  {
+   "turn": 2,
+   "cell": "import re\nseps = [m.start() for m in re.finditer(r\"=== DOCUMENT BREAK ===\", context)]\nprint(seps)\nprint(repr(context[:300]))",
+   "observation_view": "[stdout]\n[32765, 65730]\n'REGISTER 1 of 3\\n\\n[ENT-400000] Quillorreryscar Bonding Yard\\nStatus: OPEN\\nDisposition: custody passed from the Quillorreryscar Bonding Yard to the Azhcrowedorne Assay Office; the grant postdates the refusal.\\nNotes: bond escrow warrant schedule counterfoil errata errata assay docket counterfoil tally v'\n"
+  },
+  {
+   "turn": 3,
+   "cell": "import re\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\nprint(len(docs))\nfor i,d in enumerate(docs):\n    print(i, len(d), repr(d[:120]))",
+   "observation_view": "[stdout]\n3\n0 32765 'REGISTER 1 of 3\\n\\n[ENT-400000] Quillorreryscar Bonding Yard\\nStatus: OPEN\\nDisposition: custody passed from the Quillorrery'\n1 32943 '\\n\\nREGISTER 2 of 3\\n\\n[ENT-410000] Yeldblythegriff Chancery Annexe\\nStatus: OPEN\\nDisposition: custody passed from the Sturnq'\n2 32718 '\\n\\nREGISTER 3 of 3\\n\\n[ENT-420000] Cyneinchhurst Bonding Yard\\nStatus: OPEN\\nDisposition: custody passed from the Hespcroweme'\n"
+  },
+  {
+   "turn": 4,
+   "cell": "import re\nfrom collections import Counter\n# extract all organisation-ish names: capitalized sequences possibly with spaces\ndef names(doc):\n    # find sequences of Capitalized words (2+ words) or single capitalized tokens that look like orgs\n    cands = re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\n    return cands\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 5,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 6,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 7,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 8,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 9,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 10,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 11,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 12,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 13,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 14,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 15,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 16,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 17,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 18,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 19,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 20,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 21,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 22,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 23,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 24,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 25,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 26,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 27,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 28,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 29,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 30,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 31,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 32,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 33,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 34,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 35,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 36,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 37,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 38,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 39,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 40,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 41,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 42,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 43,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 44,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 45,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 46,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 47,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 48,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 49,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 50,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 51,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 52,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 53,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 54,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 55,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 56,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 57,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 58,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 59,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 60,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 61,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 62,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 63,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 64,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 65,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 66,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 67,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 68,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 69,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 70,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 71,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 72,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 73,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 74,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 75,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 76,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 77,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 78,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 79,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 80,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 81,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 82,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 83,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 84,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 85,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 86,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 87,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 88,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 89,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 90,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 91,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 92,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 93,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 94,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 95,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 96,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 97,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 98,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 99,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 100,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 101,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 102,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 103,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 104,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 105,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 106,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 107,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 108,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 109,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 110,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 111,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 112,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 113,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 114,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  },
+  {
+   "turn": 115,
+   "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
+   "observation_view": ""
+  }
+ ]
+}
