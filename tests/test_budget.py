@@ -10,6 +10,9 @@ directly in the decorator instead of a forward-referenced helper.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -146,9 +149,6 @@ TestBudgetMachine.settings = settings(max_examples=200, stateful_step_count=40,
                                       deadline=None, derandomize=True)
 
 
-import json
-from pathlib import Path
-
 FIXTURES = Path(__file__).parent / "fixtures" / "repetition"
 
 
@@ -202,6 +202,19 @@ def test_zero_disables_the_identical_turns_budget():
     b = _guarded(0)
     for _ in range(50):
         assert b.note_turn("print(1)", "v") is False
+
+
+def test_cap_two_kills_on_the_first_repeat_and_never_corrects():
+    """Review ruling (2026-08-21): the correction exists only when a repeat
+    can precede the kill. At cap 2 the first repeat IS the kill, and a
+    fresh pair must never be reported as a repeat."""
+    b = _guarded(2)
+    assert b.note_turn("a", "v") is False
+    assert b.note_turn("b", "w") is False
+    assert b.note_turn("c", "x") is False          # distinct pairs: never a correction
+    with pytest.raises(BudgetBreach) as exc:
+        b.note_turn("c", "x")                       # first repeat at cap 2: kill, no correction
+    assert exc.value.reason == "max_identical_turns"
 
 
 def test_no_turns_are_noted_after_a_breach():

@@ -651,8 +651,7 @@ def test_the_benchmark_pin_is_the_frozen_manifests_own_hash(valid_cfg):
 
 def test_max_identical_turns_ships_at_three_and_refuses_one(minimal_cfg_dict):
     """v0.3.16: the shipped config opts in at 3 (correct at 2, kill at 3);
-    1 would kill on the first repeat with no correction, which the spec does
-    not allow -- 0 (disabled) or >= 2."""
+    1 would kill on the first occurrence of any cell -- 0 (disabled) or >= 2."""
     cfg = Config.model_validate(minimal_cfg_dict)
     assert cfg.scaffold.budgets.max_identical_turns == 3
     raw = copy.deepcopy(minimal_cfg_dict)

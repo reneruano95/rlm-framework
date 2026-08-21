@@ -178,8 +178,9 @@ class Budgets(_Strict):
     max_total_tokens: int = 1_500_000
     #: v0.3.16 (s2/REPLAY-LOOP-AB.md). The same (cell, observation) pair on
     #: consecutive root turns: correct at max-1, kill at max as
-    #: budget_kill/max_identical_turns. 0 disables; 1 is refused because it
-    #: would kill on the first repeat with no correction.
+    #: budget_kill/max_identical_turns. 0 disables; 1 is refused because the
+    #: first occurrence of any cell already satisfies `run >= 1` and would
+    #: kill every turn; 2 kills on the first repeat with no correction.
     max_identical_turns: int = 3
     max_predict: MaxPredict
 

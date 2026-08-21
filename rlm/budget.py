@@ -264,7 +264,10 @@ class BudgetEnforcer:
         self._last_turn_key = key
         if self._identical_run >= cap:
             self._breach(Outcome.BUDGET_KILL, "max_identical_turns")
-        return self._identical_run == cap - 1
+        # The correction exists only when there is a repeat to correct: at
+        # cap 2 the first repeat is already the kill, and `run == cap - 1`
+        # would otherwise fire on the FIRST occurrence of every pair.
+        return cap >= 3 and self._identical_run == cap - 1
 
     def start_clock(self) -> None:
         self._clock_start = time.monotonic()
