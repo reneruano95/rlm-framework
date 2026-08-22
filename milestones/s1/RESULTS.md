@@ -145,7 +145,7 @@ are where it has to be measured.
 **off** scored 5/8 against 8/8 for every thinking arm on single-turn arithmetic,
 but thinking **destroys multi-turn prefix reuse** (85% → 4.7%, ~24 s of extra
 prefill per serial root turn). Run as whole episodes, with both effects in scope
-(`milestones/s1/run_thinking_ab.py`, same `rlm_attempt`, `variant=None` so the pinned v3
+(`milestones/s1/run_thinking_ab.py` — deleted 2026-08-22, see `milestones/s2/ROOT-THINKING.md`; same `rlm_attempt`, `variant=None` so the pinned v3
 prompt is the one under test, arm = a second config differing in exactly one key):
 
 | arm | passed | median wall | median root turns | leaf calls | budget/ctx kills |
