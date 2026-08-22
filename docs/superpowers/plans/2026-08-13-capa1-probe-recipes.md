@@ -1,5 +1,11 @@
 # Capa-1 Design Probes — Verified Recipes (companion to the implementation plan)
 
+> **GENRE NOTE (2026-08-22): this is a measurement record, not a plan.**
+> It sits under `plans/` because it is the companion its sibling plan names by
+> filename, and its Windows-sandbox recipes are still live. There is no task
+> list here and nothing to execute. See `docs/README.md`.
+
+
 > Generated from an empirical probe workflow run on the target box 2026-08-13.
 > Every recipe below was **executed on this machine**, not merely researched.
 > The implementation plan (`2026-08-13-capa1-scaffold.md`) cites these sections by name.

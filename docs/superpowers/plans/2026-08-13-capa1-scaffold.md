@@ -1,5 +1,17 @@
 # Capa-1 Scaffold (C1–C6 → S1 Gate) Implementation Plan
 
+> **STATUS (2026-08-22): EXECUTED — the S1 gate passed 2026-08-13**
+> (`s1/RESULTS.md`; `ARCHITECTURE.md` §9).
+> Its unchecked `- [ ]` boxes are **not** a to-do list: this project never ticked
+> plan checkboxes as work landed. Ground truth for what shipped is `ARCHITECTURE.md`
+> §9's gate status lines and `CHANGELOG.md`.
+> Line 11 tells implementers to read spec **Appendix A** before starting. On
+> 2026-08-22 Appendix A was replaced by a pointer to `config.yaml`, because the
+> sketch had drifted from the shipping config in fourteen places. Read
+> `config.yaml` and §5 instead; the heading is kept so this citation resolves.
+> The spec version named below is v0.2.2; the spec now ships v0.3.16.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the deterministic scaffold (C1–C6, prompt registry, config schema, CLI) to the depth the S1 gate requires, then run the S1 gate.

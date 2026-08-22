@@ -1,5 +1,20 @@
 # The delegation arm: pricing `llm_query` on the frozen v1 benchmark
 
+> **STATUS (2026-08-22): CORRECTED. The `Status:` line below reads "planned, not
+> implemented" and that has been wrong since the arm shipped.** `rlm-restricted`
+> is live in `ARM_ORDER` (`src/rlm/bench.py`), carries its own sha-pinned prompt
+> (`prompts/root-restricted.v1.md`) and its own wall clock
+> (`restricted_max_wall_clock_s: 2100`).
+>
+> The 5-arm run this plan describes (`9588328d`) was **STOPPED on 2026-08-20**
+> after 6 of 90 blocks: a worsening restricted-arm rotation fault ending in
+> `slot_pool_error_drained`, a pace of 65-80 h against a 60 h budget, and a
+> known-sign measurement on a benchmark that provably cannot price delegation
+> (`docs/research/2026-08-20-rlm-paper-fidelity-and-next-steps.md` §3). In the
+> trace store the arm stands at **5 successes in 30 episodes** (15 `error`,
+> 5 `budget_kill`, 5 `fail`) against 12,367 leaf calls. Do not re-run it on v1.
+
+
 **Status:** planned, not implemented · **Date:** 2026-08-20
 **Answers:** `s4/RESULTS.md` §"The one thing to do next", option 2
 **Blocks:** the DIRECTION.md §4a decision (is the appliance one model or two?)

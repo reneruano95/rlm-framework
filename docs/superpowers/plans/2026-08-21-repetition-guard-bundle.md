@@ -1,5 +1,11 @@
 # Repetition Guard Bundle (spec v0.3.16) Implementation Plan
 
+> **STATUS (2026-08-22): LANDED as spec v0.3.16** (`f19fdca`).
+> Its unchecked `- [ ]` boxes are **not** a to-do list: this project never ticked
+> plan checkboxes as work landed. Ground truth for what shipped is `ARCHITECTURE.md`
+> §9's gate status lines and `CHANGELOG.md`.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make a verbatim-repetition loop cost the root ~30 s instead of 1,154–1,308 s, remove the two scaffold-side contributors to it (same seed on every turn; a doubled empty think block on every past assistant turn), and record all three as a spec amendment with a version bump.
