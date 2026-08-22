@@ -20,11 +20,6 @@ sandbox_bootstrap/
 # reconstruct from a commit.
 traces/
 
-# S3 gate: generated per-run artifacts (trace store, per-run configs with
-# dynamic fake-root ports). runs.jsonl and RESULTS.md are the record and are
-# committed.
-milestones/s3/results/store/
-milestones/s3/results/cfg-*.yaml
 
 # upstream bundle: keep the scripts, issue text and verification data;
 # ignore stray bytecode
@@ -37,7 +32,7 @@ upstream/__pycache__/
 .pytest_cache/
 .hypothesis/
 
-# Bench run outputs. Runtime state -- promoted to milestones/<gate>/ when a
-# run becomes evidence. The README is tracked; the outputs are not.
+# Bench run outputs: runtime state, not source. The README is tracked; the
+# outputs are not.
 runs/*
 !runs/README.md

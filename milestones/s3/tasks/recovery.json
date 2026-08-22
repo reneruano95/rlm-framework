@@ -1,7 +1,0 @@
-{
-  "task_id": "s3-recovery",
-  "text": "S3 benign task: its startup recovery tombstones the orphan.",
-  "category": "default",
-  "context": "S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. S3 recovery fixture corpus. ",
-  "answer": "recovered"
-}

@@ -29,13 +29,6 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = ["error"]
-# The default run is the PRODUCT's tests. `research` covers the milestone
-# harnesses -- the S2 sweep classifier, the instruction-decay experiment, the
-# refusal A/B scorer, the S1 fixture builders. They pin how a past gate was
-# MEASURED, which is worth keeping runnable and is not a gate on shipping
-# `rlm`. Run them with `pytest -m research`, or everything with `-m ""`.
-markers = ["research: pins a milestone harness, not the shipped runtime"]
-addopts = "-m 'not research'"
 
 [build-system]
 requires = ["hatchling"]
@@ -52,4 +45,4 @@ packages = ["src/rlm"]
 # `src/rlm/bench.py`'s module docstring and `tests/test_import_rules.py`).
 # `milestones/s1/` and `milestones/s2/` resolve the same way -- `bench/vocab.py` imports both at
 # module import time, which is why those directories cannot be archived.
-dev-mode-dirs = [".", "src", "milestones"]
+dev-mode-dirs = [".", "src"]

@@ -27,28 +27,29 @@ tells you whether you may touch it.
 |---|---|---|
 | `src/rlm/` | **live code** | The runtime, and the only thing in the wheel. Moved here from `rlm/` on 2026-08-22. |
 | `bench/` | **live code + frozen artifact** | The benchmark builder *and* frozen v1 (`manifest.json`, `tasks/`, `corpora/`). The frozen half is pinned by `benchmark.manifest_sha256`. |
-| `tests/` | **live code** | 967 tests. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant. |
+| `tests/` | **live code** | 853 tests. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant. |
 | `prompts/` | **frozen artifact** | 18 sha-pinned prompt files. See "before you move anything". |
-| `milestones/` | **evidence record** *(and `s1`/`s2` are also live packages — see below)* | `s0/`–`s4/`, one directory per gate. Each `RESULTS.md` is the evidence behind a published verdict, sitting beside the runner and the raw JSONL that make it reproducible under I4/I5. Organised by gate on purpose: a verdict is the unit being evidenced. |
 | `upstream/` | **active work, not evidence** | llama.cpp defect reports (R13 slot leak, R14 continuous batching). Both still open upstream. It belongs to no gate and `ARCHITECTURE.md` cites it zero times — it was briefly filed under `milestones/` on 2026-08-22 and moved back out the same day, because "a bug report about someone else's project" is not a milestone. |
 | `docs/` | **live documents** | Research, specs, plans. Conventions in [`docs/README.md`](docs/README.md). |
 | `traces/` | **gitignored, and irreplaceable** | The trace store: DuckDB + 67,136 blobs. Under I4 this is the *sole* episode truth. Not in git. Not reconstructible. Kept at the top level deliberately — it is the project's most valuable artifact, not a build output. |
 | `tools/` | **gitignored, machine-bound** | Three live llama.cpp builds, ~1.3 GB. |
 
 Anything not listed above is temporary and is deleted on sight:
-`sandbox_bootstrap/`, `**/__pycache__/`, `.pytest_cache/`, `.hypothesis/`, and
-`milestones/s3/results/store/`. `sandbox_bootstrap/` looks load-bearing because
+`sandbox_bootstrap/`, `**/__pycache__/`, `.pytest_cache/`, `.hypothesis/`.
+`sandbox_bootstrap/` looks load-bearing because
 the directory carries a one-time `icacls /grant *S-1-15-2-1` ACE — it is not.
 `rlm validate` recreates the directory, its four staged files **and** the ACE.
 Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
 
 ## Three things that cost the most to rediscover
 
-1. **`milestones/s1/` and `milestones/s2/` are importable Python packages the build and the test suite
-   depend on.** `bench/build.py` and `bench/vocab.py` import them at module import
-   time, and five test modules import them directly — so moving either makes
-   `pytest` fail at *collection*. They look like finished milestones. They are not
-   only that.
+1. **The gate evidence is in git, not on disk.** `milestones/` was deleted from
+   the working tree on 2026-08-22. Read any of it with
+   `git show 4e75b53:milestones/s2/R13.md`. The ~176 citations to it across
+   `ARCHITECTURE.md`, `CHANGELOG.md`, `config.yaml` and `src/rlm` docstrings
+   were deliberately kept — a spec that stops saying where its numbers came
+   from is worse than one whose citations need a `git show` — and
+   `tests/test_citations.py` checks every one is still retrievable.
 2. **`traces/` is gitignored *and* is the sole episode truth.** Both halves matter:
    git will not save you, and nothing else holds the record.
 3. **`tools/llamacpp-vulkan-dflash2/` has no zip and cannot be re-downloaded.** It
@@ -59,7 +60,7 @@ Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
 ## Commands
 
 ```bash
-uv run pytest -q                              # 967 tests, ~10 min
+uv run pytest -q                              # 853 tests, ~10 min
 uv run rlm validate --no-server-probe         # config + prompt pins + sandbox confinement
 uv run rlm replay <episode-id>                # re-derive an episode from the store alone (I4)
 uv run rlm bench --smoke                      # the only path that launches the root server
@@ -88,9 +89,6 @@ trace store alone. Several things are therefore frozen, and two of them fail
   `src/rlm/cli.py` define `REPO_ROOT = parents[2]`.
 - **`src/rlm/schema.sql` beside `src/rlm/trace.py`** — a `with_name()` sibling
   lookup, not declared package data.
-- **`milestones/s4/RESULTS.md` and `milestones/s4/results/ledger.jsonl`** — hardcoded paths with two
-  deliberate tripwire tests. Move them and `rlm bench` silently starts a *fresh*
-  ledger instead of resuming.
 - **`.gitattributes`** — `*.md text eol=lf` and `bench/corpora/** -text` are what
   make every content hash reproducible across clones. Changing it breaks all 13
   prompt pins and 24 corpus hashes on the next fresh clone, invisibly on the
@@ -111,16 +109,18 @@ Two silent ones, stated plainly because they produce no error:
 
 ## This checkout cannot be relocated
 
-The absolute path `D:\PROJECTS\rlm-halo-framework` is baked into 63+ scripts under
-`milestones/s1/` and `milestones/s2/`, both config files, and all 614 episode snapshots. Moving the
-checkout produces silent `FileNotFoundError`s with no fallback. This is a known,
-accepted constraint, not an oversight: those scripts have already produced their
-committed output, and making them portable is a project with its own testing
-burden and no current payoff.
+The absolute path `D:\PROJECTS\rlm-halo-framework` is baked into both config
+files and all 614 episode snapshots. Moving the checkout produces silent
+`FileNotFoundError`s with no fallback. This is a known, accepted constraint,
+not an oversight — the snapshots are a record of runs that already happened,
+and rewriting them would be rewriting the record.
 
 ## Two renames on 2026-08-22, and what was swept
 
-`rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/` → `milestones/`. `upstream/` went there too and came back out — it is a third-party bug report, not a gate.
+`rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/` → `milestones/` — which was then
+deleted from the working tree entirely on 2026-08-22, along with the external
+`D:/ARCHIVE`. `upstream/` went to `milestones/` too and came back out before the
+deletion: it is a third-party bug report, not a gate.
 
 **Milestone paths were swept everywhere** — 936 repo-relative references across
 220 files, 70 absolute paths, 41 depth anchors (`parents[N]` → `parents[N+1]`,

@@ -13,8 +13,6 @@ from pathlib import Path
 import pytest
 
 from bench import corpus as bc
-from bench.build import assert_name_space_disjoint
-from bench.vocab import SYL_A, SYL_B, SYL_C
 from bench.tokens import approx_tokens
 
 REPO = Path(__file__).resolve().parents[1]
@@ -26,19 +24,6 @@ def built():
                  count=approx_tokens, counter_name="approx-offline")
     c.assert_affordable()
     return c
-
-
-def test_the_name_space_is_disjoint_from_every_fixture_pool():
-    """§8: S2's gates run on "dedicated non-benchmark fixtures so S2 cannot
-    overfit the benchmark it is authoring". That holds only if the names cannot
-    collide. It found four collisions on its first run (eph, lorn, ryn, keld).
-
-    It used to run at import of `bench/vocab.py`; on 2026-08-22 it moved to the
-    BUILD path (`bench/build.py`), because the failure it prevents is a rebuilt
-    benchmark and firing on every import except at the build was the wrong
-    placement. Kept as a test as well, because the pools are editable and a
-    build is rare."""
-    assert_name_space_disjoint()
 
 
 def test_the_disposition_pairs_are_exact_word_permutations():
@@ -107,19 +92,6 @@ def test_building_is_deterministic_for_a_seed():
     assert a.sha256 == b.sha256
     assert (a.n_records, a.sealed_count, a.withheld_count) == \
            (b.n_records, b.sealed_count, b.withheld_count)
-
-
-def test_no_identifier_is_shared_with_any_fixture_on_disk(built):
-    """The literal half of disjointness. The syllable check cannot see a UUID or
-    ENT- code collision, and that is the collision that would actually let a
-    stale slot or a leaked answer score as a pass."""
-    others: list[str] = []
-    for pat in ("milestones/s1/tasks/*.txt", "milestones/s2/fixtures*/**/*.txt"):
-        for p in REPO.glob(pat):
-            others.append(p.read_text(encoding="utf-8", errors="replace"))
-    assert others, "no fixture corpora found to compare against"
-    overlap = bc.foreign_identifier_overlap(built, others)
-    assert not overlap, f"benchmark shares identifiers with a fixture: {sorted(overlap)[:5]}"
 
 
 def test_a_corpus_over_the_cap_is_refused_rather_than_truncated():

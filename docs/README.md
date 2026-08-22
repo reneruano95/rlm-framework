@@ -12,11 +12,13 @@ written down; this file writes it down.
 The pipeline is `research → spec → plan → code`. A document that skips a stage is
 usually a document in the wrong genre.
 
-Milestone evidence does **not** live here. `milestones/s0/`–`milestones/s4/` hold the gate
-records, each beside the runner and JSONL that make it reproducible under I4/I5, and
-`ARCHITECTURE.md` cites into that tree roughly 55 times against 5 citations into
-`docs/`. Moving those records here would break the majority of the spec's citations
-and separate each result from the code that produced it.
+Milestone evidence used to live in `milestones/`, which was **deleted from the
+working tree on 2026-08-22**. It is still in git: read any of it with
+`git show 4e75b53:milestones/s2/R13.md`. The ~176 citations to it across
+`ARCHITECTURE.md`, `CHANGELOG.md`, `config.yaml` and `src/rlm` docstrings were
+deliberately not stripped — they are the evidence trail behind every gate
+verdict, and `tests/test_citations.py` checks that each one is still
+retrievable from that commit.
 
 ## Plan checkboxes are not a status signal
 

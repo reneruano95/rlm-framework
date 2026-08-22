@@ -127,9 +127,10 @@ results themselves are committed and untouched; only the binary is gone.
 
 If a maintainer asks for a re-run on b10488, rebuild it in two steps:
 
-1. Extract `D:/ARCHIVE/rlm-halo-framework/toolchain-zips/llama-b10488-bin-win-rocm-7.14-x64.zip`
-   (196,780,034 B, kept out of the tree, not in git). That gives 99 of the 354
-   files.
+1. Re-download `llama-b10488-bin-win-rocm-7.14-x64.zip` from the public
+   ggml-org llama.cpp releases. The local archived copy was deleted on
+   2026-08-22 along with `D:/ARCHIVE`; the release is the source of record.
+   That gives 99 of the 354 files.
 2. Copy the **255-file AMD-wheel graft** from `tools/llamacpp-rocm/` — the
    pinned b10375 build, which is live and carries the identical graft.
    Verified 2026-08-22: the graft file *sets* are equal and spot-checked
