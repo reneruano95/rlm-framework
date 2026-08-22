@@ -2,9 +2,9 @@
 """R13 minimal reproducer: cross-request content leakage on a shared llama.cpp slot.
 
 TWO COPIES, DELIBERATELY. This file exists byte-identically at BOTH
-`milestones/s2/r13_repro.py` and `milestones/upstream/r13_repro.py`, and each is cited independently:
+`milestones/s2/r13_repro.py` and `upstream/r13_repro.py`, and each is cited independently:
 the s2 copy by `milestones/s2/R13.md`, `milestones/s2/R13-mitigations.md`, `src/rlm/leakcheck.py:38`
-and three `milestones/s2/audit/*.py` scripts; the upstream copy by `milestones/upstream/README.md`.
+and three `milestones/s2/audit/*.py` scripts; the upstream copy by `upstream/README.md`.
 Removing either breaks a citation, so both stay. KEEP THEM IDENTICAL -- apply
 any change to both in the same commit. Their sha256 equality is the only thing
 standing between these two files and silent divergence.

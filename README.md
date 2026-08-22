@@ -27,12 +27,13 @@ tells you whether you may touch it.
 |---|---|---|
 | `src/rlm/` | **live code** | The runtime, and the only thing in the wheel. Moved here from `rlm/` on 2026-08-22. |
 | `bench/` | **live code + frozen artifact** | The benchmark builder *and* frozen v1 (`manifest.json`, `tasks/`, `corpora/`). The frozen half is pinned by `benchmark.manifest_sha256`. |
-| `tests/` | **live code** | 958 tests. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant. |
+| `tests/` | **live code** | 967 tests. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant. |
 | `prompts/` | **frozen artifact** | 18 sha-pinned prompt files. See "before you move anything". |
-| `milestones/` | **evidence record** *(and `s1`/`s2` are also live packages — see below)* | `s0/`–`s4/` one per gate, plus `upstream/` (llama.cpp defect reproducers for R13 and R14). Each `RESULTS.md` is the evidence behind a published verdict. Consolidated here from five top-level directories on 2026-08-22. |
+| `milestones/` | **evidence record** *(and `s1`/`s2` are also live packages — see below)* | `s0/`–`s4/`, one directory per gate. Each `RESULTS.md` is the evidence behind a published verdict, sitting beside the runner and the raw JSONL that make it reproducible under I4/I5. Organised by gate on purpose: a verdict is the unit being evidenced. |
+| `upstream/` | **active work, not evidence** | llama.cpp defect reports (R13 slot leak, R14 continuous batching). Both still open upstream. It belongs to no gate and `ARCHITECTURE.md` cites it zero times — it was briefly filed under `milestones/` on 2026-08-22 and moved back out the same day, because "a bug report about someone else's project" is not a milestone. |
 | `docs/` | **live documents** | Research, specs, plans. Conventions in [`docs/README.md`](docs/README.md). |
 | `traces/` | **gitignored, and irreplaceable** | The trace store: DuckDB + 67,136 blobs. Under I4 this is the *sole* episode truth. Not in git. Not reconstructible. Kept at the top level deliberately — it is the project's most valuable artifact, not a build output. |
-| `tools/` | **gitignored, machine-bound** | Three live llama.cpp builds, ~2.3 GB. |
+| `tools/` | **gitignored, machine-bound** | Three live llama.cpp builds, ~1.3 GB. |
 
 Anything not listed above is temporary and is deleted on sight:
 `sandbox_bootstrap/`, `**/__pycache__/`, `.pytest_cache/`, `.hypothesis/`, and
@@ -45,7 +46,7 @@ Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
 
 1. **`milestones/s1/` and `milestones/s2/` are importable Python packages the build and the test suite
    depend on.** `bench/build.py` and `bench/vocab.py` import them at module import
-   time, and seven test modules import them directly — so moving either makes
+   time, and five test modules import them directly — so moving either makes
    `pytest` fail at *collection*. They look like finished milestones. They are not
    only that.
 2. **`traces/` is gitignored *and* is the sole episode truth.** Both halves matter:
@@ -58,7 +59,7 @@ Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
 ## Commands
 
 ```bash
-uv run pytest -q                              # 958 tests, ~16 min
+uv run pytest -q                              # 967 tests, ~10 min
 uv run rlm validate --no-server-probe         # config + prompt pins + sandbox confinement
 uv run rlm replay <episode-id>                # re-derive an episode from the store alone (I4)
 uv run rlm bench --smoke                      # the only path that launches the root server
@@ -119,7 +120,7 @@ burden and no current payoff.
 
 ## Two renames on 2026-08-22, and what was swept
 
-`rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/ upstream/` → `milestones/`.
+`rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/` → `milestones/`. `upstream/` went there too and came back out — it is a third-party bug report, not a gate.
 
 **Milestone paths were swept everywhere** — 936 repo-relative references across
 220 files, 70 absolute paths, 41 depth anchors (`parents[N]` → `parents[N+1]`,
