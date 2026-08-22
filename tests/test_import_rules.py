@@ -58,6 +58,12 @@ ISOLATED = [
     # It shells out to `powershell`/`Get-Counter`, never to a model server, so
     # it stays importable by the trace/analysis side without an HTTP client.
     "power.py",
+    # D27's launch-log reader (extracted from cli.py, 2026-08-22). Pure text
+    # parsing of a server's own stderr: a file read, three regexes, dict
+    # arithmetic. It answers §4's cache-type assertion WITHOUT contacting the
+    # server -- which is the whole point, since /props cannot report cache
+    # types -- so the lint is what keeps it that way.
+    "launchlog.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
