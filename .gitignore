@@ -29,3 +29,10 @@ s3/results/cfg-*.yaml
 # upstream bundle: keep the scripts, issue text and verification data;
 # ignore stray bytecode
 upstream/__pycache__/
+
+# Tool caches and the venv. Each is currently ignored only by a tool-authored
+# inner .gitignore; naming them here means a recreated cache cannot show up
+# untracked if the tool that writes that inner file ever changes.
+.venv/
+.pytest_cache/
+.hypothesis/

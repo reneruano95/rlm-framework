@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """R13 minimal reproducer: cross-request content leakage on a shared llama.cpp slot.
 
+TWO COPIES, DELIBERATELY. This file exists byte-identically at BOTH
+`s2/r13_repro.py` and `upstream/r13_repro.py`, and each is cited independently:
+the s2 copy by `s2/R13.md`, `s2/R13-mitigations.md`, `src/rlm/leakcheck.py:38`
+and three `s2/audit/*.py` scripts; the upstream copy by `upstream/README.md`.
+Removing either breaks a citation, so both stay. KEEP THEM IDENTICAL -- apply
+any change to both in the same commit. Their sha256 equality is the only thing
+standing between these two files and silent divergence.
+
 SELF-CONTAINED ON PURPOSE. This module shares no code with `s2/run_sweep.py` or
 `s2/leafcall.py` -- the harness that found the defect cannot also be the
 independent evidence that it is real. Only the standard library and `httpx` are

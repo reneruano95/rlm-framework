@@ -1,3 +1,4 @@
+from pathlib import Path
 import asyncio
 import sys
 import time
@@ -39,10 +40,15 @@ async def test_setvar_injects_a_32mb_payload_through_the_bridge(manager, cfg):
 
 async def test_sandbox_cannot_read_the_repo(manager, cfg):
     """D7: config.yaml and prompts/ must be denied by default."""
+    # Derived, not hardcoded: this must name THIS checkout's config.yaml, and a
+    # stale absolute path would make the test pass for the wrong reason (a
+    # missing file is also an OSError, so the confinement would go unchecked).
+    target = Path(__file__).resolve().parents[1] / "config.yaml"
+    assert target.exists(), "the confinement target must exist to be meaningful"
     async with manager.session("ep-4", cfg) as s:
         out = await s.exec_cell(
             "try:\n"
-            "    open(r'D:\\PROJECTS\\rlm-halo-framework\\config.yaml').read()\n"
+            f"    open(r'{target}').read()\n"
             "    print('READABLE')\n"
             "except OSError as e:\n"
             "    print('DENIED')\n")
