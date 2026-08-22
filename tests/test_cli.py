@@ -774,10 +774,11 @@ GATE_ARMS = "rlm,b1,b2,b3"
 
 
 def _bench_argv(config_file, tmp_path, *extra):
-    """Every path a bench run writes to, redirected into tmp: the ledger
-    (whose default is the pre-registered `milestones/s4/results/ledger.jsonl`) and the
-    report. A test that wrote either into the repo would be a test that
-    contaminated the artifact S4 is scored from."""
+    """Every path a bench run writes to, redirected into tmp: the ledger and the
+    report. Both now default under `runs/` rather than into `milestones/s4/`, so
+    a stray write is no longer an edit to S4's evidence -- but redirecting stays
+    correct regardless: a test that writes into the repo at all is a test that
+    leaves state behind."""
     argv = ["bench", "--config", str(config_file),
             "--ledger", str(tmp_path / "ledger.jsonl"),
             "--report", str(tmp_path / "RESULTS.md"), *extra]
