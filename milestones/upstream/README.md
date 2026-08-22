@@ -114,3 +114,29 @@ never been scored. On Vulkan the leaf answers 32/32 at concurrency 2, so the
 gate is scoreable for the first time — at the cost of S0's measured
 prefill difference between the backends (leaf 32K prefill 949.9 t/s ROCm vs
 836.2 Vulkan, -11.9%). That is now a trade with numbers on both sides.
+
+---
+
+## Rebuilding the b10488 binary (2026-08-22)
+
+`tools/llamacpp-rocm-b10488/` was **deleted on 2026-08-22**. It was 1.03 GiB,
+referenced by no config — the only mention anywhere was a comment at
+`config.yaml:89` — and it existed solely as the binary behind the
+`r13-b10488-*.jsonl` and `r14-b10488-*.jsonl` results in this directory. The
+results themselves are committed and untouched; only the binary is gone.
+
+If a maintainer asks for a re-run on b10488, rebuild it in two steps:
+
+1. Extract `D:/ARCHIVE/rlm-halo-framework/toolchain-zips/llama-b10488-bin-win-rocm-7.14-x64.zip`
+   (196,780,034 B, kept out of the tree, not in git). That gives 99 of the 354
+   files.
+2. Copy the **255-file AMD-wheel graft** from `tools/llamacpp-rocm/` — the
+   pinned b10375 build, which is live and carries the identical graft.
+   Verified 2026-08-22: the graft file *sets* are equal and spot-checked
+   sha256-identical. It is `hipblas.dll`, `hipblaslt/library/gfx1151/**`,
+   `rocblas.dll`, `rocsolver.dll` and `.kpack/blas_lib_gfx1151.kpack`.
+
+So the graft does **not** need re-deriving from AMD wheels; it is a copy from a
+build that is still on disk. That is what made the deletion cheap enough to
+take. If `tools/llamacpp-rocm/` is ever also removed, this recipe dies with it
+and the graft must come from the wheels again — do not delete both.

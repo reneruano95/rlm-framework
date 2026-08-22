@@ -6,50 +6,6 @@ The two moves: `rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/ upstream/` → `m
 
 Still refused, and still for the reason given: the **331-site `rlm/` prose sweep** (three classes of false positive, one of them a functional break in the sandbox destination strings). Stage 6 (spec-version event) and Stage 7 (six owner decisions) remain open.
 
-**Plus three refactors this plan did not scope** (§8a): `cli.py` 2,836 → 2,508 lines, with `launchlog.py`, `projection.py` and `escalation.py` extracted into modules that are now *covered by* §5's dependency-rule lint. Final state: **961/961 tests**, tree clean.
-
-### 8a. Why `cli.py` was not split into a package
-
-The obvious refactor — `rlm/cli/` with one module per verb — is **forbidden**, and it is worth writing down so nobody spends a day discovering it again.
-
-`tests/test_import_rules.py::test_lint_covers_every_isolated_module_that_exists` walks `rglob("*.py")` and exempts exactly eight filenames. Any new `cli/*.py` module would be non-exempt, would need C4 access, and so could not join `ISOLATED`. The list's own comment: *"spec-frozen at two modules (episode.py, cli.py) and widening it is the drift `rlm/episode.py`'s docstring forbids."*
-
-**`cli.py` is large by design.** The spec confines composition-root privilege to two files, and file size is the price. That is an invariant — unlike §0.1's verdict, which was cost misdescribed as impossibility.
-
-So the legitimate direction is the inverse: move *out* what does not need composition-root privilege and put it *under* the lint. That shrinks the root **and increases** checked surface; a package split would have shrunk both.
-
-| extracted | lines | why it qualified |
-|---|---|---|
-| `src/rlm/launchlog.py` | 130 | a file read, three regexes, dict arithmetic — answers §4's cache-type assertion *without* contacting a server |
-| `src/rlm/projection.py` | 165 | pure arithmetic. Also surfaced §8's **pre-registered** 60 h budget, which had been sitting at line 1480 of a 2,700-line file |
-| `src/rlm/escalation.py` | 130 | JSON + verdict inspection. The lint is load-bearing: a planner that could *ask a server* which cells to re-run would be choosing its own replicates |
-| `src/rlm/roottext.py` | 149 | the root turn's pure text shaping, split out of `rootclient.py` — see below |
-| `src/rlm/replay.py` | 239 | **I4 itself.** Rebuild an episode from the trace store alone — the property S3 passed on |
-| `src/rlm/export.py` | 143 | the parquet+blob bundle a foreign reader gets; must depend on the store and nothing else |
-
-`cli.py`: **2,836 → 2,221 (−22%)**. `rootclient.py`: 260 → 152.
-
-### The chain that mattered: `roottext.py` → `replay.py`
-
-`rlm.rootclient` is in the dependency rule's `FORBIDDEN_RLM` set, because `RootConversation` holds a `ServerClient`. So no lint-covered module could import it — and `history_message` and `extract_cell` were behind that wall. Replay needs both to re-derive an episode's message array, which meant **I4 could not be lint-enforced**: text had been welded to transport, and the cost landed on the one place in the tree where *"cannot consult a live system"* is the entire point.
-
-Splitting the six pure text functions out of `rootclient.py` unblocked it. `replay.py` now sits under the lint, so a re-derivation that tried to ask a server what the prompt was — checking the server against itself — is a test failure rather than a discovery.
-
-Two seams there look wrong and are not. The cut is at `_verify_online`, **not** at `cmd_replay`: `--online` builds a `ServerClient`, so the boundary the section structure suggests would have pulled an HTTP client into the module whose premise is having none. And `_first_difference` is 8 lines, not the ~950 a boundary search claimed — the orchestra banner below it opens with `# ====`, so a `# ---` search sails past it into the bench section.
-
-### What the checks caught, and what they missed
-
-The pre-wiring check aborts by deleting the new file, so a rejected extraction leaves no half-migration. It caught C4 wiring hidden inside an apparently coherent block (`BenchCtx`, `blocks_for`, `run_bench`), a lone `ConfigError`, and a bad boundary — `cli.py` untouched each time.
-
-It **missed** `from rlm.trace import ActionType`: those enums live in `rlm.errors`. The AST check proves names are *bound*, not that imports *resolve*. The check now also runs `python -c "import rlm.<mod>"` in a subprocess. Bind and resolve are different questions; both are cheap to ask.
-
-### Where `cli.py` stops
-
-2,221 lines, and roughly half is `ServerOrchestra` (271), `_bench` (235) and `bench_arm_runners` (172) — composition the spec pins to this file. `build_parser` binds the `cmd_*` handlers; the verb handlers own their server paths. That is the floor, not a pause.
-
-**The seam is the work, not the split.** The escalation banner-to-banner block reads as one unit and is not — a static undefined-name check over the extracted text returned `BenchCtx`, `blocks_for`, `run_bench`, the signature of C4 wiring. Cutting on the banner would have produced a module importing the composition root: a "lint-covered" module whose coverage meant nothing. The real seam is three lines above `async def run_escalation`.
-
-**Run that check before wiring, not after.** It now aborts by deleting the new file, so a rejected extraction leaves no half-migration. It caught two rounds on `escalation.py` with `cli.py` never touched. The `projection.py` extraction ran it afterwards and shipped an `ARM_ORDER` `NameError` to the suite — eleven failures that a five-second check would have prevented.
 **Goal (owner, 2026-08-22):** retire finished milestones · delete what is genuinely dead · navigability for S6. Disk reclaim explicitly **not** a goal.
 **Method:** nine read-only agents (seven area inventories, a layout proposal, a destruction audit). Findings marked **[V]** were re-verified in-session; **[R]** are agent-reported and cited but not re-measured.
 
@@ -149,7 +105,7 @@ Every stage leaves the repo working. Run the verification before proceeding.
 git status --porcelain
 uv run pytest -q                                  # record the green count
 uv run rlm validate --no-server-probe
-python -c "from rlm.config import load_config; load_config('config.yaml'); load_config('config-thinkon.yaml')"
+python -c "from pathlib import Path; from rlm.config import load_config; load_config(Path('config.yaml'))"
 ```
 Pick and run **three replay canaries** before anything moves: one pre-root-swap S1 episode carrying `prompts\root.v1.md`; one carrying `prompts\strat-aggregation.v1.md`; one of the 208 `dflash: true` episodes. All must exit 0.
 
@@ -207,8 +163,8 @@ These sit inside pre-registered gate text, which line 5's amendment rule makes v
 
 | # | Decision | Note |
 |---|---|---|
-| 1 | `tools/llamacpp-rocm-b10488/` — **1,108,556,858 B, the largest single reclaim** | Referenced by **no config**; the only mention anywhere is a *comment* at `config.yaml:89` **[V]**. It is the binary behind the committed `milestones/upstream/r13-b10488-*.jsonl` and `r14-b10488-*.jsonl` bug reports; deleting costs a re-extract **plus** an AMD-wheel re-graft to answer a maintainer question |
-| 2 | `config-thinkon.yaml` + `milestones/s1/run_thinking_ab.py` | Loads cleanly, but its root block predates the DFlash2 swap: MTP + `--spec-type draft-mtp` + `llamacpp-vulkan` against `config.yaml`'s DFlash2 + `draft-dflash` + `llamacpp-vulkan-dflash2`, ~8 further deltas. The driver's docstring asserts "differ in exactly one key (verified)" with **no runtime assertion**, and `assert_props` compares only `model_path`/`total_slots`/`n_ctx` — all identical. **A thinking A/B run today would attribute an entire serving-stack difference to one boolean.** Refresh, or retire both and close the question with `milestones/s2/ROOT-THINKING.md`. Either way, add the assertion |
+| 1 | `tools/llamacpp-rocm-b10488/` — **1,108,556,858 B, the largest single reclaim** | **DONE 2026-08-22 — deleted.** Referenced by **no config**; the only mention anywhere is a *comment* at `config.yaml:89` **[V]**. It is the binary behind the committed `milestones/upstream/r13-b10488-*.jsonl` and `r14-b10488-*.jsonl` bug reports; deleting costs a re-extract **plus** an AMD-wheel re-graft to answer a maintainer question |
+| 2 | `config-thinkon.yaml` + `milestones/s1/run_thinking_ab.py` | **DONE 2026-08-22 — retired.** Loads cleanly, but its root block predates the DFlash2 swap: MTP + `--spec-type draft-mtp` + `llamacpp-vulkan` against `config.yaml`'s DFlash2 + `draft-dflash` + `llamacpp-vulkan-dflash2`, ~8 further deltas. The driver's docstring asserts "differ in exactly one key (verified)" with **no runtime assertion**, and `assert_props` compares only `model_path`/`total_slots`/`n_ctx` — all identical. **A thinking A/B run today would attribute an entire serving-stack difference to one boolean.** Refresh, or retire both and close the question with `milestones/s2/ROOT-THINKING.md`. Either way, add the assertion |
 | 3 | `traces/rlm.duckdb` compaction (~203.5 MiB) | 814 of 1,634 blocks free. `VACUUM` is a **no-op** in DuckDB 1.5.5 — it needs `ATTACH` + `COPY FROM DATABASE` + swap, which changes the file identity of the I4 truth. Free blocks get reused, so this is a one-time tidy, not a leak. **Recommend deferring past S6** |
 | 4 | `prompts/strat-aggregation.v2.md:3` stale 1,024/768 comment | The loader strips the comment so it never reaches the model; the sha256 covers it anyway. Ship a v3, or accept it. **Do not silently edit v2** — it breaks byte-level comparability with frozen S4 run `1cbafb8f` |
 | 5 | `docs/research/2026-08-22-avo-arc-agi-3-dossier.md` + `docs/superpowers/specs/` | The only untracked paths in the tree. Coupled by `[R]` citations — commit together or not at all. Committing the design makes an S6 slice that `ARCHITECTURE.md` §9 marks "UNSCHEDULED. Do not build." look scheduled unless a status header travels with it |
@@ -225,3 +181,49 @@ These sit inside pre-registered gate text, which line 5's amendment rule makes v
 ## 4. Reclaim, for the record
 
 Disk was not a stated goal; these are recorded so the numbers exist. Stage 1: 81,439,500 B. Stage 2 (out of tree): 394,305,285 B. Stage 7 row 1: 911,776,824 B net — the biggest single win. Stage 7 row 3: 213,383,168 B, recommended deferred. **Ceiling 1.49 GiB** of the 3.64 GB untracked today; `tools/` would end at 1.20 GiB, all of it the three live builds.
+
+---
+
+**Plus six refactors this plan did not scope** (§8a): `cli.py` 2,836 → 2,221 lines and `rootclient.py` 260 → 152, with six modules extracted into the coverage of §5's dependency-rule lint. Final state: **964/964 tests**, tree clean.
+
+
+### 8a. Why `cli.py` was not split into a package
+
+The obvious refactor — `rlm/cli/` with one module per verb — is **forbidden**, and it is worth writing down so nobody spends a day discovering it again.
+
+`tests/test_import_rules.py::test_lint_covers_every_isolated_module_that_exists` walks `rglob("*.py")` and exempts exactly eight filenames. Any new `cli/*.py` module would be non-exempt, would need C4 access, and so could not join `ISOLATED`. The list's own comment: *"spec-frozen at two modules (episode.py, cli.py) and widening it is the drift `rlm/episode.py`'s docstring forbids."*
+
+**`cli.py` is large by design.** The spec confines composition-root privilege to two files, and file size is the price. That is an invariant — unlike §0.1's verdict, which was cost misdescribed as impossibility.
+
+So the legitimate direction is the inverse: move *out* what does not need composition-root privilege and put it *under* the lint. That shrinks the root **and increases** checked surface; a package split would have shrunk both.
+
+| extracted | lines | why it qualified |
+|---|---|---|
+| `src/rlm/launchlog.py` | 130 | a file read, three regexes, dict arithmetic — answers §4's cache-type assertion *without* contacting a server |
+| `src/rlm/projection.py` | 165 | pure arithmetic. Also surfaced §8's **pre-registered** 60 h budget, which had been sitting at line 1480 of a 2,700-line file |
+| `src/rlm/escalation.py` | 130 | JSON + verdict inspection. The lint is load-bearing: a planner that could *ask a server* which cells to re-run would be choosing its own replicates |
+| `src/rlm/roottext.py` | 149 | the root turn's pure text shaping, split out of `rootclient.py` — see below |
+| `src/rlm/replay.py` | 239 | **I4 itself.** Rebuild an episode from the trace store alone — the property S3 passed on |
+| `src/rlm/export.py` | 143 | the parquet+blob bundle a foreign reader gets; must depend on the store and nothing else |
+
+`cli.py`: **2,836 → 2,221 (−22%)**. `rootclient.py`: 260 → 152.
+
+### The chain that mattered: `roottext.py` → `replay.py`
+
+`rlm.rootclient` is in the dependency rule's `FORBIDDEN_RLM` set, because `RootConversation` holds a `ServerClient`. So no lint-covered module could import it — and `history_message` and `extract_cell` were behind that wall. Replay needs both to re-derive an episode's message array, which meant **I4 could not be lint-enforced**: text had been welded to transport, and the cost landed on the one place in the tree where *"cannot consult a live system"* is the entire point.
+
+Splitting the six pure text functions out of `rootclient.py` unblocked it. `replay.py` now sits under the lint, so a re-derivation that tried to ask a server what the prompt was — checking the server against itself — is a test failure rather than a discovery.
+
+Two seams there look wrong and are not. The cut is at `_verify_online`, **not** at `cmd_replay`: `--online` builds a `ServerClient`, so the boundary the section structure suggests would have pulled an HTTP client into the module whose premise is having none. And `_first_difference` is 8 lines, not the ~950 a boundary search claimed — the orchestra banner below it opens with `# ====`, so a `# ---` search sails past it into the bench section.
+
+### What the checks caught, and what they missed
+
+The pre-wiring check aborts by deleting the new file, so a rejected extraction leaves no half-migration. It caught C4 wiring hidden inside an apparently coherent block (`BenchCtx`, `blocks_for`, `run_bench`), a lone `ConfigError`, and a bad boundary — `cli.py` untouched each time.
+
+It **missed** `from rlm.trace import ActionType`: those enums live in `rlm.errors`. The AST check proves names are *bound*, not that imports *resolve*. The check now also runs `python -c "import rlm.<mod>"` in a subprocess. Bind and resolve are different questions; both are cheap to ask.
+
+**Run it before wiring, not after.** The `projection.py` extraction ran it afterwards and shipped an `ARM_ORDER` `NameError` to the suite — eleven failures that five seconds would have prevented.
+
+### Where `cli.py` stops
+
+2,221 lines, and roughly half is `ServerOrchestra` (271), `_bench` (235) and `bench_arm_runners` (172) — composition the spec pins to this file. `build_parser` binds the `cmd_*` handlers; the verb handlers own their server paths. That is the floor, not a pause.

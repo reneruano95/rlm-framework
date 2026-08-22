@@ -117,3 +117,41 @@ root-as-programmer on the *old* root. Doing both in one pass answers both.
 Until then `enable_thinking: false` stands for the root, recorded here as
 **measured-and-contested** rather than inherited — which is already a better
 position than it was in this morning.
+
+---
+
+## Closed 2026-08-22 — the A/B harness is retired, the question is not
+
+`config-thinkon.yaml` and `milestones/s1/run_thinking_ab.py` were **deleted on
+2026-08-22**. They are not retired because the question above was answered; it
+was not. They are retired because **the harness could no longer answer it
+honestly.**
+
+`run_thinking_ab.py:47` ran two arms, `config.yaml` against
+`config-thinkon.yaml`, and its docstring asserted the two configs "differ in
+exactly one key (verified)". There was no runtime assertion behind the word.
+Meanwhile `config-thinkon.yaml`'s root block had gone stale at the DFlash2 swap
+(2026-08-19) and never caught up:
+
+| | `config.yaml` | `config-thinkon.yaml` |
+|---|---|---|
+| drafter | DFlash2, `--spec-type draft-dflash`, n-max 4 | MTP, `--spec-type draft-mtp`, n-max 2 |
+| backend | `tools/llamacpp-vulkan-dflash2` | `tools/llamacpp-vulkan` |
+
+plus roughly eight further deltas. `rlm/episode.py`'s §4 `/props` handshake
+could not catch it either: `assert_props` compares `model_path`, `total_slots`
+and per-slot `n_ctx`, and all three were identical.
+
+**So a thinking A/B run on 2026-08-22 would have attributed an entire
+serving-stack difference to one boolean** — and reported it as a measurement of
+thinking. A harness that can produce a confidently wrong number is worse than
+no harness, because the absence of one is at least visible.
+
+What this file's §1–§3 measured still stands. What it says is owed still stands:
+a full episode on the S1 fixtures with thinking on and off, scored on task
+success and wall clock together, folded into the S5 root-swap re-run. Whoever
+does it should build the arm from **one** config with the flag toggled
+programmatically, or keep two and assert at runtime that they differ in exactly
+the one key — the mistake above is what a second hand-maintained config costs.
+
+`enable_thinking: false` stands for the root, still **measured-and-contested**.
