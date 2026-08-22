@@ -13,8 +13,9 @@ from pathlib import Path
 import pytest
 
 from bench import corpus as bc
-from bench.vocab import SYL_A, SYL_B, SYL_C, assert_disjoint_from_fixtures
-from s1.make_fixtures import approx_tokens
+from bench.build import assert_name_space_disjoint
+from bench.vocab import SYL_A, SYL_B, SYL_C
+from bench.tokens import approx_tokens
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -30,9 +31,14 @@ def built():
 def test_the_name_space_is_disjoint_from_every_fixture_pool():
     """§8: S2's gates run on "dedicated non-benchmark fixtures so S2 cannot
     overfit the benchmark it is authoring". That holds only if the names cannot
-    collide. This ran at import and found four collisions on its first run --
-    keep it as a test too, because the pools are editable."""
-    assert_disjoint_from_fixtures()
+    collide. It found four collisions on its first run (eph, lorn, ryn, keld).
+
+    It used to run at import of `bench/vocab.py`; on 2026-08-22 it moved to the
+    BUILD path (`bench/build.py`), because the failure it prevents is a rebuilt
+    benchmark and firing on every import except at the build was the wrong
+    placement. Kept as a test as well, because the pools are editable and a
+    build is rare."""
+    assert_name_space_disjoint()
 
 
 def test_the_disposition_pairs_are_exact_word_permutations():

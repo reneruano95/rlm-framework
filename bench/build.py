@@ -31,7 +31,8 @@ from pathlib import Path
 
 from bench import corpus as bc
 from bench.manifest import BenchmarkManifest, TaskEntry
-from s1.make_fixtures import approx_tokens
+from bench.tokens import approx_tokens
+from bench.vocab import SYL_A, SYL_B, SYL_C
 
 REPO = Path(__file__).resolve().parents[1]
 CORPORA = REPO / "bench" / "corpora"
@@ -229,6 +230,43 @@ def build_code_qa(count, counter_name) -> list[TaskEntry]:
     return out
 
 
+def assert_name_space_disjoint() -> None:
+    """The benchmark's coined-name space shares no syllable with s1's or s2's.
+
+    §8 requires S2's gates to run on fixtures the benchmark cannot overfit. That
+    is only true if the two name spaces cannot collide: a benchmark answer that
+    also appears in an s2 fixture would let a leak, a memorisation, or a stale
+    slot score as a PASS.
+
+    Runs HERE, on the build path, because the failure this prevents is a rebuilt
+    benchmark -- and because a build that refuses to emit is harder to route
+    around than an AssertionError in a library.
+
+    It imports the fixture modules to read their REAL pools. A snapshot copied
+    into `bench/` would assert a copy against itself and see nothing, which is
+    why `bench/tokens.py` copies the token helpers but not these. This local
+    import is the only thing in `bench/` that touches `milestones/`, and it
+    happens when a corpus is being generated, not when the package is imported.
+    It caught four real collisions (eph, lorn, ryn, keld) on its first run.
+    """
+    import s1.make_fixtures as s1m
+    import s2.make_sweep_fixtures as s2m
+
+    ours = {"A": set(SYL_A), "B": set(SYL_B), "C": set(SYL_C)}
+    for mod, label in ((s1m, "s1"), (s2m, "s2-sweep")):
+        theirs = {"A": set(mod._SYL_A), "B": set(mod._SYL_B), "C": set(mod._SYL_C)}
+        # Compare every position against every position: a syllable reused in a
+        # different slot still produces colliding names.
+        for ok, ov in ours.items():
+            for tk, tv in theirs.items():
+                shared = ov & tv
+                if shared:
+                    raise AssertionError(
+                        f"benchmark SYL_{ok} shares {sorted(shared)} with "
+                        f"{label} _SYL_{tk}: the benchmark corpus would sit "
+                        f"inside a fixture's name space, which §8 forbids")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--leaf-port", type=int, default=None,
@@ -236,8 +274,11 @@ def main() -> int:
                          "for a build that may be frozen")
     a = ap.parse_args()
 
+    # Before anything is generated: §8's name-space disjointness.
+    assert_name_space_disjoint()
+
     if a.leaf_port:
-        from s1.make_fixtures import leaf_counter
+        from bench.tokens import leaf_counter
         count, counter_name = leaf_counter(a.leaf_port, 120), f"leaf:/tokenize"
     else:
         count, counter_name = approx_tokens, "approx-offline"

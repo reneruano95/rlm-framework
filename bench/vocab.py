@@ -17,8 +17,16 @@ syllable triples, one per corpus family -- so this is the fourth:
 **Do not import a name pool from s1 or s2 here.** Importing the fit and
 placement helpers is right and is done elsewhere in this package; importing
 `_org`/`_coined` would put the benchmark inside the fixture namespace, which is
-the precise contamination §8 forbids. `assert_disjoint_from_fixtures()` checks
-that structurally at import time rather than trusting this comment.
+the precise contamination §8 forbids.
+
+The structural check lives in `bench/build.py` as `assert_name_space_disjoint`,
+and it runs on the BUILD path -- not at import of this module, where it used to
+sit. Two reasons. Its own purpose is that a collision must not be discovered
+late, and the late moment is a build; firing on every import by every consumer
+except at the build was the wrong placement. And an AssertionError raised inside
+a leaf library is something a maintainer can be tempted to route around, whereas
+a build that refuses to emit a corpus is not. Moving it also means THIS module
+imports nothing from `milestones/`.
 """
 from __future__ import annotations
 
@@ -26,10 +34,11 @@ import random
 import re
 
 __all__ = ["SYL_A", "SYL_B", "SYL_C", "BODIES", "coined_name", "organisation",
-           "assert_disjoint_from_fixtures", "harvest_names"]
+           "harvest_names"]
 
 # Chosen so that no syllable is shared with either existing pool. Checked, not
-# asserted by eye: assert_disjoint_from_fixtures() below re-derives it.
+# asserted by eye: bench/build.py's assert_name_space_disjoint re-derives it
+# against the real fixture modules on every build.
 # `eph`, `lorn` and `ryn` were in the first draft of this list and all three
 # collide with s1's pool; `keld` in SYL_B collided too. The assertion below
 # found them on its first run, which is the entire reason it runs at import
@@ -67,32 +76,3 @@ def harvest_names(text: str) -> set[str]:
     structural syllable check cannot see a UUID that happens to collide, and a
     collision there would be far more damaging than a shared syllable."""
     return {m.lower() for m in _ID_RE.findall(text)}
-
-
-def assert_disjoint_from_fixtures() -> None:
-    """Structural check: this pool shares no syllable with s1's or s2's.
-
-    Run at import of the generator rather than in a test, because the cost of
-    discovering it late is a rebuilt benchmark. It imports the fixture modules
-    only to READ their pools for comparison -- the one legitimate reason to
-    touch them from here.
-    """
-    import s1.make_fixtures as s1m
-    import s2.make_sweep_fixtures as s2m
-
-    ours = {"A": set(SYL_A), "B": set(SYL_B), "C": set(SYL_C)}
-    for mod, label in ((s1m, "s1"), (s2m, "s2-sweep")):
-        theirs = {"A": set(mod._SYL_A), "B": set(mod._SYL_B), "C": set(mod._SYL_C)}
-        # Compare every position against every position: a syllable reused in a
-        # different slot still produces colliding names.
-        for ok, ov in ours.items():
-            for tk, tv in theirs.items():
-                shared = ov & tv
-                if shared:
-                    raise AssertionError(
-                        f"benchmark SYL_{ok} shares {sorted(shared)} with "
-                        f"{label} _SYL_{tk}: the benchmark corpus would sit "
-                        f"inside a fixture's name space, which §8 forbids")
-
-
-assert_disjoint_from_fixtures()

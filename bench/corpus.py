@@ -34,7 +34,7 @@ inside `max_subcalls: 926`. Both bounds are asserted at build time rather than
 checked later, because a corpus one window over the line makes every episode
 using it a `budget_kill`, which §8 scores as a FAILURE for every arm.
 
-Token counting is OFFLINE by default (`s1.make_fixtures.approx_tokens`, the
+Token counting is OFFLINE by default (`bench.tokens.approx_tokens`, the
 repo's one stated 4-chars-per-token proxy) so a corpus can be built with no GPU.
 The proxy is not the truth: chars-per-token is vocabulary-specific (4.058 on
 s1's pool, 3.765 on s2's), so the manifest stamps which counter was used and
