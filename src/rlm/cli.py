@@ -1284,7 +1284,11 @@ BENCH_MANIFEST_PATH = REPO_ROOT / "bench" / "manifest.json"
 #: Where the generated half of the S4 report lands. `write_report` preserves
 #: everything below `verdict.NARRATIVE_MARKER`, so re-running a bench run
 #: regenerates the tables and never destroys the findings.
-DEFAULT_REPORT_PATH = REPO_ROOT / "milestones" / "s4" / "RESULTS.md"
+#: Same reasoning as `LEDGER_PATH`. Pointing the default report at S4's
+#: RESULTS.md meant the next `rlm bench` could regenerate over it -- and
+#: `verdict.regenerate()` guards on `path.exists()`, so a report whose
+#: hand-written half sits below NARRATIVE_MARKER loses it silently.
+DEFAULT_REPORT_PATH = REPO_ROOT / "runs" / "RESULTS.md"
 
 # §8's projection constants and the --smoke calibration table live in
 # `rlm/projection.py`: pure arithmetic, no server contact, so they sit under

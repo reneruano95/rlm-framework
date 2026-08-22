@@ -24,6 +24,10 @@ from s2.run_refusal_ab import (
 )
 from s2.run_sweep import CONFABULATION, CORRECT, FALSE_POSITIVE, MALFORMED, MISS
 
+# S2's refusal A/B scorer. Marked `research`: it pins how a past gate was measured, not
+# behaviour `rlm` ships. Out of the default run; `pytest -m research` runs it.
+pytestmark = pytest.mark.research
+
 KEY = "8243843a-ecc2-4f29-9122-60b53028b36b"
 CHUNK = (f"[custody note] The archive key issued to the Fenngate Ledger is {KEY}. "
          "It was cut once, for that holder only.")

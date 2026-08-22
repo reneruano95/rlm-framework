@@ -106,7 +106,13 @@ LEDGER_FIELDS = ("run_id", "block", "task_id", "seed", "arm", "episode_id",
                  "outcome", "reason", "wall_s", "relaunch_s", "superseded_by",
                  "ts")
 
-LEDGER_PATH = REPO_ROOT / "milestones" / "s4" / "results" / "ledger.jsonl"
+#: Where a bench run writes by default. OUTSIDE `milestones/`, deliberately:
+#: `milestones/` is the evidence archive for gates that have already been
+#: taken, and a product whose default write target is last run's finished
+#: ledger will append a new grid into a closed result. S4's own ledger stays
+#: at `milestones/s4/results/ledger.jsonl` as evidence; resume it explicitly
+#: with `--ledger` if that is what you mean.
+LEDGER_PATH = REPO_ROOT / "runs" / "ledger.jsonl"
 
 ArmRunner = Callable[..., Awaitable[Any]]
 

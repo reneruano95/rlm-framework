@@ -36,3 +36,8 @@ upstream/__pycache__/
 .venv/
 .pytest_cache/
 .hypothesis/
+
+# Bench run outputs. Runtime state -- promoted to milestones/<gate>/ when a
+# run becomes evidence. The README is tracked; the outputs are not.
+runs/*
+!runs/README.md

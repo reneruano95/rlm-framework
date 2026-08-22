@@ -878,10 +878,26 @@ def test_bench_imports_neither_c4_nor_the_benchmark_package():
     assert not any(m == "bench" or m.startswith("bench.") for m in runtime)
 
 
-def test_the_ledger_default_path_is_the_pre_registered_one():
-    from rlm.bench import LEDGER_PATH
+def test_default_outputs_are_not_inside_the_evidence_archive():
+    """The product must not write into `milestones/`.
 
-    assert LEDGER_PATH.parts[-3:] == ("s4", "results", "ledger.jsonl")
+    That directory holds gate evidence -- results already published and cited
+    by path from ARCHITECTURE.md. A default that lands there means the next
+    `rlm bench` appends a new grid into a closed ledger, and regenerates a
+    report over one whose hand-written half lives below NARRATIVE_MARKER.
+
+    This replaced an assertion that the path was `s4/results/ledger.jsonl`
+    and called it "pre-registered". It is not: ARCHITECTURE.md names neither
+    path anywhere. It was a convention, and it pointed the product at the
+    archive."""
+    from rlm.bench import LEDGER_PATH
+    from rlm.cli import DEFAULT_REPORT_PATH
+
+    for name, path in (("LEDGER_PATH", LEDGER_PATH),
+                       ("DEFAULT_REPORT_PATH", DEFAULT_REPORT_PATH)):
+        assert "milestones" not in path.parts, (
+            f"{name} defaults into the evidence archive: {path}")
+        assert path.parts[-2] == "runs", f"{name} is not under runs/: {path}"
 
 
 # --------------------------------------------------------------------------- #

@@ -1,5 +1,10 @@
+import pytest
 import json
 from pathlib import Path
+
+# S1's fixture builders. Marked `research`: it pins how a past gate was measured, not
+# behaviour `rlm` ships. Out of the default run; `pytest -m research` runs it.
+pytestmark = pytest.mark.research
 
 S1 = Path(__file__).resolve().parents[1] / "milestones" / "s1"
 

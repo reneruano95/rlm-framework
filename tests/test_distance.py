@@ -36,6 +36,10 @@ from s2.run_distance import (
 )
 from s2.run_sweep import CORRECT, FALSE_POSITIVE
 
+# S2's instruction-decay experiment. Marked `research`: it pins how a past gate was measured, not
+# behaviour `rlm` ships. Out of the default run; `pytest -m research` runs it.
+pytestmark = pytest.mark.research
+
 PREFIX = "RULES: answer only from the excerpt."
 
 

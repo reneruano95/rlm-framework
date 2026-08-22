@@ -20,6 +20,10 @@ from s2 import run_sweep as rs
 from s2 import run_ub_experiment as ub
 from s2.leafcall import PinnedLeafCaller
 
+# S2's chunk-size sweep harness and its classifier. Marked `research`: it pins how a past gate was measured, not
+# behaviour `rlm` ships. Out of the default run; `pytest -m research` runs it.
+pytestmark = pytest.mark.research
+
 # --------------------------------------------------------------------------- #
 # fixtures: determinism and the claims build_cell asserts
 # --------------------------------------------------------------------------- #
