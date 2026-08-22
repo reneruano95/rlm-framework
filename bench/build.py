@@ -185,7 +185,13 @@ def build_code_qa(count, counter_name) -> list[TaskEntry]:
     """
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO,
                             capture_output=True, text=True).stdout.strip()
-    files = sorted(p for p in (REPO / "rlm").rglob("*.py")
+    # The package moved to `src/rlm/` on 2026-08-22. The FROZEN v1 corpus and
+    # its seven answers predate that move and spell the paths `rlm/<mod>.py`;
+    # a rebuild here would emit `src/rlm/<mod>.py` and change every answer.
+    # That is not a live hazard -- `benchmark.manifest_sha256` pins the frozen
+    # manifest and §8's comparability rule forbids re-freezing v1 -- but any
+    # future corpus MUST be a new benchmark version, never a rebuild of v1.
+    files = sorted(p for p in (REPO / "src" / "rlm").rglob("*.py")
                    if p.name != "__init__.py")
     bundle_parts, defs = [], {}
     for p in files:

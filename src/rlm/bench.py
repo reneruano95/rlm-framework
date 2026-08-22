@@ -60,7 +60,7 @@ if TYPE_CHECKING:                       # pragma: no cover - typing only
 
     from rlm.episode import Task
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: §8's pre-registered within-block order. RLM and B2 run on the resident
 #: topology; B1 and B3 share the one `bench_leaf` relaunch, on their own slots

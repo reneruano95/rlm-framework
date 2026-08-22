@@ -864,7 +864,7 @@ def test_bench_imports_neither_c4_nor_the_benchmark_package():
     `tests/test_import_rules.py` lists bench.py as isolated). And `bench/` is
     not in the shipped wheel (`pyproject.toml` packages = ["rlm"]), so a
     runtime import of the manifest module would break the installed package."""
-    tree = ast.parse((REPO_ROOT / "rlm" / "bench.py").read_text(encoding="utf-8"))
+    tree = ast.parse((REPO_ROOT / "src" / "rlm" / "bench.py").read_text(encoding="utf-8"))
     runtime: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.If) and getattr(node.test, "id", "") == "TYPE_CHECKING":

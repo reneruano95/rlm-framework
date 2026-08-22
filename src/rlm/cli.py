@@ -110,7 +110,7 @@ from rlm.verdict import (
     write_report,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXIT_OK = 0
 EXIT_REFUSED = 2       # config/handshake/invariant refusal
@@ -2786,7 +2786,7 @@ def build_parser() -> argparse.ArgumentParser:
     b = common(sub.add_parser("bench", help="run §8's benchmark grid and score it"))
     b.add_argument("--arm", default=None,
                    help="comma-separated subset of rlm,rlm-restricted,b1,b2,b3 (default: all "
-                        "four, always in §8's pre-registered within-block order)")
+                        "five, always in §8's pre-registered within-block order)")
     b.add_argument("--seeds", default=None,
                    help="comma-separated base seeds (default: benchmark.seeds)")
     b.add_argument("--tasks", default=None,

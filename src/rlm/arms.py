@@ -529,7 +529,7 @@ class ArmEpisode:
         scoring query needs and the schema has no column for.
 
         Shaped to match `_EpisodeRun._snapshot` key for key, so one query reads
-        prompt hashes and task identity across all four arms. `bench` is the
+        prompt hashes and task identity across all five arms. `bench` is the
         arm's own dict: the identity Task 9 supplies (arm/run_id/seed/block)
         plus whatever the arm records about how it ran (B1's truncation).
         """

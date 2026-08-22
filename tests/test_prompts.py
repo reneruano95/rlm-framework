@@ -119,7 +119,7 @@ def _child_llm_query_signature():
     (os.dup2 on fds 0/1, an event loop, an audit hook) in the test process.
     """
     import ast
-    src = (Path(__file__).resolve().parents[1] / "rlm" / "sandbox" / "child.py")
+    src = (Path(__file__).resolve().parents[1] / "src" / "rlm" / "sandbox" / "child.py")
     tree = ast.parse(src.read_text(encoding="utf-8"))
     fn = next(n for n in tree.body
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_llm_query_template")

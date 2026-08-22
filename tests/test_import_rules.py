@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-RLM = Path(__file__).resolve().parents[1] / "rlm"
+RLM = Path(__file__).resolve().parents[1] / "src" / "rlm"
 
 # modules that must never reach a model server, directly or transitively
 ISOLATED = [
