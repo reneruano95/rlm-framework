@@ -64,6 +64,12 @@ ISOLATED = [
     # server -- which is the whole point, since /props cannot report cache
     # types -- so the lint is what keeps it that way.
     "launchlog.py",
+    # §8's wall-clock projection model + the --smoke calibration table
+    # (extracted from cli.py, 2026-08-22). Pure arithmetic over manifest entries
+    # and ledger records. It must never learn to ask a server what something
+    # cost -- a projection that can measure is no longer a projection, and §8
+    # prints the two side by side precisely to keep them apart.
+    "projection.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
