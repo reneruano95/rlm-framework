@@ -112,10 +112,12 @@ from rlm.verdict import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXIT_OK = 0
-EXIT_REFUSED = 2       # config/handshake/invariant refusal
-EXIT_MISMATCH = 3      # replay found a discrepancy
-EXIT_FAILED = 1        # the command itself failed to complete
+# The exit contract lives in `rlm/errors.py` -- `rlm/export.py` and
+# `rlm/replay.py` return these too, and importing them back out of the
+# composition root would be a cycle. Re-exported: tests read `cli.EXIT_*`.
+from rlm.errors import (  # noqa: E402,F401
+    EXIT_FAILED, EXIT_MISMATCH, EXIT_OK, EXIT_REFUSED,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -2093,114 +2095,10 @@ def cmd_bench(args) -> int:
 # =========================================================================== #
 
 
-def _export_filter(ident: str, *, by_run: bool) -> str:
-    """The SQL predicate, with `ident` interpolated -- which is safe ONLY
-    because every caller validated it as a UUID first.
-
-    `trace.export_bundle`'s own docstring flags this: DuckDB does not accept a
-    bound parameter in a COPY's FROM clause, so the filter is a string. A
-    canonical `str(uuid.UUID(...))` cannot carry a quote, a comment or a
-    semicolon, which is what makes the interpolation a non-issue rather than a
-    caveat to remember.
-    """
-    if by_run:
-        return f"json_extract_string(config_snapshot, '$.bench.run_id') = '{ident}'"
-    return f"episode_id = '{ident}'"
-
-
-async def _export(cfg: Config, ident: str, dest: Path, out, err) -> int:
-    trace = TraceLogger(cfg.trace.db_path, cfg.trace.blob_root)
-    try:
-        await trace.start()
-    except (duckdb.Error, OSError) as exc:
-        print(f"refused: cannot open the trace store at {cfg.trace.db_path} "
-              f"({exc}). `rlm export` reads a CLOSED store: on Windows DuckDB "
-              f"excludes every other connection from a file its writer holds "
-              f"open, so this means the run is still live. Let it finish and "
-              f"export then — a bundle taken from a half-written store is a "
-              f"bundle of a different run.", file=err)
-        return EXIT_REFUSED
-    try:
-        con = trace.monitor()
-        sql = ("SELECT CAST(episode_id AS VARCHAR), CAST(config_snapshot AS VARCHAR) "
-               "FROM episodes WHERE {} ORDER BY started_at, episode_id")
-        rows = con.execute(
-            sql.format("json_extract_string(config_snapshot, '$.bench.run_id') = ?"),
-            [ident]).fetchall()
-        by_run = bool(rows)
-        if not rows:
-            # An episode_id, then. Tried SECOND on purpose: a run_id is what an
-            # operator has after `rlm bench`, and the two id spaces are both
-            # UUIDs, so the order decides which one wins a (vanishingly
-            # unlikely) collision. The run is the more useful answer.
-            rows = con.execute(sql.format("CAST(episode_id AS VARCHAR) = ?"),
-                                [ident]).fetchall()
-        if not rows:
-            print(f"nothing to export: no episode and no bench run in "
-                  f"{cfg.trace.db_path} matches {ident}", file=err)
-            return EXIT_REFUSED
-
-        episode_ids = [str(r[0]) for r in rows]
-        dest.mkdir(parents=True, exist_ok=True)
-        where = _export_filter(ident, by_run=by_run)
-        cur = con.cursor()
-        try:
-            # The two row tables, filtered, ONCE. `export_bundle` is not reused
-            # here: its blob half globs exactly one episode directory, which
-            # cannot express "this run's 360 episodes", and globbing `*`
-            # instead would drag in every other run on disk.
-            cur.execute(
-                f"COPY (SELECT * FROM episodes WHERE {where}) "
-                f"TO '{(dest / 'episodes.parquet').as_posix()}' "
-                f"(FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 3)")
-            cur.execute(
-                f"COPY (SELECT s.* FROM steps s JOIN episodes e USING (episode_id) "
-                f"WHERE {where}) "
-                f"TO '{(dest / 'steps.parquet').as_posix()}' "
-                f"(FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 3)")
-        finally:
-            cur.close()
-
-        # The blobs, as DIRECTORIES rather than a parquet BLOB column: the
-        # `*_ref` values in steps.parquet are paths relative to `blob_root`, so
-        # copying each episode's directory under `<dest>/blobs/` keeps every
-        # reference resolvable with no join and no decoder. Per episode, so the
-        # cost is this run's blobs and not the whole store's.
-        blob_root = Path(cfg.trace.blob_root)
-        copied = 0
-        for episode_id in episode_ids:
-            source = blob_root / episode_id
-            if not source.is_dir():
-                continue
-            target = dest / "blobs" / episode_id
-            if target.exists():
-                shutil.rmtree(target)
-            shutil.copytree(source, target)
-            copied += 1
-
-        digest = hashlib.sha256()
-        for _episode_id, snapshot in sorted((str(r[0]), r[1] or "") for r in rows):
-            digest.update(snapshot.encode("utf-8", "replace"))
-        (dest / "bundle-manifest.json").write_text(json.dumps({
-            "run_id": ident if by_run else None,
-            "resolved_by": "run_id" if by_run else "episode_id",
-            "episode_ids": episode_ids,
-            "n_episodes": len(episode_ids),
-            "blob_dirs": copied,
-            "config_snapshot_sha256": digest.hexdigest(),
-            "source_db": str(cfg.trace.db_path),
-            "exported_at": dt.datetime.now(dt.timezone.utc).isoformat(
-                timespec="seconds"),
-            "layout": ("episodes.parquet + steps.parquet (both filtered to this "
-                       "bundle) and blobs/<episode_id>/<file>, where every "
-                       "steps.*_ref value is a path relative to blobs/"),
-        }, indent=2) + "\n", encoding="utf-8", newline="\n")
-        print(f"exported {len(episode_ids)} episode(s) "
-              f"({'run ' + ident if by_run else 'episode ' + ident}) to {dest}",
-              file=out)
-        return EXIT_OK
-    finally:
-        await trace.aclose()
+# The bundle builder lives in `rlm/export.py`: it must depend on the trace
+# store and nothing else, so it sits under §5's dependency-rule lint. An
+# export that needed a live server would be one nobody else could reproduce.
+from rlm.export import _export, _export_filter  # noqa: E402
 
 
 def cmd_export(args) -> int:

@@ -90,6 +90,12 @@ ISOLATED = [
     # is the gate that claim rests on. `cmd_replay`/`_verify_online` keep the
     # --online path in cli.py, which is why they are not here.
     "replay.py",
+    # `rlm export`'s bundle builder (extracted from cli.py, 2026-08-22). Same
+    # family as replay.py: the parquet+blob bundle is what a FOREIGN reader uses
+    # to check a published number, so it must depend on the trace store and
+    # nothing else. An export that needed a running server would be one nobody
+    # else could reproduce.
+    "export.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",

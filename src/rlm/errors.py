@@ -4,6 +4,18 @@ from __future__ import annotations
 from enum import StrEnum
 
 
+# --------------------------------------------------------------------------- #
+# the CLI's exit contract
+# --------------------------------------------------------------------------- #
+# Here rather than in `rlm/cli.py` because `rlm/export.py` and `rlm/replay.py`
+# return them too, and importing them back out of the composition root would be
+# a cycle. This module imports nothing from rlm, so everything may have them.
+EXIT_OK = 0
+EXIT_FAILED = 1        # the command itself failed to complete
+EXIT_REFUSED = 2       # config/handshake/invariant refusal
+EXIT_MISMATCH = 3      # replay found a discrepancy
+
+
 class Outcome(StrEnum):
     """episodes.outcome (spec §6)."""
 
