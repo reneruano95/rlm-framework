@@ -83,6 +83,13 @@ ISOLATED = [
     # be lint-covered while `history_message` and `extract_cell` sat behind an
     # HTTP client. Text has no business importing transport; the lint says so now.
     "roottext.py",
+    # I4 in code: rebuild an episode from the trace store ALONE (extracted from
+    # cli.py, 2026-08-22). This is the entry that most needs the rule. A
+    # re-derivation able to ask a server what the prompt was would be checking
+    # the server against itself, and S3 -- 12/12 with the lifecycle log deleted --
+    # is the gate that claim rests on. `cmd_replay`/`_verify_online` keep the
+    # --online path in cli.py, which is why they are not here.
+    "replay.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
