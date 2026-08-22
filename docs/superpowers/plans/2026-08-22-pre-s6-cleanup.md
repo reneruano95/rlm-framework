@@ -5,6 +5,28 @@
 The two moves: `rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/ upstream/` → `milestones/`. The second **reverses §0.1's verdict below**, which is left in place as the record of a conclusion that was wrong — see §0.1a. Top level went from 14 directories to 8. Everything temporary is now deleted rather than tracked: `sandbox_bootstrap/`, `**/__pycache__/`, `.pytest_cache/`, `.hypothesis/`, `milestones/s3/results/store/`.
 
 Still refused, and still for the reason given: the **331-site `rlm/` prose sweep** (three classes of false positive, one of them a functional break in the sandbox destination strings). Stage 6 (spec-version event) and Stage 7 (six owner decisions) remain open.
+
+**Plus three refactors this plan did not scope** (§8a): `cli.py` 2,836 → 2,508 lines, with `launchlog.py`, `projection.py` and `escalation.py` extracted into modules that are now *covered by* §5's dependency-rule lint. Final state: **961/961 tests**, tree clean.
+
+### 8a. Why `cli.py` was not split into a package
+
+The obvious refactor — `rlm/cli/` with one module per verb — is **forbidden**, and it is worth writing down so nobody spends a day discovering it again.
+
+`tests/test_import_rules.py::test_lint_covers_every_isolated_module_that_exists` walks `rglob("*.py")` and exempts exactly eight filenames. Any new `cli/*.py` module would be non-exempt, would need C4 access, and so could not join `ISOLATED`. The list's own comment: *"spec-frozen at two modules (episode.py, cli.py) and widening it is the drift `rlm/episode.py`'s docstring forbids."*
+
+**`cli.py` is large by design.** The spec confines composition-root privilege to two files, and file size is the price. That is an invariant — unlike §0.1's verdict, which was cost misdescribed as impossibility.
+
+So the legitimate direction is the inverse: move *out* what does not need composition-root privilege and put it *under* the lint. That shrinks the root **and increases** checked surface; a package split would have shrunk both.
+
+| extracted | lines | why it qualified |
+|---|---|---|
+| `src/rlm/launchlog.py` | 130 | a file read, three regexes, dict arithmetic — answers §4's cache-type assertion *without* contacting a server |
+| `src/rlm/projection.py` | 165 | pure arithmetic. Also surfaced §8's **pre-registered** 60 h budget, which had been sitting at line 1480 of a 2,700-line file |
+| `src/rlm/escalation.py` | 130 | JSON + verdict inspection. The lint is load-bearing: a planner that could *ask a server* which cells to re-run would be choosing its own replicates |
+
+**The seam is the work, not the split.** The escalation banner-to-banner block reads as one unit and is not — a static undefined-name check over the extracted text returned `BenchCtx`, `blocks_for`, `run_bench`, the signature of C4 wiring. Cutting on the banner would have produced a module importing the composition root: a "lint-covered" module whose coverage meant nothing. The real seam is three lines above `async def run_escalation`.
+
+**Run that check before wiring, not after.** It now aborts by deleting the new file, so a rejected extraction leaves no half-migration. It caught two rounds on `escalation.py` with `cli.py` never touched. The `projection.py` extraction ran it afterwards and shipped an `ARM_ORDER` `NameError` to the suite — eleven failures that a five-second check would have prevented.
 **Goal (owner, 2026-08-22):** retire finished milestones · delete what is genuinely dead · navigability for S6. Disk reclaim explicitly **not** a goal.
 **Method:** nine read-only agents (seven area inventories, a layout proposal, a destruction audit). Findings marked **[V]** were re-verified in-session; **[R]** are agent-reported and cited but not re-measured.
 
