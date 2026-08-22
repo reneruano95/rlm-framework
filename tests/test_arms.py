@@ -1,4 +1,4 @@
-"""§8's baseline arms (`rlm/arms.py`): shared plumbing + B1 single-shot.
+"""§8's baseline arms (`src/rlm/measure/arms.py`): shared plumbing + B1 single-shot.
 
 Every test here runs the REAL arm code against a canned dispatcher -- no
 servers. The dispatcher double subclasses `conftest.CannedDispatcher` so the
@@ -924,7 +924,7 @@ async def test_call_leaf_admit_breach_raises_before_dispatch_and_logs_nothing(be
 
 
 def test_settled_tokens_matches_the_episode_runners_implementation():
-    """`arms._settled_tokens` is `rlm/episode.py::settled_tokens`, duplicated
+    """`arms._settled_tokens` is `src/rlm/episode.py::settled_tokens`, duplicated
     (the dependency rule -- see the module docstring). Pinned equal so the
     duplication cannot drift in silence."""
     from rlm.measure.arms import _settled_tokens
@@ -1246,7 +1246,7 @@ async def test_b2_records_the_scaffold_provenance_columns(bench_cfg, fake_root_s
 
 
 def test_rotation_vocab_matches_the_episode_runner():
-    """DUPLICATED FROM `rlm/episode.py` ON PURPOSE (the module docstring's
+    """DUPLICATED FROM `src/rlm/episode.py` ON PURPOSE (the module docstring's
     "THIS MODULE NEVER IMPORTS C4") -- pinned equal so the vocabulary cannot
     drift in silence, the same discipline `test_reason_constants_match_the_
     episode_runner` already applies to `CHECKER_FAILED`/`SERVER_UNREACHABLE`."""
@@ -1269,7 +1269,7 @@ class _RotatingDispatcher(_PerChunkDispatcher):
     `pool_error_drained`) is close enough to `LLMDispatcher`'s to drive
     `ArmEpisode._rotate_leaf` for real -- retry_idx continuation included:
     `_new_step`'s contract is that a re-dispatched call_id gets the NEXT
-    retry_idx, not 0 again (`rlm/dispatcher.py:_retry_base`), and
+    retry_idx, not 0 again (`src/rlm/serve/dispatcher.py:_retry_base`), and
     `MockDispatcher.query` always writes 0, so this patches the successful
     retry's step the way the real dispatcher's `_retry_base` would have
     produced it -- getting this wrong would make `log_call`'s

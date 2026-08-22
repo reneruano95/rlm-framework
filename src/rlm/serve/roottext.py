@@ -5,7 +5,7 @@ template wrote, split reasoning from answer, build the history message a past
 turn becomes, derive a per-turn seed, strip reasoning, extract the REPL cell.
 
 WHY THIS IS ITS OWN MODULE, and what it unblocks. These functions used to live
-in `rlm/rootclient.py` next to `RootConversation`, which holds a `ServerClient`
+in `src/rlm/serve/rootclient.py` next to `RootConversation`, which holds a `ServerClient`
 -- so `rlm.serve.rootclient` is in the dependency rule's FORBIDDEN_RLM set and no
 lint-covered module may import it. That is a real cost, not a label: the replay
 path needs `history_message` and `extract_cell` to re-derive an episode from
@@ -14,10 +14,10 @@ client. Splitting the text from the transport puts these under §5's
 dependency-rule lint (`tests/test_import_rules.py` ISOLATED) and lets replay
 follow.
 
-`rlm/rootclient.py` re-exports all six, so every existing import site keeps
+`src/rlm/serve/rootclient.py` re-exports all six, so every existing import site keeps
 working.
 
-Extracted from `rlm/rootclient.py` on 2026-08-22, unchanged.
+Extracted from `src/rlm/serve/rootclient.py` on 2026-08-22, unchanged.
 """
 from __future__ import annotations
 

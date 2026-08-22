@@ -53,7 +53,7 @@ async def test_semaphore_never_exceeds_leaf_parallel(mock_server):
 
 
 async def test_backoff_sleep_does_not_hold_the_semaphore(mock_server):
-    """rlm/dispatcher.py holds the semaphore only around a single completion
+    """src/rlm/serve/dispatcher.py holds the semaphore only around a single completion
     attempt, not around the backoff sleep between attempts ("Held only
     around THIS attempt" -- the call's slot is its own window's and can be
     handed to nothing else, so releasing the semaphore during a backoff costs
@@ -531,7 +531,7 @@ async def test_a_rendered_prompt_of_exactly_slot_capacity_is_admitted(mock_serve
 # length was never measured -- so a gate-(a) failure was uninvestigable, since
 # prefix drift and slot eviction produce an identical symptom (a `tokens_cached`
 # below the prefix length). The root path already does this correctly
-# (rlm/rootclient.py); the leaf was the odd one out.
+# (src/rlm/serve/rootclient.py); the leaf was the odd one out.
 # --------------------------------------------------------------------------- #
 
 

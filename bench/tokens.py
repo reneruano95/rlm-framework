@@ -1,11 +1,11 @@
 """Token counting for the benchmark builder: one offline proxy, one real count.
 
 COPIED FROM `milestones/s1/make_fixtures.py`, NOT IMPORTED, and that is the
-house style rather than a shortcut. `src/rlm/projection.py:28` documents the
+house style rather than a shortcut. `src/rlm/measure/projection.py:28` documents the
 same move for the same reason: `milestones/` is an evidence archive, not a
 library, and live code reaching into it makes an archive un-archivable. The
 repo already carries three copies of `approx_tokens` on purpose -- s1's,
-`rlm/dispatcher.py`'s, and `upstream/make_fixtures.py`'s, that last one made
+`src/rlm/serve/dispatcher.py`'s, and `upstream/make_fixtures.py`'s, that last one made
 expressly so the reproducer could stand alone.
 
 `approx_tokens` is one executable line. `leaf_counter` is stdlib `urllib`. The

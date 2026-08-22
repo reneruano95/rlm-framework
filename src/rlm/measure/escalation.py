@@ -6,7 +6,7 @@ inconclusive -- and this module is the PLAN for them: which cells, at which
 seeds, written next to the ledger so an escalation run is reproducible from the
 artifact rather than from whoever remembered to write it down.
 
-The plan only. `run_escalation` stays in `rlm/cli.py` because executing it
+The plan only. `run_escalation` stays in `src/rlm/cli.py` because executing it
 means driving arms against live servers, which is composition-root work.
 
 WHY THIS IS ITS OWN MODULE. Choosing and serialising cells is JSON and verdict
@@ -16,7 +16,7 @@ load-bearing here rather than tidy: a planner that could ASK a server which
 cells to re-run would be choosing its own replicates, and §8's pre-registration
 exists to prevent exactly that.
 
-Extracted from `rlm/cli.py` on 2026-08-22, unchanged.
+Extracted from `src/rlm/cli.py` on 2026-08-22, unchanged.
 """
 from __future__ import annotations
 

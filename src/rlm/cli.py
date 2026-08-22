@@ -68,7 +68,7 @@ from rlm.measure.bench import (
     seeded_config,
 )
 # The two hook defaults `assert_bench_wiring` has to be able to RECOGNISE. They
-# are private to `rlm/bench.py` because nothing else should install them; this
+# are private to `src/rlm/measure/bench.py` because nothing else should install them; this
 # module is the composition root that must detect them still installed.
 from rlm.measure.bench import _no_hook as _BENCH_NO_HOOK
 from rlm.measure.bench import _no_task_loader as _BENCH_NO_TASK_LOADER
@@ -112,8 +112,8 @@ from rlm.measure.verdict import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The exit contract lives in `rlm/errors.py` -- `rlm/export.py` and
-# `rlm/replay.py` return these too, and importing them back out of the
+# The exit contract lives in `src/rlm/errors.py` -- `src/rlm/trace/export.py` and
+# `src/rlm/trace/replay.py` return these too, and importing them back out of the
 # composition root would be a cycle. Re-exported: tests read `cli.EXIT_*`.
 from rlm.errors import (  # noqa: E402,F401
     EXIT_FAILED, EXIT_MISMATCH, EXIT_OK, EXIT_REFUSED,
@@ -123,7 +123,7 @@ from rlm.errors import (  # noqa: E402,F401
 # --------------------------------------------------------------------------- #
 # D27: cache types come from the -lv 4 launch log, never from /props
 # --------------------------------------------------------------------------- #
-# The reader lives in `rlm/launchlog.py`: pure text parsing with no server
+# The reader lives in `src/rlm/serve/launchlog.py`: pure text parsing with no server
 # contact, so it belongs under §5's dependency-rule lint rather than in the
 # composition root. Re-exported here -- `rlm validate` and the tests import it
 # from `rlm.cli`.
@@ -588,7 +588,7 @@ def cmd_run(args) -> int:
 # --------------------------------------------------------------------------- #
 
 
-# The re-derivation itself lives in `rlm/replay.py`: it rebuilds an episode
+# The re-derivation itself lives in `src/rlm/trace/replay.py`: it rebuilds an episode
 # from the trace store ALONE (I4, the property S3 passed on), so it must not
 # be able to consult a live system -- and there it sits under §5's
 # dependency-rule lint, which enforces that instead of leaving it to
@@ -730,8 +730,8 @@ def cmd_replay(args) -> int:
 # =========================================================================== #
 #
 # WHY THIS CLASS LIVES HERE, IN THE PROCESS ROOT, AND NOT IN A NEW MODULE.
-# `rlm/bench.py`'s dependency-rule exemption is spec-frozen at exactly two
-# modules -- `rlm/episode.py` and `rlm/cli.py` (`tests/test_import_rules.py`'s
+# `src/rlm/measure/bench.py`'s dependency-rule exemption is spec-frozen at exactly two
+# modules -- `src/rlm/episode.py` and `src/rlm/cli.py` (`tests/test_import_rules.py`'s
 # `ISOLATED` list and its comment on `bench.py`). A standalone `rlm/benchserve.py`
 # was the first design considered, and it does not survive that lint. Every
 # module on disk that is not one of the two exempt composition roots (or the
@@ -745,7 +745,7 @@ def cmd_replay(args) -> int:
 # exactly the one import `ISOLATED` membership forbids. There is no import
 # shape that gets HTTP into a new isolated module; the class joins
 # `leaf_process_manager` here instead of widening the exemption list, exactly
-# as `rlm/serverproc.py`'s own docstring anticipates ("the CLI ... supplies an
+# as `src/rlm/serve/serverproc.py`'s own docstring anticipates ("the CLI ... supplies an
 # implementation").
 #
 # WHAT IT OWNS. `root_proc` is started once by `start_resident()` and only
@@ -772,7 +772,7 @@ def cmd_replay(args) -> int:
 # cost is one extra ~10s relaunch on a resume that would otherwise have
 # found a perfectly good survivor.
 #
-# THE HOOK SURFACE. `rlm/bench.py`'s `BenchCtx` takes three server-facing
+# THE HOOK SURFACE. `src/rlm/measure/bench.py`'s `BenchCtx` takes three server-facing
 # callables; Task 12 binds them straight off one instance:
 #
 #     BenchCtx(quiesce_fn=orchestra.quiesce,
@@ -788,7 +788,7 @@ def cmd_replay(args) -> int:
 # `rlm.measure.bench.ARM_PROFILE` runs both arms there exclusively.
 #
 # EVERYTHING THAT TOUCHES A PROCESS, THE NETWORK, OR THE OS IS INJECTED --
-# `rlm/arms.py`'s own discipline, restated here: `process_factory` defaults to
+# `src/rlm/measure/arms.py`'s own discipline, restated here: `process_factory` defaults to
 # `LlamaServerProcess`, `client_factory` to `ServerClient`, `handshake_fn` to
 # `rlm.episode.handshake`, `cache_check_fn` to `_check_cache_types`,
 # `slots_idle_fn` to `_slots_idle`, `force_kill_fn` to a best-effort Windows
@@ -927,7 +927,7 @@ class LeafProcessManager:
     `LlamaServerProcess` object each time).
 
     PLAIN: restart only, no re-handshake. This is `run_episode`'s manager
-    (`ServerOrchestra.episode_process_manager`) -- `rlm/episode.py`'s own
+    (`ServerOrchestra.episode_process_manager`) -- `src/rlm/episode.py`'s own
     `Episode._rotate_leaf` already calls `_rehandshake_leaf()` immediately
     after `process_manager.restart()` returns, so wrapping the handshake
     HERE too would double the §4 probe on every RLM rotation for no
@@ -1249,8 +1249,8 @@ class ServerOrchestra:
 # =========================================================================== #
 #
 # WHAT THIS SECTION IS. Three modules do the work and none of them may do it
-# alone: `rlm/bench.py` schedules the grid but may not reach a model server,
-# `rlm/arms.py` runs the baselines but may not construct one, `rlm/verdict.py`
+# alone: `src/rlm/measure/bench.py` schedules the grid but may not reach a model server,
+# `src/rlm/measure/arms.py` runs the baselines but may not construct one, `src/rlm/measure/verdict.py`
 # scores the record but may not open a live store. This is where they meet.
 # Every seam those modules declare as INJECTED is bound here, once.
 #
@@ -1291,7 +1291,7 @@ BENCH_MANIFEST_PATH = REPO_ROOT / "bench" / "manifest.json"
 DEFAULT_REPORT_PATH = REPO_ROOT / "runs" / "RESULTS.md"
 
 # §8's projection constants and the --smoke calibration table live in
-# `rlm/projection.py`: pure arithmetic, no server contact, so they sit under
+# `src/rlm/measure/projection.py`: pure arithmetic, no server contact, so they sit under
 # the §5 dependency-rule lint instead of in the composition root.
 from rlm.measure.projection import (  # noqa: E402
     CHUNKED_ARMS, PROJ_CHEAP_ARM_S, PROJ_NON_AGG_EXPENSIVE_S,
@@ -1386,7 +1386,7 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
                       rlm_dispatcher, leaf_dispatcher, root_client,
                       scaffold_instance_id: str, scaffold_git_sha: str,
                       benchmark_version: str | None) -> dict[str, Any]:
-    """§8's arms, each closed over everything `rlm/bench.py` may not
+    """§8's arms, each closed over everything `src/rlm/measure/bench.py` may not
     import. This IS `BenchCtx.arm_runners`.
 
     THE FOUR ARE NOT SYMMETRIC, and every asymmetry below is a ruling:
@@ -1644,7 +1644,7 @@ def reset_dispatcher_steps(*dispatchers) -> None:
 def assert_bench_wiring(ctx: BenchCtx, arms) -> None:
     """Refuse a bench run whose `BenchCtx` still carries a default.
 
-    `rlm/bench.py` chose no-op hook defaults on purpose (that module is
+    `src/rlm/measure/bench.py` chose no-op hook defaults on purpose (that module is
     dry-run with no servers), and named THIS file as where a missing one is a
     startup bug. This is that check. It is not defensive programming: an
     unbound `swap_servers_fn` produces a complete, plausible, fully-recorded
@@ -1694,7 +1694,7 @@ def bench_exit_code(verdict, escalated=None) -> int:
 # escalation execution (§8:343)
 # --------------------------------------------------------------------------- #
 # The PLAN -- which cells, at which seeds, and its on-disk form -- lives in
-# `rlm/escalation.py`: JSON and verdict inspection, no server contact, so it
+# `src/rlm/measure/escalation.py`: JSON and verdict inspection, no server contact, so it
 # sits under the §5 dependency-rule lint. Executing the plan stays here,
 # because it drives arms against live servers.
 from rlm.measure.escalation import (  # noqa: E402
@@ -2099,7 +2099,7 @@ def cmd_bench(args) -> int:
 # =========================================================================== #
 
 
-# The bundle builder lives in `rlm/export.py`: it must depend on the trace
+# The bundle builder lives in `src/rlm/trace/export.py`: it must depend on the trace
 # store and nothing else, so it sits under §5's dependency-rule lint. An
 # export that needed a live server would be one nobody else could reproduce.
 from rlm.trace.export import _export, _export_filter  # noqa: E402

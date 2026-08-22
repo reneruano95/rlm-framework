@@ -7,7 +7,7 @@ from enum import StrEnum
 # --------------------------------------------------------------------------- #
 # the CLI's exit contract
 # --------------------------------------------------------------------------- #
-# Here rather than in `rlm/cli.py` because `rlm/export.py` and `rlm/replay.py`
+# Here rather than in `src/rlm/cli.py` because `src/rlm/trace/export.py` and `src/rlm/trace/replay.py`
 # return them too, and importing them back out of the composition root would be
 # a cycle. This module imports nothing from rlm, so everything may have them.
 EXIT_OK = 0

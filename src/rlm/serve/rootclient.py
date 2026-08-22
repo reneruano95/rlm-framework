@@ -48,7 +48,7 @@ from rlm.serve.dispatcher import CompletionResult, ServerClient
 
 # The pure text shaping -- assistant_prefix, split_reasoning,
 # history_message, turn_seed, strip_reasoning, extract_cell -- lives in
-# `rlm/roottext.py`. It is string and regex work with no transport, so it
+# `src/rlm/serve/roottext.py`. It is string and regex work with no transport, so it
 # sits under §5's dependency-rule lint; this module cannot, because
 # `RootConversation` holds a `ServerClient` and so `rlm.serve.rootclient` is in the
 # rule's FORBIDDEN_RLM set. Splitting them is what lets the REPLAY path --
@@ -56,7 +56,7 @@ from rlm.serve.dispatcher import CompletionResult, ServerClient
 # from the trace store alone -- be lint-covered too.
 #
 # Re-exported here: every existing `from rlm.serve.rootclient import ...` site
-# keeps working, including tests and `rlm/cli.py`.
+# keeps working, including tests and `src/rlm/cli.py`.
 from rlm.serve.roottext import (  # noqa: F401
     assistant_prefix, extract_cell, history_message, split_reasoning,
     strip_reasoning, turn_seed,

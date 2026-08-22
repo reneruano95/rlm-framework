@@ -4,8 +4,8 @@ The bundle is what someone who was not here uses to check a published number.
 Its whole value is being self-contained -- so building it must depend on the
 trace store and nothing else.
 
-WHY THIS IS ITS OWN MODULE. Same family as `rlm/replay.py`, same reason: this
-is offline re-derivation, and inside `rlm/cli.py` nothing stopped it growing a
+WHY THIS IS ITS OWN MODULE. Same family as `src/rlm/trace/replay.py`, same reason: this
+is offline re-derivation, and inside `src/rlm/cli.py` nothing stopped it growing a
 dependency on a live server. Here §5's dependency-rule lint
 (`tests/test_import_rules.py` ISOLATED) forbids `httpx`, `rlm.serve.dispatcher` and
 `rlm.serve.rootclient` on every run. An export that needed a running server would be
@@ -14,9 +14,9 @@ an export nobody else could reproduce, which defeats the point of shipping one.
 The `async` here is the TraceLogger's lifecycle (`start`/`aclose`), not network
 I/O -- worth saying, because `async` reads like a server at a glance.
 
-`cmd_export` stays in `rlm/cli.py` with the other verb handlers.
+`cmd_export` stays in `src/rlm/cli.py` with the other verb handlers.
 
-Extracted from `rlm/cli.py` on 2026-08-22, unchanged.
+Extracted from `src/rlm/cli.py` on 2026-08-22, unchanged.
 """
 from __future__ import annotations
 

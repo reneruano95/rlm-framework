@@ -38,7 +38,7 @@ ISOLATED = [
     # takes the manifest as an injected object (`bench/` is not in the wheel).
     "measure/verdict.py",
     # §8's baseline arms. They make model calls, but through an INJECTED
-    # dispatcher: `rlm/episode.py` is the only module permitted to import both
+    # dispatcher: `src/rlm/episode.py` is the only module permitted to import both
     # C4 and the isolated components, and widening that to a second module is
     # the drift its docstring forbids. Keeping arms on this side is also what
     # lets the scoring/replay path import an arm's helpers (the truncation
@@ -47,7 +47,7 @@ ISOLATED = [
     # §8's benchmark scheduler. It has the SHAPE of a composition root -- it
     # sequences four arms across two server profiles -- but the exemption list
     # below is spec-frozen at two modules (episode.py, cli.py) and widening it
-    # is the drift `rlm/episode.py`'s docstring forbids. So the scheduler stays
+    # is the drift `src/rlm/episode.py`'s docstring forbids. So the scheduler stays
     # on this side and every model-facing thing it needs (the four arms,
     # `Task.from_file`, quiesce, the /props handshake, the leaf relaunch)
     # arrives as an injected callable on `BenchCtx`. The same rule that keeps

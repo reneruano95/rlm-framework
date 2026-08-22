@@ -27,7 +27,7 @@ semantics:
 the injected dispatcher, so the R13 leak columns, the retry attempts and the
 timing/token fields are recorded by the one component that measures them. This
 module only copies C4's attempt dicts onto trace rows (the pattern
-`rlm/episode.py:720-757` owns), which is why an arm's steps are comparable with
+`src/rlm/episode.py:720-757` owns), which is why an arm's steps are comparable with
 the RLM arm's rather than merely similar to them.
 
 **B2'S MAP CAN DRAIN THE LEAF'S NEVER-REUSE SLOT POOL, AND ROTATES.** R13's
@@ -39,7 +39,7 @@ finding about the task. `ArmEpisode` therefore accepts an optional
 `process_manager` (the `rlm.serve.serverproc.ProcessManager` duck type: one method,
 `.restart()`) and `call_leaf` rotates through it on `SlotPoolExhausted` ONLY
 (§5 C4: a FAILED server is never restarted, only a HEALTHY one whose pool
-served its `--parallel` windows), mirroring `rlm/episode.py::_rotate_leaf`'s
+served its `--parallel` windows), mirroring `src/rlm/episode.py::_rotate_leaf`'s
 quiesce -> restart -> `rotate_pool()` -> resume sequence with one guarantee
 deliberately narrowed and documented (`ArmEpisode._rotate_leaf`'s docstring):
 this module cannot re-run §4's `/props` handshake against the restarted
@@ -60,7 +60,7 @@ therefore detected at most one model call late (bounded by that call's timeout
 one, `scaffold.retries.per_call_timeout_s` otherwise; B1/B3 run on the bench
 profile's 900 s, sized against a 262K-token slot's measured prefill).
 
-**THIS MODULE NEVER IMPORTS C4.** `rlm/episode.py` is the composition root and
+**THIS MODULE NEVER IMPORTS C4.** `src/rlm/episode.py` is the composition root and
 the only module permitted to import both C4 and the isolated components; arms
 stay on the isolated side by taking the dispatcher (and the trace logger, and
 the registry) as injected arguments, with `Task` imported only for typing.
@@ -167,7 +167,7 @@ __all__ = [
 ]
 
 # --- §6 outcome_reason vocabulary ------------------------------------------ #
-# DUPLICATED FROM `rlm/episode.py` ON PURPOSE: importing it from there would
+# DUPLICATED FROM `src/rlm/episode.py` ON PURPOSE: importing it from there would
 # drag C4 into this module (see the docstring). `tests/test_arms.py` pins the
 # two definitions equal, so the vocabulary cannot drift in silence.
 CHECKER_FAILED = "checker_failed"
@@ -191,7 +191,7 @@ ARM_ERROR = "arm_error"
 #: the root still sees a slot for it, just one that says nothing was there.
 NO_SUMMARY = "[no summary]"
 
-#: `rlm/episode.py`'s rotation vocabulary, DUPLICATED here for the same
+#: `src/rlm/episode.py`'s rotation vocabulary, DUPLICATED here for the same
 #: reason `CHECKER_FAILED`/`SERVER_UNREACHABLE` are (importing `rlm.episode`
 #: would drag C4 in) — `SLOT_POOL_EXHAUSTED` fires when a leaf's never-reuse
 #: slot pool ran out and either no `process_manager` was injected or the pool
@@ -359,7 +359,7 @@ def outcome_for_error(exc: BaseException) -> tuple[Outcome, str]:
 
 
 def _settled_tokens(attempts: list[dict[str, Any]]) -> tuple[int, int]:
-    """`rlm/episode.py::settled_tokens`, DUPLICATED ON PURPOSE: importing
+    """`src/rlm/episode.py::settled_tokens`, DUPLICATED ON PURPOSE: importing
     `rlm.episode` here would drag C4's composition root into this module (the
     module docstring's "THIS MODULE NEVER IMPORTS C4"). The sum itself is
     tiny — every attempt's tokens count against `max_total_tokens` (spec §5
@@ -454,7 +454,7 @@ class ArmEpisode:
         # each cannot exhaust a pool sized >= 1.
         self.process_manager = process_manager
         #: How many rotations THIS episode has completed. In-memory only —
-        #: unlike `rlm/episode.py`, no `config_snapshot` field carries this
+        #: unlike `src/rlm/episode.py`, no `config_snapshot` field carries this
         #: (episode.py itself has none either; `steps.server_rotation`,
         #: stamped by `_rotate_leaf`, is the durable record). Exposed for
         #: tests and for a caller that wants a fast total without scanning
@@ -515,7 +515,7 @@ class ArmEpisode:
         rather than False, so the per-arm hit count would have no denominator
         and the verdict could not be written at all.
 
-        Same entry point the RLM arm uses (`rlm/episode.py:817`), and
+        Same entry point the RLM arm uses (`src/rlm/episode.py:817`), and
         deliberately unguarded: a dispatcher without `set_corpus` is not a
         dispatcher this benchmark may run on, and degrading to NULL silently is
         precisely the failure this call exists to prevent.
@@ -587,7 +587,7 @@ class ArmEpisode:
         """One trace step per dispatch ATTEMPT, copied from C4's own records.
 
         Idempotent per `(call_id, retry_idx)` so the failure path and a later
-        flush cannot double-write the same attempt (`rlm/episode.py:720-757`).
+        flush cannot double-write the same attempt (`src/rlm/episode.py:720-757`).
         Returns the blob path holding the answer, or None when no attempt
         produced one.
 
@@ -670,7 +670,7 @@ class ArmEpisode:
         routes this call through `BudgetEnforcer.admit()`/`.settle()` — B2's
         obligation (this task): its leaf summaries are admitted against
         `max_subcalls` AND `max_total_tokens` exactly as the RLM arm's leaf
-        sub-calls are (`rlm/episode.py`'s `_EpisodeRun._on_llm_query`/
+        sub-calls are (`src/rlm/episode.py`'s `_EpisodeRun._on_llm_query`/
         `_settle`, mirrored here rather than imported — the dependency rule).
         B1/B3 never pass it: their ONE call per episode is already bounded by
         the bench_leaf relaunch profile's single-slot capacity, so admitting
@@ -687,7 +687,7 @@ class ArmEpisode:
         A `BudgetBreach` from `.admit()` is raised BEFORE any dispatch and
         BEFORE any reservation is recorded (`BudgetEnforcer.admit` never
         partially reserves — see its docstring) — nothing was sent, so
-        (matching `rlm/episode.py`'s own admission path) nothing is logged as
+        (matching `src/rlm/episode.py`'s own admission path) nothing is logged as
         a step; the breach itself is the episode's outcome.
 
         The dispatch itself goes through `_dispatch_leaf`, which rotates the
@@ -736,19 +736,19 @@ class ArmEpisode:
         `SlotPoolExhausted` when a `process_manager` was injected — spec §5
         C4's rotation, scoped to what `arms.py` can reach (see
         `_rotate_leaf`'s docstring for the one guarantee this narrows
-        relative to `rlm/episode.py`'s `_dispatch_leaf`, which this mirrors).
+        relative to `src/rlm/episode.py`'s `_dispatch_leaf`, which this mirrors).
 
         FIRES ONLY ON EXHAUSTION, NEVER ON ANY OTHER `DispatchError` (§5's
         rule: a server that FAILED is never restarted — that would mask the
         fault the trace exists to record — only a HEALTHY one whose pool ran
         out is a resource-lifecycle operation). `pool_error_drained` (when the
         dispatcher exposes it, matching `LLMDispatcher`) distinguishes the two
-        shapes of exhaustion the same way `rlm/episode.py:586` does: a
+        shapes of exhaustion the same way `src/rlm/episode.py:586` does: a
         generation that answered NOTHING is a failed server wearing pool
         exhaustion's exception, not a healthy one that ran out of windows.
 
         Retries the SAME `call_id` ONCE after a successful rotation — B2's
-        map is serial, so (unlike `rlm/episode.py`'s up-to-
+        map is serial, so (unlike `src/rlm/episode.py`'s up-to-
         `MAX_ROTATIONS_PER_CALL` loop, sized for concurrent callers racing the
         same pool) one rotation is always enough to make forward progress on
         one call; a second exhaustion immediately against a freshly rotated,
@@ -772,7 +772,7 @@ class ArmEpisode:
 
     async def _rotate_leaf(self, call_id: str) -> None:
         """Replace the healthy leaf process and resume on a virgin pool --
-        `rlm/episode.py::_rotate_leaf`'s sequence, mirrored: quiesce C4
+        `src/rlm/episode.py::_rotate_leaf`'s sequence, mirrored: quiesce C4
         (`dispatcher.rotating()`, quiesce -> resume with the reopen in a
         `finally` INSIDE C4) -> `process_manager.restart()` -> `rotate_pool()`
         (a new process means a new pool) -> resume. Serialized on
@@ -783,7 +783,7 @@ class ArmEpisode:
         `call_leaf` is shared plumbing and the lock costs nothing idle).
 
         ONE GUARANTEE THIS NARROWS, DELIBERATELY, DOCUMENTED RATHER THAN LEFT
-        TO BE DISCOVERED: `rlm/episode.py` re-runs §4's `/props` handshake
+        TO BE DISCOVERED: `src/rlm/episode.py` re-runs §4's `/props` handshake
         against the freshly restarted process (`_rehandshake_leaf`,
         `assert_props` — total_slots/n_ctx/build_info re-checked against
         config) as an EXTRA, independent verification that the replacement
@@ -797,7 +797,7 @@ class ArmEpisode:
         stand in for it, both weaker than a pre-emptive `/props` check but
         not nothing: `ProcessManager.restart()`'s OWN contract already
         promises "a fresh process of the SAME CONFIGURATION ... returning
-        only once it answers /health" (`rlm/serverproc.py`'s `ProcessManager`
+        only once it answers /health" (`src/rlm/serve/serverproc.py`'s `ProcessManager`
         Protocol), and C4's per-target prefix-hash check
         (`LLMDispatcher._query_once`) fires automatically on the very next
         call if the restarted process renders a different system head, so a
@@ -809,7 +809,7 @@ class ArmEpisode:
         `ProcessManager` Protocol already promises.
 
         Stamps `steps.server_rotation` on the triggering (exhausted) attempt,
-        the SAME mechanism `rlm/episode.py:683-696` (`_stamp_rotation`) uses:
+        the SAME mechanism `src/rlm/episode.py:683-696` (`_stamp_rotation`) uses:
         `self.dispatcher.steps` is a plain public list of dicts — the one
         `log_call` already reads — so mutating the last recorded attempt for
         `call_id` in place needs no C4 import, only data C4 already exposes.
@@ -842,7 +842,7 @@ class ArmEpisode:
         C4's asymmetry: a retried call counts once against `max_subcalls`,
         but every attempt's tokens count against `max_total_tokens`. The mock
         dispatcher records no token usage, so this settles zero for it —
-        stated, not a bug (`rlm/episode.py::_settle`'s pattern, mirrored)."""
+        stated, not a bug (`src/rlm/episode.py::_settle`'s pattern, mirrored)."""
         attempts = [s for s in self.dispatcher.steps if s.get("call_id") == call_id]
         tokens_in, tokens_out = _settled_tokens(attempts)
         self.enforcer.settle(reservation, tokens_in, tokens_out)
@@ -1069,7 +1069,7 @@ def bm25_select(chunks: list[str], question: str, *, budget_tokens: int,
 async def _b3_prompt(task: "Task", cfg: Config, *, dispatcher: Any,
                       registry: PromptRegistry) -> tuple[str, dict, int, list[str]]:
     """Assemble B3's one prompt: C2's chunker VERBATIM (same config geometry,
-    same snap rule as `rlm/episode.py:~808` -- B2/B3 sharing C2 verbatim is a
+    same snap rule as `src/rlm/episode.py:~808` -- B2/B3 sharing C2 verbatim is a
     §8 pre-registration), then `bm25_select`'s greedy pick restored to original
     order.
 
@@ -1329,7 +1329,7 @@ async def _b2_root_final(cfg: Config, *, ep: ArmEpisode, registry: PromptRegistr
         "rendered": rendered,
     }
     # depth=0: the root sits at the top of the tree (§6), same convention
-    # `rlm/episode.py`'s own root-turn logging uses -- LEAF steps are the
+    # `src/rlm/episode.py`'s own root-turn logging uses -- LEAF steps are the
     # ones at depth 1 (`log_call`'s default).
     ep.log_call(call_id, prompt, answer=answer, actor=Actor.ROOT, depth=0,
                 attempts=[attempt])
@@ -1365,7 +1365,7 @@ async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any
     a crash and never a silent wrap onto a slot that has held another
     document. See `ArmEpisode._rotate_leaf`'s docstring for the rotation
     sequence and the one guarantee it deliberately narrows relative to
-    `rlm/episode.py`'s.
+    `src/rlm/episode.py`'s.
     """
     ep = ArmEpisode(task, cfg, dispatcher=dispatcher, trace=trace,
                      registry=registry, arm="b2", bench_extra=bench_extra,

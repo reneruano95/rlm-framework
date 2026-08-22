@@ -8,11 +8,11 @@ scaffold contract.
 WHY THIS IS ITS OWN MODULE. It is pure text parsing: a file read, three regexes
 and dict arithmetic. It contacts no server and imports no client, so it belongs
 UNDER §5's dependency-rule lint (`tests/test_import_rules.py` ISOLATED) rather
-than inside `rlm/cli.py`, where nothing would check that it stays that way.
-`rlm/cli.py` re-exports both public names, so `from rlm.cli import
+than inside `src/rlm/cli.py`, where nothing would check that it stays that way.
+`src/rlm/cli.py` re-exports both public names, so `from rlm.cli import
 parse_launch_log` keeps working.
 
-Extracted from `rlm/cli.py` on 2026-08-22, unchanged.
+Extracted from `src/rlm/cli.py` on 2026-08-22, unchanged.
 """
 from __future__ import annotations
 

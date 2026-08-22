@@ -10,21 +10,21 @@ number can be checked by someone who was not there.
 WHY THIS IS ITS OWN MODULE, and why it matters more here than anywhere else.
 The whole value of replay is that it CANNOT consult a live system: a
 re-derivation able to ask a server what the prompt was would be checking the
-server against itself. Inside `rlm/cli.py` nothing maintained that -- the
+server against itself. Inside `src/rlm/cli.py` nothing maintained that -- the
 composition root imports HTTP clients and dispatchers, so only convention stood
 between this code and a shortcut. Here §5's dependency-rule lint
 (`tests/test_import_rules.py` ISOLATED) enforces it: no `httpx`, no
 `rlm.serve.dispatcher`, no `rlm.serve.rootclient`, checked on every run.
 
-Reaching this required splitting `rlm/roottext.py` out of `rlm/rootclient.py`
+Reaching this required splitting `src/rlm/serve/roottext.py` out of `src/rlm/serve/rootclient.py`
 first: `history_message` and `extract_cell` are needed here and were sitting
 behind a `ServerClient`.
 
-What stays in `rlm/cli.py`: `_verify_online` and `cmd_replay`. The `--online`
+What stays in `src/rlm/cli.py`: `_verify_online` and `cmd_replay`. The `--online`
 mode contacts a server by design, and mixing it in here is exactly what the
 lint above exists to prevent.
 
-Extracted from `rlm/cli.py` on 2026-08-22, unchanged.
+Extracted from `src/rlm/cli.py` on 2026-08-22, unchanged.
 """
 from __future__ import annotations
 
@@ -220,7 +220,7 @@ def _render_transcript(cfg: Config, steps: list[dict], out) -> None:
                 print("  -> " + "\n     ".join(view.splitlines()[:12]), file=out)
         elif kind == ActionType.LLM_CALL:
             # The ACTOR, not a literal "leaf": B2's reduce step is an
-            # `llm_call` with `actor='root'` (`rlm/arms.py`), and a transcript
+            # `llm_call` with `actor='root'` (`src/rlm/measure/arms.py`), and a transcript
             # that labels it "leaf" says the call happened on a server it never
             # touched — the one fact a reader most needs this line for.
             actor = step.get("actor") or "leaf"

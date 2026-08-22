@@ -639,7 +639,7 @@ class _EpisodeRun:
                     # THE SEED COMES FROM THIS EPISODE'S CONFIG, PER CALL --
                     # never from whenever the dispatcher happened to be built.
                     # A bench run holds one leaf dispatcher across §8's three
-                    # seeds (`rlm/bench.py` re-seeds the CONFIG per attempt),
+                    # seeds (`src/rlm/measure/bench.py` re-seeds the CONFIG per attempt),
                     # so a construction-time seed would decode all three
                     # replicates identically while `config_snapshot` recorded
                     # that they differed.

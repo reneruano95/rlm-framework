@@ -1,4 +1,4 @@
-"""Task 11: `rlm/verdict.py` -- §8's scoring, inference and report layer.
+"""Task 11: `src/rlm/measure/verdict.py` -- §8's scoring, inference and report layer.
 
 Everything here runs against a SYNTHETIC store written by the REAL
 `TraceLogger` (tests/test_trace.py + tests/test_bench.py patterns): the module
@@ -397,7 +397,7 @@ async def test_a_missing_store_is_refused_with_its_path(tmp_path):
 
 async def test_a_live_store_is_refused_rather_than_half_scored(tmp_path):
     """A verdict is computed from a CLOSED store. On Windows a second reader
-    cannot open a file a writer holds (rlm/trace.py:302-307) -- so the refusal
+    cannot open a file a writer holds (src/rlm/trace/store.py:302-307) -- so the refusal
     is free, and it must arrive as an explanation, not a DuckDB IOException."""
     b = await StoreBuilder(tmp_path).start()
     b.episode("t1", "rlm", 1, Outcome.SUCCESS)

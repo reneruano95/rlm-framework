@@ -3,7 +3,7 @@
 # is the canonical JSON dump of the validated model (stable field order).
 #
 # Prompt files under prompts/ (Task 14) are pinned by sha256 below — see
-# rlm/config.py's PromptRegistry and Config.pinned_prompt_hashes() docstrings.
+# src/rlm/config.py's PromptRegistry and Config.pinned_prompt_hashes() docstrings.
 # A drifted or deleted file fails load_config() loudly (Config's
 # cross-field validator hashes the file on every load).
 
@@ -571,7 +571,7 @@ trace:
 # Both §8 preconditions that gate the freeze have passed: the closed-book probe
 # (30 tasks x 2 models x 3 seeds, 0/6 everywhere — no task is answerable without
 # its corpus) and the checker near-miss suites (>=3 per checker, in
-# rlm/checkers.py beside the implementations).
+# src/rlm/measure/checkers.py beside the implementations).
 #
 # `manifest_sha256` IS that freeze hash, pinned so `config_snapshot` records
 # WHICH freeze an episode was scored against rather than merely that one

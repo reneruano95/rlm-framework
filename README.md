@@ -85,9 +85,9 @@ trace store alone. Several things are therefore frozen, and two of them fail
 - **`bench/manifest.json` with `bench/tasks/` and `bench/corpora/`.** The
   repo-relative path strings live *inside* the JSON whose sha256 is pinned. There
   is no move that is both correct and pin-preserving.
-- **`src/rlm/` at exactly two levels below the root.** `src/rlm/bench.py` and
+- **`src/rlm/` at exactly two levels below the root.** `src/rlm/measure/bench.py` and
   `src/rlm/cli.py` define `REPO_ROOT = parents[2]`.
-- **`src/rlm/schema.sql` beside `src/rlm/trace.py`** — a `with_name()` sibling
+- **`src/rlm/schema.sql` beside `src/rlm/trace/store.py`** — a `with_name()` sibling
   lookup, not declared package data.
 - **`.gitattributes`** — `*.md text eol=lf` and `bench/corpora/** -text` are what
   make every content hash reproducible across clones. Changing it breaks all 13
@@ -98,7 +98,7 @@ trace store alone. Several things are therefore frozen, and two of them fail
 
 Two silent ones, stated plainly because they produce no error:
 
-- **Renaming `src/rlm/dispatcher.py`, `budget.py`, `serverproc.py` or `trace.py`**
+- **Renaming `src/rlm/serve/dispatcher.py`, `budget.py`, `serverproc.py` or `trace.py`**
   is safe *today* only because `bench/corpora/code-bundle.txt` is frozen text and
   the seven codeqa answers are frozen strings. Never rebuild the v1 corpus — see
   the comment in `bench/build.py`.
@@ -129,10 +129,21 @@ inside `s2/` were left alone because they survive the move), and 32 path-compone
 constructions (`REPO_ROOT / "s4"`). Every resulting `milestones/…` path was then
 checked to exist on disk.
 
-**`rlm/` paths in prose were deliberately *not* swept.** A mechanical rewrite
-would have hit three classes of false positive, one of them a functional break:
-the sandbox *destination* strings in `src/rlm/sandbox/manager.py:101-103`, which
-describe the layout inside `sandbox_bootstrap/` and must stay `rlm/`; citations to
-the upstream `alexzhang13/rlm` harness, a different project; and a module that
-does not exist. There is exactly one `episode.py` — read `rlm/x.py` in prose as
-`src/rlm/x.py`.
+**`rlm/` paths in the LIVE docs were swept** when `src/rlm/` was grouped into
+`context/ serve/ trace/ measure/` — this file, `ARCHITECTURE.md`, `config.yaml`
+and `docs/README.md`. The map was built from what is actually on disk, so a
+citation only moves if its target does, and every remaining one was checked to
+resolve.
+
+Three classes were excluded, one of them a functional break:
+
+- the sandbox **destination** strings in `src/rlm/sandbox/manager.py:101-103`.
+  They describe the layout *inside* `sandbox_bootstrap/`, where the AppContainer
+  child imports `rlm.bridge` — they must stay `rlm/`, and that is why
+  `bridge.py` did not move with the rest.
+- citations to the upstream `alexzhang13/rlm` harness, a different project.
+- `rlm/benchserve.py`, a module that was considered and never built.
+
+**Historical documents were left alone**: `CHANGELOG.md`, `docs/research/` and
+`docs/superpowers/`. They describe where a file was when the entry was written,
+and rewriting a dated record to match today's tree falsifies it.

@@ -4,17 +4,17 @@ two rules that make a 39-hour run survivable — resume and rerun-once.
 WHAT THIS MODULE IS ALLOWED TO TOUCH. It is the shape of a composition root
 (it sequences the arms across two server profiles), but it is NOT one: the
 dependency rule (spec §5, linted by `tests/test_import_rules.py`) exempts
-exactly two modules — `rlm/episode.py` and `rlm/cli.py` — and widening that
-list is the drift `rlm/episode.py`'s docstring forbids. So `rlm/bench.py` is
+exactly two modules — `src/rlm/episode.py` and `src/rlm/cli.py` — and widening that
+list is the drift `src/rlm/episode.py`'s docstring forbids. So `src/rlm/measure/bench.py` is
 listed as ISOLATED instead, and everything that reaches a model server or a
 process arrives as an INJECTED callable on `BenchCtx`:
 
   * the arms (`arm_runners`) — Task 10 builds them from `run_episode`
     and `run_b1/b2/b3` with the dispatcher, root client, registry and process
     manager already closed over;
-  * `load_task_fn` — `Task.from_file` lives in `rlm/episode.py`, which reaches
+  * `load_task_fn` — `Task.from_file` lives in `src/rlm/episode.py`, which reaches
     C4, so even the task loader is passed in (`Task` is imported here for
-    typing only, exactly as `rlm/arms.py` does);
+    typing only, exactly as `src/rlm/measure/arms.py` does);
   * `quiesce_fn` / `handshake_fn` / `swap_servers_fn` — the §5 quiesce point,
     §4's per-episode `/props` re-assertion, and the leaf relaunch.
 
@@ -422,7 +422,7 @@ async def _no_hook(profile: str) -> None:
     A default that REFUSED would be safer in the abstract and wrong here: this
     module is exercised (and dry-run) with no servers at all, and the wiring
     that must not be forgotten is checked where it can be — Task 10 passes all
-    three, and `rlm/cli.py` is where a missing one is a startup bug."""
+    three, and `src/rlm/cli.py` is where a missing one is a startup bug."""
     return None
 
 
@@ -691,7 +691,7 @@ async def run_bench(ctx: BenchCtx, *, arms: list[str] | tuple[str, ...] = ARM_OR
     """The whole grid for one `run_id`, resumable.
 
     The freeze is verified HERE, before any block runs, and not only in
-    `rlm/cli.py`: `assert_manifest_pinned` is also exported so a CLI can
+    `src/rlm/cli.py`: `assert_manifest_pinned` is also exported so a CLI can
     refuse early with a better error surface, but a forgotten call there must
     not be able to score 39 hours of episodes against a manifest nobody
     checked. The startup assertion belongs where the episodes are, so it

@@ -237,7 +237,7 @@ def test_the_recorded_loops_are_killed_at_the_third_identical_turn(episode, onse
     `.value` is an `ExceptionInfo` attribute that only exists when the
     exception is caught via `pytest.raises(...) as exc`; a plain `except`
     binds `exc` to the exception instance itself, which carries `.reason`
-    directly (rlm/errors.py). Fixed to `exc.reason`."""
+    directly (src/rlm/errors.py). Fixed to `exc.reason`."""
     turns = json.loads((FIXTURES / f"{episode}.json").read_text(encoding="utf-8"))["turns"]
     b = _guarded(3)
     corrected_at = killed_at = None

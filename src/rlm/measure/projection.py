@@ -8,10 +8,10 @@ rather than buried in the middle of the operator surface.
 WHY THIS IS ITS OWN MODULE. Pure arithmetic over manifest entries and ledger
 records: no server, no dispatcher, no HTTP client. It therefore belongs UNDER
 §5's dependency-rule lint (`tests/test_import_rules.py` ISOLATED), where
-something checks that it stays that way. `rlm/cli.py` re-exports every public
+something checks that it stays that way. `src/rlm/cli.py` re-exports every public
 name, so the existing import sites keep working.
 
-Extracted from `rlm/cli.py` on 2026-08-22, unchanged.
+Extracted from `src/rlm/cli.py` on 2026-08-22, unchanged.
 """
 from __future__ import annotations
 

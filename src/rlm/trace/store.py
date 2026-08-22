@@ -148,7 +148,7 @@ STEP_COLS = (
     "latency_queue_ms", "latency_prefill_ms", "latency_decode_ms",
     # R13's foreign-string detector, recorded per leaf answer (§5 C4). NULL
     # means NOT CHECKED -- see schema.sql for why that is not the same as
-    # False, and rlm/leakcheck.py for the 2.2% bound that forbids the phrase
+    # False, and src/rlm/serve/leakcheck.py for the 2.2% bound that forbids the phrase
     # "leak-free" anywhere near a column of Falses.
     "leak_detected", "leak_detail",
     # The slot-pool rotation this step triggered (§5 C4, v0.2.6). NULL on every

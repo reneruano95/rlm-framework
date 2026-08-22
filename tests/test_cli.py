@@ -398,7 +398,7 @@ def test_the_cli_has_exactly_five_verbs():
     """Non-goals are written into the spec: no daemon, no REST API, no web UI,
     no interactive chat mode.
 
-    THREE became FIVE, and that is the whole renegotiation. `rlm/cli.py:7` named
+    THREE became FIVE, and that is the whole renegotiation. `src/rlm/cli.py:7` named
     `bench` and `export` as "later slices (S4)" from the start, so S4 landing
     them is the argued-for change this test was always going to record — a
     SIXTH verb appearing here still means a slice shipped without arguing
@@ -844,7 +844,7 @@ def test_bench_refuses_an_unknown_task_id(valid_config_file, tmp_path, capsys,
 
 
 def test_bench_refuses_an_unbound_hook(valid_config_file, tmp_path):
-    """`BenchCtx`'s hook defaults are deliberate NO-OPS (`rlm/bench.py`: the
+    """`BenchCtx`'s hook defaults are deliberate NO-OPS (`src/rlm/measure/bench.py`: the
     module is dry-run with no servers at all). That makes a forgotten binding
     invisible: the run would not crash, it would complete 39 hours of episodes
     with no quiesce, no §4 re-assertion and no leaf relaunch -- every B1/B3
@@ -1361,7 +1361,7 @@ def test_the_arm_runners_hand_every_arm_the_blocks_own_seed(
     runners must therefore hand each arm is a config carrying THAT block's
     seed -- on both the root and the leaf, and on the bench-profile arms too,
     which derive their own `Config` and could silently keep the shipped one.
-    (`rlm/episode.py` and `rlm/arms.py` then put that seed on the wire per
+    (`src/rlm/episode.py` and `src/rlm/measure/arms.py` then put that seed on the wire per
     call; `tests/test_dispatcher.py` pins the wire end.)
     """
     arms = _ArmRecorder().patch(monkeypatch)
