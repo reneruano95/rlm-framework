@@ -77,6 +77,12 @@ ISOLATED = [
     # Executing the plan (run_escalation) stays in cli.py, which is why it is
     # not here.
     "escalation.py",
+    # The root turn's pure text shaping, split out of rootclient.py 2026-08-22.
+    # It lived next to `RootConversation`, which holds a ServerClient -- which is
+    # why `rlm.rootclient` is in FORBIDDEN_RLM and why the REPLAY path could not
+    # be lint-covered while `history_message` and `extract_cell` sat behind an
+    # HTTP client. Text has no business importing transport; the lint says so now.
+    "roottext.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
