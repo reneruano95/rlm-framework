@@ -23,6 +23,29 @@ So the legitimate direction is the inverse: move *out* what does not need compos
 | `src/rlm/launchlog.py` | 130 | a file read, three regexes, dict arithmetic — answers §4's cache-type assertion *without* contacting a server |
 | `src/rlm/projection.py` | 165 | pure arithmetic. Also surfaced §8's **pre-registered** 60 h budget, which had been sitting at line 1480 of a 2,700-line file |
 | `src/rlm/escalation.py` | 130 | JSON + verdict inspection. The lint is load-bearing: a planner that could *ask a server* which cells to re-run would be choosing its own replicates |
+| `src/rlm/roottext.py` | 149 | the root turn's pure text shaping, split out of `rootclient.py` — see below |
+| `src/rlm/replay.py` | 239 | **I4 itself.** Rebuild an episode from the trace store alone — the property S3 passed on |
+| `src/rlm/export.py` | 143 | the parquet+blob bundle a foreign reader gets; must depend on the store and nothing else |
+
+`cli.py`: **2,836 → 2,221 (−22%)**. `rootclient.py`: 260 → 152.
+
+### The chain that mattered: `roottext.py` → `replay.py`
+
+`rlm.rootclient` is in the dependency rule's `FORBIDDEN_RLM` set, because `RootConversation` holds a `ServerClient`. So no lint-covered module could import it — and `history_message` and `extract_cell` were behind that wall. Replay needs both to re-derive an episode's message array, which meant **I4 could not be lint-enforced**: text had been welded to transport, and the cost landed on the one place in the tree where *"cannot consult a live system"* is the entire point.
+
+Splitting the six pure text functions out of `rootclient.py` unblocked it. `replay.py` now sits under the lint, so a re-derivation that tried to ask a server what the prompt was — checking the server against itself — is a test failure rather than a discovery.
+
+Two seams there look wrong and are not. The cut is at `_verify_online`, **not** at `cmd_replay`: `--online` builds a `ServerClient`, so the boundary the section structure suggests would have pulled an HTTP client into the module whose premise is having none. And `_first_difference` is 8 lines, not the ~950 a boundary search claimed — the orchestra banner below it opens with `# ====`, so a `# ---` search sails past it into the bench section.
+
+### What the checks caught, and what they missed
+
+The pre-wiring check aborts by deleting the new file, so a rejected extraction leaves no half-migration. It caught C4 wiring hidden inside an apparently coherent block (`BenchCtx`, `blocks_for`, `run_bench`), a lone `ConfigError`, and a bad boundary — `cli.py` untouched each time.
+
+It **missed** `from rlm.trace import ActionType`: those enums live in `rlm.errors`. The AST check proves names are *bound*, not that imports *resolve*. The check now also runs `python -c "import rlm.<mod>"` in a subprocess. Bind and resolve are different questions; both are cheap to ask.
+
+### Where `cli.py` stops
+
+2,221 lines, and roughly half is `ServerOrchestra` (271), `_bench` (235) and `bench_arm_runners` (172) — composition the spec pins to this file. `build_parser` binds the `cmd_*` handlers; the verb handlers own their server paths. That is the floor, not a pause.
 
 **The seam is the work, not the split.** The escalation banner-to-banner block reads as one unit and is not — a static undefined-name check over the extracted text returned `BenchCtx`, `blocks_for`, `run_bench`, the signature of C4 wiring. Cutting on the banner would have produced a module importing the composition root: a "lint-covered" module whose coverage meant nothing. The real seam is three lines above `async def run_escalation`.
 
