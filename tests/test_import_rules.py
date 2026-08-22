@@ -70,6 +70,13 @@ ISOLATED = [
     # cost -- a projection that can measure is no longer a projection, and §8
     # prints the two side by side precisely to keep them apart.
     "projection.py",
+    # §8:343's escalation PLAN (extracted from cli.py, 2026-08-22). Choosing and
+    # serialising the cells to re-measure. A planner that could ASK a server
+    # which cells to re-run would be choosing its own replicates -- the exact
+    # thing §8's pre-registration prevents -- so this lint is load-bearing.
+    # Executing the plan (run_escalation) stays in cli.py, which is why it is
+    # not here.
+    "escalation.py",
     "sandbox/manager.py",
     "sandbox/child.py",
     "sandbox/winjob.py",
