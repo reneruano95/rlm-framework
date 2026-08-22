@@ -1,7 +1,7 @@
 """§8's inference layer, exactly as pre-registered (ARCHITECTURE.md:339-343).
 
 Dependency-free on purpose: the repo has no scipy, and a p-value that cannot
-be recomputed from the record is not evidence (s2/run_distance.py precedent).
+be recomputed from the record is not evidence (milestones/s2/run_distance.py precedent).
 Changing any rule here after benchmark runs exist is p-hacking.
 """
 from __future__ import annotations

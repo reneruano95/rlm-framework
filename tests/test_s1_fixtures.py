@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-S1 = Path(__file__).resolve().parents[1] / "s1"
+S1 = Path(__file__).resolve().parents[1] / "milestones" / "s1"
 
 
 def test_needle_fixture_is_at_least_64k_leaf_tokens():

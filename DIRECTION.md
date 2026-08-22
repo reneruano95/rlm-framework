@@ -41,7 +41,7 @@ The wedges pull apart only in *marginal-effort allocation* (the library rewards 
 
 ## 4a. S4 result and what it does to this direction (2026-08-18)
 
-The S4 gate PASSED (RLM 30/30; +30/+13/+29 vs B1/B2/B3, all p ≤ 0.0002) — **and the RLM arm never called the leaf** (`s4/RESULTS.md`, ARCHITECTURE.md §9 S4). Three consequences bear directly on this document:
+The S4 gate PASSED (RLM 30/30; +30/+13/+29 vs B1/B2/B3, all p ≤ 0.0002) — **and the RLM arm never called the leaf** (`milestones/s4/RESULTS.md`, ARCHITECTURE.md §9 S4). Three consequences bear directly on this document:
 
 - **The evidence base for a product claim is now real, and cheaper than forecast.** On the frozen benchmark the scaffold answered at 0.78×/0.10×/0.43× the wall-clock and 0.19×/0.06×/0.13× the tokens of the three baselines. "Private, on-prem, *and* cheaper per answer than the obvious alternatives" is a stronger pitch than the quality-at-a-cost story §2 predicted.
 - **Differentiator #1 is not load-bearing for this result.** §3 names serving co-design on unified memory as the first unoccupied gap, and S0's two-resident contention data as its proof. A single resident root plus a REPL would have produced the same 30/30. The co-design work is not invalidated (the baselines needed the leaf; delegation is unmeasured), but **the appliance's minimum viable shape may be one model, not two** — smaller, cheaper, and easier to support. Do not re-plan around this until the delegation measurement lands; do not sell the two-resident topology as the differentiator until it earns a scored win.
@@ -51,7 +51,7 @@ The S4 gate PASSED (RLM 30/30; +30/+13/+29 vs B1/B2/B3, all p ≤ 0.0002) — **
 
 ## 5. Consequences for the engineering plan
 
-- **R13 upstream fix is promoted to product-blocking.** In a multi-user org deployment, cross-request slot leakage is a *privacy defect* — one user's document bleeding into another query's answer — not only a benchmark-validity threat. The interim mitigation (never-reuse-a-slot + deterministic detector, 95% upper bound 2.2%) remains the shipping posture and its bound is a number a customer must be shown. The upstream reproducer/issue (`s2/R13-upstream-draft.md`) moves from "worth filing" to scheduled work.
+- **R13 upstream fix is promoted to product-blocking.** In a multi-user org deployment, cross-request slot leakage is a *privacy defect* — one user's document bleeding into another query's answer — not only a benchmark-validity threat. The interim mitigation (never-reuse-a-slot + deterministic detector, 95% upper bound 2.2%) remains the shipping posture and its bound is a number a customer must be shown. The upstream reproducer/issue (`milestones/s2/R13-upstream-draft.md`) moves from "worth filing" to scheduled work.
 - **R14 gains commercial weight.** Serial-pinned dispatch means the appliance's throughput story is serial until upstream continuous batching is fixed; the `--no-cont-batching` parity lead at concurrency 2 is the path back to fan-out economics. The reproducer and upstream issue matter commercially, not just scientifically.
 - **The trust stack is a sales asset, not overhead:** auditable open orchestration layer + replayable traces (I4) + hard budgets (I1) + published measurement record answer the on-prem buyer's first question — "how do I know what this thing does with my data?" — in a way a closed vendor cannot.
 - **Revenue model (working assumption, not measured):** support and deployment, not licenses. Orgs at this trust level pay for accountability.

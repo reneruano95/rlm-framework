@@ -108,7 +108,7 @@ def test_no_identifier_is_shared_with_any_fixture_on_disk(built):
     ENT- code collision, and that is the collision that would actually let a
     stale slot or a leaked answer score as a pass."""
     others: list[str] = []
-    for pat in ("s1/tasks/*.txt", "s2/fixtures*/**/*.txt"):
+    for pat in ("milestones/s1/tasks/*.txt", "milestones/s2/fixtures*/**/*.txt"):
         for p in REPO.glob(pat):
             others.append(p.read_text(encoding="utf-8", errors="replace"))
     assert others, "no fixture corpora found to compare against"

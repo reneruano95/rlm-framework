@@ -7,7 +7,7 @@ fail**, plus normalization edge cases", with the reason stated plainly:
 
 That reason is not hypothetical here. This project has measured, repeatedly,
 that the leaf answers unanswerable questions with a real identifier lifted from
-somewhere plausible (§7 #2's 95% false-positive rate; `s2/DISTANCE.md`). A
+somewhere plausible (§7 #2's 95% false-positive rate; `milestones/s2/DISTANCE.md`). A
 `contains`-style checker passes exactly that failure whenever the model hedges
 -- "either A or B", "candidates: A, B, C" -- and it passes it for EVERY arm, so
 the S4 verdict would be measuring the checker rather than the roots.

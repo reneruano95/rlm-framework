@@ -1,0 +1,54 @@
+{
+  "generator": "milestones/s2/make_sweep_fixtures.py",
+  "generator_sha256": "ceabab8f4035997c219f66393e3e7e357e50fc6a83a44712ed9fe29f191dbbb2",
+  "token_counter": "leaf:/tokenize",
+  "seed": 5,
+  "built_at": "2026-08-14T01:35:49+00:00",
+  "cells": {
+    "s2-640-p50": {
+      "cell_id": "s2-640-p50",
+      "size_tokens": 640,
+      "measured_tokens": 639,
+      "position": 0.5,
+      "chars": 2300,
+      "seed": 5,
+      "sha256": "4dac21cdc3934f547f38ba8aed1d78c43bef03df12112364357869cb9594e592",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Mervcarnsted Bureau is ce4b54a5-910f-4247-87d0-4ef682b01cb6. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 1168,
+          "token_depth": 0.4679
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Orsthaskwick Exchange enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Torsirmeholm\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Lumsshawgate\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 1368,
+          "token_depth": 0.5837
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Mervcarnsted Bureau. What is that key? Reply with the key itself and nothing else.",
+          "expected": "ce4b54a5-910f-4247-87d0-4ef682b01cb6",
+          "expected_kind": "uuid",
+          "entity": "the Mervcarnsted Bureau"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Orsthaskwick Exchange has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Torsirmeholm Lumsshawgate",
+          "expected_kind": "name",
+          "entity": "the Orsthaskwick Exchange"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Prylshawfield Bureau. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Prylshawfield Bureau"
+        }
+      },
+      "chunk_path": "s2\\fixtures-refusal-640-s5\\s2-640-p50.chunk.txt"
+    }
+  }
+}

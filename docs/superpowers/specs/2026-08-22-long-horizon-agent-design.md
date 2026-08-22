@@ -190,7 +190,7 @@ Same synthetic environment, same local root, same seeds. `loop-nosup` (control) 
 - **Endurance** is read off the *control arm alone*: answer quality and per-turn latency against turn index. It extends Gate 0's null-agent soak to a real reasoning loop.
 - **The supervisor's contribution** is the delta between arms.
 
-**Scored on repetition-attractor entry and recovery rate, never on task score** — because §2.1 proves v1 cannot score anything. Pre-registered milestone: **entry rate falls by ≥50% with zero new outcome types**. The DFlash2 entry-rate anomaly already logged in `s2/REPLAY-LOOP-AB.md` (11/88 vs 1/90 episodes, unexplained) is free signal and should be folded into the design rather than run separately.
+**Scored on repetition-attractor entry and recovery rate, never on task score** — because §2.1 proves v1 cannot score anything. Pre-registered milestone: **entry rate falls by ≥50% with zero new outcome types**. The DFlash2 entry-rate anomaly already logged in `milestones/s2/REPLAY-LOOP-AB.md` (11/88 vs 1/90 episodes, unexplained) is free signal and should be folded into the design rather than run separately.
 
 **What the treatment arm changes, minimally.** `note_turn`'s detector is untouched. `repetition_observation` stops being a fixed config string and becomes **episode-specific content** derived from the trace — what was tried, what the observation was, what has not been tried. Still scaffold-composed, still I1-clean: the model never chooses it. The kill at cap remains as the backstop.
 

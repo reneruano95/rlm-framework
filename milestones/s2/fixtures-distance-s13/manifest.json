@@ -1,0 +1,292 @@
+{
+  "generator": "milestones/s2/make_distance_fixtures.py",
+  "generator_sha256": "303078a17dabc0cda92b6c450ca33d771f12d5e1b27135c16426e761f6e1e1af",
+  "token_counter": "leaf:/tokenize",
+  "seed": 13,
+  "matched_entities": 3,
+  "built_at": "2026-08-14T10:26:51+00:00",
+  "cells": {
+    "s2d-1024-matched": {
+      "cell_id": "s2d-1024-matched",
+      "size_tokens": 1024,
+      "measured_tokens": 1024,
+      "density": "matched",
+      "entity_bindings": 3,
+      "position": 0.5,
+      "chars": 3890,
+      "seed": 13,
+      "sha256": "70724c15fc4cb38b1ee850e0ab745485fc8f2e17b6238f515977e35e112ec01a",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Selkfennthorpe Bureau is 6c7c5b6d-8e4a-4564-a41f-9b60fca7731a. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 1843,
+          "token_depth": 0.4531
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Korrdunested Exchange enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Mervbraefield\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Aldregnridge\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 2045,
+          "token_depth": 0.5283
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Selkfennthorpe Bureau. What is that key? Reply with the key itself and nothing else.",
+          "expected": "6c7c5b6d-8e4a-4564-a41f-9b60fca7731a",
+          "expected_kind": "uuid",
+          "entity": "the Selkfennthorpe Bureau"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Korrdunested Exchange has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Mervbraefield Aldregnridge",
+          "expected_kind": "name",
+          "entity": "the Korrdunested Exchange"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Prylgildbourne Trust. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Prylgildbourne Trust"
+        }
+      },
+      "chunk_path": "s2\\fixtures-distance-s13\\s2d-1024-matched.chunk.txt"
+    },
+    "s2d-1024-natural": {
+      "cell_id": "s2d-1024-natural",
+      "size_tokens": 1024,
+      "measured_tokens": 1022,
+      "density": "natural",
+      "entity_bindings": 6,
+      "position": 0.5,
+      "chars": 3744,
+      "seed": 13,
+      "sha256": "54bed1cf40f31d7c95baf65a502b5e134d2b0057ffb7d7f7fe295406857e6088",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Korrduneness Chapterhouse is 26a6c4af-afe5-40d7-88fd-c9df678028ab. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 1713,
+          "token_depth": 0.4462
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Ilvmestthorpe Ledger enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Jentjostfield\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Ravvhaskbourne\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 1919,
+          "token_depth": 0.5157
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Korrduneness Chapterhouse. What is that key? Reply with the key itself and nothing else.",
+          "expected": "26a6c4af-afe5-40d7-88fd-c9df678028ab",
+          "expected_kind": "uuid",
+          "entity": "the Korrduneness Chapterhouse"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Ilvmestthorpe Ledger has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Jentjostfield Ravvhaskbourne",
+          "expected_kind": "name",
+          "entity": "the Ilvmestthorpe Ledger"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Hurngildridge Exchange. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Hurngildridge Exchange"
+        }
+      },
+      "chunk_path": "s2\\fixtures-distance-s13\\s2d-1024-natural.chunk.txt"
+    },
+    "s2d-2048-matched": {
+      "cell_id": "s2d-2048-matched",
+      "size_tokens": 2048,
+      "measured_tokens": 2048,
+      "density": "matched",
+      "entity_bindings": 3,
+      "position": 0.5,
+      "chars": 8094,
+      "seed": 13,
+      "sha256": "f8379bd3f0c33c1008966c25b05b4768ccb194ef488650be8e203778319f6bf5",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Erlirmested Trust is 63e23fa2-e1fe-4d60-8b45-67979b1ebcb5. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 3898,
+          "token_depth": 0.4673
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Mervjostwick Chapterhouse enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Cenregnridge\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Jentfennfield\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 4096,
+          "token_depth": 0.502
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Erlirmested Trust. What is that key? Reply with the key itself and nothing else.",
+          "expected": "63e23fa2-e1fe-4d60-8b45-67979b1ebcb5",
+          "expected_kind": "uuid",
+          "entity": "the Erlirmested Trust"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Mervjostwick Chapterhouse has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Cenregnridge Jentfennfield",
+          "expected_kind": "name",
+          "entity": "the Mervjostwick Chapterhouse"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Aldlorngate Bureau. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Aldlorngate Bureau"
+        }
+      },
+      "chunk_path": "s2\\fixtures-distance-s13\\s2d-2048-matched.chunk.txt"
+    },
+    "s2d-2048-natural": {
+      "cell_id": "s2d-2048-natural",
+      "size_tokens": 2048,
+      "measured_tokens": 2048,
+      "density": "natural",
+      "entity_bindings": 11,
+      "position": 0.5,
+      "chars": 7702,
+      "seed": 13,
+      "sha256": "1910574b2c1014aeb4ebc9f78620d5c79fa03e1d40db516a64a60d0a62c97c0e",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Faskcarnridge Assembly is bc7f051e-e432-4fcd-929e-f6de49b5fc06. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 3971,
+          "token_depth": 0.5171
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Torsfennfield Trust enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Brydunebourne\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Cenfennholm\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 4174,
+          "token_depth": 0.5518
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Faskcarnridge Assembly. What is that key? Reply with the key itself and nothing else.",
+          "expected": "bc7f051e-e432-4fcd-929e-f6de49b5fc06",
+          "expected_kind": "uuid",
+          "entity": "the Faskcarnridge Assembly"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Torsfennfield Trust has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Brydunebourne Cenfennholm",
+          "expected_kind": "name",
+          "entity": "the Torsfennfield Trust"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Orstfenncombe Bureau. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Orstfenncombe Bureau"
+        }
+      },
+      "chunk_path": "s2\\fixtures-distance-s13\\s2d-2048-natural.chunk.txt"
+    },
+    "s2d-640-matched": {
+      "cell_id": "s2d-640-matched",
+      "size_tokens": 640,
+      "measured_tokens": 639,
+      "density": "matched",
+      "entity_bindings": 3,
+      "position": 0.5,
+      "chars": 2274,
+      "seed": 13,
+      "sha256": "786257094ff785d1f51a0c1e2012ed0181f4e2ec30613c4b12cb36ac79098236",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Dovdalegate Assembly is 9f4694e1-b540-45ad-97a4-505a31ed2e91. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 1087,
+          "token_depth": 0.4413
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Aldvintthorpe Chapterhouse enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Faskdunested\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Selkdaleholm\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 1288,
+          "token_depth": 0.5556
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Dovdalegate Assembly. What is that key? Reply with the key itself and nothing else.",
+          "expected": "9f4694e1-b540-45ad-97a4-505a31ed2e91",
+          "expected_kind": "uuid",
+          "entity": "the Dovdalegate Assembly"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Aldvintthorpe Chapterhouse has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Faskdunested Selkdaleholm",
+          "expected_kind": "name",
+          "entity": "the Aldvintthorpe Chapterhouse"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Quinshawbourne Repository. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Quinshawbourne Repository"
+        }
+      },
+      "chunk_path": "s2\\fixtures-distance-s13\\s2d-640-matched.chunk.txt"
+    },
+    "s2d-640-natural": {
+      "cell_id": "s2d-640-natural",
+      "size_tokens": 640,
+      "measured_tokens": 638,
+      "density": "natural",
+      "entity_bindings": 3,
+      "position": 0.5,
+      "chars": 2246,
+      "seed": 13,
+      "sha256": "54c9af489df12b34c9acc07c013898f0dfde740a3d7d2c9ecb199d7f78295991",
+      "needles": {
+        "literal": {
+          "text": "[custody note] The archive key issued to the Mervmestbourne Ledger is bd97c125-b438-48b7-bf8b-1e0e69bb72f6. It was cut once, for that holder only, and no duplicate key was ever issued under that name.",
+          "char_offset": 1072,
+          "token_depth": 0.4639
+        },
+        "paraphrase": {
+          "text": "[custodial register] the Aldholtthorpe Assembly enters each custodian across two separate lines and never prints a custodian's name in full.\nGIVEN . . . . . . Erlvintholm\nSEAL  . . . . . . intact\nTERM  . . . . . . open\nFAMILY  . . . . . Ilvmoraness\nThose two entries are the only custodian of record for this trust; no other custodian is entered anywhere in the register.",
+          "char_offset": 1274,
+          "token_depth": 0.5784
+        }
+      },
+      "questions": {
+        "literal": {
+          "type": "literal",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Mervmestbourne Ledger. What is that key? Reply with the key itself and nothing else.",
+          "expected": "bd97c125-b438-48b7-bf8b-1e0e69bb72f6",
+          "expected_kind": "uuid",
+          "entity": "the Mervmestbourne Ledger"
+        },
+        "paraphrase": {
+          "type": "paraphrase",
+          "question": "The Aldholtthorpe Assembly has exactly one custodian of record, but the register never prints that custodian's name in full. What is the custodian's full name? Reply with the given name followed by the family name, and nothing else.",
+          "expected": "Erlvintholm Ilvmoraness",
+          "expected_kind": "name",
+          "entity": "the Aldholtthorpe Assembly"
+        },
+        "absent": {
+          "type": "absent",
+          "question": "Exactly one custody note in this excerpt records the archive key issued to the Gormmoraridge Guildhall. What is that key? Reply with the key itself and nothing else.",
+          "expected": null,
+          "expected_kind": "uuid",
+          "entity": "the Gormmoraridge Guildhall"
+        }
+      },
+      "chunk_path": "s2\\fixtures-distance-s13\\s2d-640-natural.chunk.txt"
+    }
+  }
+}

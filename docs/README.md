@@ -12,7 +12,7 @@ written down; this file writes it down.
 The pipeline is `research → spec → plan → code`. A document that skips a stage is
 usually a document in the wrong genre.
 
-Milestone evidence does **not** live here. `s0/`–`s4/` and `upstream/` hold the gate
+Milestone evidence does **not** live here. `milestones/s0/`–`milestones/s4/` and `milestones/upstream/` hold the gate
 records, each beside the runner and JSONL that make it reproducible under I4/I5, and
 `ARCHITECTURE.md` cites into that tree roughly 55 times against 5 citations into
 `docs/`. Moving those records here would break the majority of the spec's citations

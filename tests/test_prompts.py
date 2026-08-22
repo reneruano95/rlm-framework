@@ -19,7 +19,7 @@ FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "leaf-prefix.v1.md",
 
 #: The two recorded S1 A/B arms. Their bytes ARE the published 6/6-vs-6/6
 #: result: editing either one retroactively invalidates it, so the hashes are
-#: pinned here as well as in s1/RESULTS.md. `root.v3.md` exists precisely so
+#: pinned here as well as in milestones/s1/RESULTS.md. `root.v3.md` exists precisely so
 #: that teaching the `chunk=` form never requires touching them.
 S1_AB_ARM_HASHES = {
     "root.v1.md": "1c58a5813e7d62cf2721843b01106b2e59cb5734b95a38e660f81229fad6f24f",

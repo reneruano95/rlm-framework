@@ -228,7 +228,7 @@ def test_no_turns_are_noted_after_a_breach():
 
 @pytest.mark.parametrize("episode, onset_turn", [("9d9e47fb", 9), ("0c1c397d", 5)])
 def test_the_recorded_loops_are_killed_at_the_third_identical_turn(episode, onset_turn):
-    """The two production loops (s4/RESULTS-dflash2-rlm-only.md), replayed
+    """The two production loops (milestones/s4/RESULTS-dflash2-rlm-only.md), replayed
     through the enforcer: the correction lands on the first repeat and the
     kill on the second, i.e. turn onset+2 instead of turn 79 / 116.
 

@@ -609,7 +609,7 @@ async def test_root_role_is_not_a_valid_dispatch_target_from_config(minimal_cfg_
 #
 # The leaf returns content from documents previously held on the same slot:
 # shared slot 24/54 vs virgin slot 0/54 in one process with byte-identical
-# prompts (p = 4.4e-9, s2/R13.md §1). It survives a cold full re-prefill and
+# prompts (p = 4.4e-9, milestones/s2/R13.md §1). It survives a cold full re-prefill and
 # survives `action=erase`, and a full-attention control model leaked MORE than
 # the hybrid -- so it is neither the prompt cache nor recurrent state, and no
 # configuration flag suppresses it. The only thing that works is never reusing
@@ -629,7 +629,7 @@ def test_a_slot_pool_never_hands_out_the_same_index_twice():
 
 
 def test_a_slot_pool_keeps_one_window_on_its_own_slot():
-    """s2/R13-mitigations.md §4.3: the rule is never reuse a slot for a
+    """milestones/s2/R13-mitigations.md §4.3: the rule is never reuse a slot for a
     DIFFERENT document. A second question about the same window is
     same-document reuse -- warm, and measured clean (0/72 at 3 calls per slot,
     0/54 at 9). It is the one performance lever that survives R13."""
@@ -715,7 +715,7 @@ async def test_pool_exhaustion_signals_a_restart_and_dispatches_nothing(mock_ser
 
 
 async def test_a_reassigned_slot_is_caught_and_logged_as_an_error(mock_server):
-    """s2/R13-mitigations.md §4.5. The server can answer HTTP 200 on a slot
+    """milestones/s2/R13-mitigations.md §4.5. The server can answer HTTP 200 on a slot
     other than the one requested, with no error and no warning; a scaffold
     that trusts its own request then believes it holds a virgin slot while
     sharing a used one. The assertion is what keeps the whole mitigation
@@ -810,7 +810,7 @@ async def test_the_pool_is_sized_by_the_servers_parallel(minimal_cfg_dict, mock_
 async def test_the_semaphore_is_the_concurrency_not_the_pool(minimal_cfg_dict,
                                                               mock_server):
     """`--parallel` sizes the POOL (how many windows one process serves before
-    it is rotated -- 128, measured in `s2/R13-slotcount.md`). The semaphore is
+    it is rotated -- 128, measured in `milestones/s2/R13-slotcount.md`). The semaphore is
     how many calls may be in flight at once (8, tuned against S0's flat
     aggregate prefill). Tying the semaphore to the pool would put 128 leaf
     calls on the wire at once purely because the memory bill allowed 128
@@ -869,7 +869,7 @@ async def test_with_no_corpus_the_verdict_is_null_not_a_clean_bill(mock_server):
 
 
 # --------------------------------------------------------------------------- #
-# The reuse law (§7 #3, `s2/CACHE-INSTRUMENT.md`). Every number below is a
+# The reuse law (§7 #3, `milestones/s2/CACHE-INSTRUMENT.md`). Every number below is a
 # MEASURED (n_resident, lcp, ub) -> cache_n triple from that report, not an
 # invented case: the function exists to be asserted as an equality against the
 # server's counter, so a test that agreed with it by construction would be

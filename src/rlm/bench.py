@@ -106,7 +106,7 @@ LEDGER_FIELDS = ("run_id", "block", "task_id", "seed", "arm", "episode_id",
                  "outcome", "reason", "wall_s", "relaunch_s", "superseded_by",
                  "ts")
 
-LEDGER_PATH = REPO_ROOT / "s4" / "results" / "ledger.jsonl"
+LEDGER_PATH = REPO_ROOT / "milestones" / "s4" / "results" / "ledger.jsonl"
 
 ArmRunner = Callable[..., Awaitable[Any]]
 
@@ -141,7 +141,7 @@ def build_blocks(manifest: "BenchmarkManifest", seeds: list[int]) -> list[Block]
 def seeded_config(raw_cfg_dict: dict, seed: int) -> Config:
     """The shipped config with this attempt's seed, re-validated.
 
-    Patch the RAW dict and re-validate (`s1/run_s1.py:variant_config`), never
+    Patch the RAW dict and re-validate (`milestones/s1/run_s1.py:variant_config`), never
     mutate a built `Config`: every cross-field rule in `rlm.config` runs again,
     and the prompt sha256 pins are re-derived rather than carried over.
 

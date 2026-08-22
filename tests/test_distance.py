@@ -1,5 +1,5 @@
-"""The instruction-decay experiment (`s2/run_distance.py`,
-`s2/make_distance_fixtures.py`).
+"""The instruction-decay experiment (`milestones/s2/run_distance.py`,
+`milestones/s2/make_distance_fixtures.py`).
 
 Two things in this experiment can quietly make it measure nothing, and both are
 pinned here rather than trusted:
@@ -116,7 +116,7 @@ def test_matched_density_is_flat_in_size_and_natural_is_not():
 
 def test_the_natural_rate_reproduces_the_fixtures_the_AB_actually_ran():
     """3 bindings per 640, 6 per 1,024, 11 per 2,048 — counted in
-    `s2/fixtures-refusal-640-s*`, `s2/fixtures-refusal-s*` and `s2/fixtures`."""
+    `milestones/s2/fixtures-refusal-640-s*`, `milestones/s2/fixtures-refusal-s*` and `milestones/s2/fixtures`."""
     assert [n_bindings(s, "natural") for s in (640, 1024, 2048)] == [3, 6, 11]
 
 

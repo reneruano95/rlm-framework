@@ -1260,7 +1260,7 @@ async def _b2_chunks(task: "Task", cfg: Config, *,
 async def _b2_root_final(cfg: Config, *, ep: ArmEpisode, registry: PromptRegistry,
                           root_client: Any, summaries: list[str],
                           question: str) -> str:
-    """B2's reduce step: ONE root call, mirroring `s1/run_s1.py:control_attempt`
+    """B2's reduce step: ONE root call, mirroring `milestones/s1/run_s1.py:control_attempt`
     (:144-156) -- `/apply-template` then `/completion`, with
     `cfg.scaffold.sampling.root` (temperature/top_p/seed) carried verbatim,
     via the injected `root_client` at the root port (never constructed here --
@@ -1351,7 +1351,7 @@ async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any
     map step dispatches through C4 exactly as an RLM leaf sub-call does (see
     the section docstring above for the slot/admission consequences of that),
     while the reduce step talks directly to the root server the way
-    `s1/run_s1.py:control_attempt` does. Neither is constructed here --
+    `milestones/s1/run_s1.py:control_attempt` does. Neither is constructed here --
     `arms.py` may not import `rlm.dispatcher`/`rlm.rootclient` (the dependency
     rule; `tests/test_import_rules.py` lints it).
 

@@ -9,9 +9,9 @@ memorisation, or a stale slot score as a pass.
 The existing generators already establish the pattern -- three pairwise-disjoint
 syllable triples, one per corpus family -- so this is the fourth:
 
-    s1/make_fixtures.py        _SYL_A 23 x _SYL_B 20 x _SYL_C 10
-    s2/make_sweep_fixtures.py  _SYL_A 20 x _SYL_B 17 x _SYL_C 10
-    s2/make_distance_fixtures  imports the s2 sweep pool
+    milestones/s1/make_fixtures.py        _SYL_A 23 x _SYL_B 20 x _SYL_C 10
+    milestones/s2/make_sweep_fixtures.py  _SYL_A 20 x _SYL_B 17 x _SYL_C 10
+    milestones/s2/make_distance_fixtures  imports the s2 sweep pool
     bench/vocab.py             THIS ONE
 
 **Do not import a name pool from s1 or s2 here.** Importing the fit and

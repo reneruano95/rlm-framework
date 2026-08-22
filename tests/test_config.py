@@ -64,11 +64,11 @@ def test_the_shipped_chunk_geometry_is_the_measured_one(valid_cfg):
 def test_the_leaf_launch_line_disables_the_host_prompt_cache(valid_cfg):
     """`--cache-ram 0` is load-bearing twice over, and neither reason is taste.
 
-    LATENCY (`s2/OCCUPANCY.md`): the default 8,192 MiB host prompt cache holds
+    LATENCY (`milestones/s2/OCCUPANCY.md`): the default 8,192 MiB host prompt cache holds
     41 entries of this config's 202.80 MiB slot state against a 128-slot pool,
     so past 41 occupied slots the evictions per request equal the occupancy
     exactly, at 37.5 ms each -- 272 s of a 543 s run, per-call wall 2.18 ->
-    6.69 s with `timings.prompt_ms` flat. MEASUREMENT (`s2/CACHE-INSTRUMENT.md`):
+    6.69 s with `timings.prompt_ms` flat. MEASUREMENT (`milestones/s2/CACHE-INSTRUMENT.md`):
     the same subsystem restores an idle slot's state onto a DIFFERENT slot, so
     under the default `cache_n` is not a function of the prompts and not
     reproducible run to run -- it is the precondition for §7 #3's gates being
@@ -102,7 +102,7 @@ def test_max_subcalls_covers_a_full_pass_at_the_shipped_geometry(valid_cfg):
 
 
 def test_the_measured_slot_pool_is_pinned(valid_cfg):
-    """`s2/R13-slotcount.md` §7: `-np 128` with `-c 327680` retained. Measured
+    """`milestones/s2/R13-slotcount.md` §7: `-np 128` with `-c 327680` retained. Measured
     62.8125 MiB of per-slot recurrent state (priced by slot COUNT, not by the
     token budget -- KV stayed at 3,400 MiB for every `-np`), 32.244 GiB leaf
     residency, 51.53 GiB dual-resident of the 64 GiB carve (19.5% margin) and
@@ -119,7 +119,7 @@ def test_dispatch_concurrency_is_not_the_slot_pool_size(valid_cfg):
     """The equality `dispatch_concurrency == leaf.parallel` was true while
     `--parallel` meant "how many calls this server serves at once". Under
     never-reuse it means "how many WINDOWS one process can serve before it is
-    rotated" -- a pool size, measured against memory (`s2/R13-slotcount.md`).
+    rotated" -- a pool size, measured against memory (`milestones/s2/R13-slotcount.md`).
     Concurrency is a throughput lever. Coupling them would put 128 leaf calls
     in flight at once."""
     assert valid_cfg.scaffold.dispatch_concurrency != valid_cfg.servers.leaf.parallel
@@ -132,7 +132,7 @@ def test_dispatch_concurrency_is_pinned_to_serial_by_R14(valid_cfg):
     answers, so serial wins on correct-answers-per-second by 2.7x-110x.
 
     This assertion is a tripwire, not a preference. Raising it silently would
-    change what every leaf measurement in `s2/` means. Raise it only when the
+    change what every leaf measurement in `milestones/s2/` means. Raise it only when the
     `--no-cont-batching` lead is characterised or fixed upstream, and re-measure
     on correct-answers-per-second -- never on wall-clock alone."""
     assert valid_cfg.scaffold.dispatch_concurrency == 1
@@ -438,7 +438,7 @@ def test_the_shipped_config_declares_dflash_and_emits_it(valid_cfg):
     """SUPERSEDES the MTP tripwire (2026-08-19). The shipped root ran
     `draft-mtp` at 2.11x from the S5 swap until DFlash2 shipped a drafter for
     Qwen3.8-27B specifically; measured 1.46x MTP at production sampling
-    (s2/DFLASH2.md). Same tripwire intent as before: dropping either half
+    (milestones/s2/DFLASH2.md). Same tripwire intent as before: dropping either half
     silently gives back a 3x on the serial, decode-bound part of every episode."""
     root = valid_cfg.servers.root
     assert root.dflash is True
@@ -526,7 +526,7 @@ def test_the_wall_clock_budget_carries_the_aggregation_ruling(valid_cfg):
     frozen benchmark unaffordable -- they would `budget_kill`, which §8 scores
     as a FAILURE for every arm, so the benchmark would measure the budget
     rather than the roots. 1300 rather than 1200 because 1,199 against 1,200 is
-    a one-second margin. See s2/aggregation_options.py for the full pricing.
+    a one-second margin. See milestones/s2/aggregation_options.py for the full pricing.
     """
     assert valid_cfg.scaffold.budgets.max_wall_clock_s == 1300
     # 302 windows x 2 sub-calls must still fit the sub-call budget, or the
@@ -627,7 +627,7 @@ def test_the_bench_leaf_profile_is_the_shipped_leaf_with_two_full_slots(valid_cf
 
 
 def test_the_leaf_carries_the_rocblas_env_the_launch_path_used_to_drop(valid_cfg):
-    """`s2/run_occupancy.py:455` sets ROCBLAS_USE_HIPBLASLT for every leaf
+    """`milestones/s2/run_occupancy.py:455` sets ROCBLAS_USE_HIPBLASLT for every leaf
     measurement recorded so far; the CLI's own launch path passed `env=None`,
     so `--launch-leaf` would have run the S4 blocks against a differently
     configured BLAS than every S2 number they are compared with."""

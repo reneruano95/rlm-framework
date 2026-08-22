@@ -1,7 +1,7 @@
 # Capa-1 Scaffold (C1–C6 → S1 Gate) Implementation Plan
 
 > **STATUS (2026-08-22): EXECUTED — the S1 gate passed 2026-08-13**
-> (`s1/RESULTS.md`; `ARCHITECTURE.md` §9).
+> (`milestones/s1/RESULTS.md`; `ARCHITECTURE.md` §9).
 > Its unchecked `- [ ]` boxes are **not** a to-do list: this project never ticked
 > plan checkboxes as work landed. Ground truth for what shipped is `ARCHITECTURE.md`
 > §9's gate status lines and `CHANGELOG.md`.
@@ -32,7 +32,7 @@
 - **No inline prompts.** Prompt text lives only in `prompts/*.md`, referenced from config by path, pinned by sha256. An inline prompt string in config or scaffold code is a spec violation.
 - **The name `llm_query` is load-bearing** — it matches the RLM paper harness API. Injected sandbox API is exactly: `context` (str), `chunks` (list[str]), `await llm_query(prompt: str, role: str = "leaf") -> str`, `final_answer(value)`.
 - **Config is `extra="forbid"`** with cross-field validators; `config_snapshot` is the canonical JSON dump of the validated model (stable field order ⇒ stable hashing).
-- **Never run a foreground interactive process.** `llama-cli` in build b10375 is an interactive chat REPL that wedges the terminal. Servers launch detached with redirected logs (see `s0/RESULTS.md`).
+- **Never run a foreground interactive process.** `llama-cli` in build b10375 is an interactive chat REPL that wedges the terminal. Servers launch detached with redirected logs (see `milestones/s0/RESULTS.md`).
 - **Measured constants from S0** (do not re-derive): leaf prefill 949.9 t/s @32K; leaf decode 55.1 fresh / 46.3 @32K; root decode 12.35 fresh / 12.0 @28K; aggregate prefill is FLAT ~950 t/s at k=1..8; root retains 69–81% decode under full leaf load.
 - **Server launch flags** (both already S0-validated; `--no-mmap` is deprecated in b10375 — use `-lm none`):
   - leaf: `<rocm>\llama-server.exe -m <leaf.gguf> --host 127.0.0.1 --port 8081 -c 327680 -np 8 -ctk q8_0 -ctv q8_0 -fa on -ub 512 -b 2048 -lm none --no-kv-unified --cont-batching` with env `ROCBLAS_USE_HIPBLASLT=1`
@@ -64,7 +64,7 @@
 | `rlm/cli.py` | `rlm validate / run / replay` (bench/export are later slices) |
 | `tests/test_*.py` | per-component suites; property suites for C3 and C5 |
 | `tests/test_import_rules.py` | the dependency-rule lint |
-| `s1/` | S1 fixtures, gate runner, results |
+| `milestones/s1/` | S1 fixtures, gate runner, results |
 
 ---
 
@@ -2239,7 +2239,7 @@ git commit -m "feat: CLI — validate, run, replay (offline + online hash verifi
 ## Task 17: S1 fixtures and the gate
 
 **Files:**
-- Create: `s1/make_fixtures.py`, `s1/tasks/*.json`, `s1/run_s1.py`, `s1/RESULTS.md`
+- Create: `milestones/s1/make_fixtures.py`, `milestones/s1/tasks/*.json`, `milestones/s1/run_s1.py`, `milestones/s1/RESULTS.md`
 - Test: `tests/test_s1_fixtures.py`
 
 **Interfaces:**
@@ -2287,7 +2287,7 @@ def test_fixtures_are_reproducible_from_seed():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run --python 3.12 pytest tests/test_s1_fixtures.py -v`
-Expected: FAIL — `s1/make_fixtures.py` missing.
+Expected: FAIL — `milestones/s1/make_fixtures.py` missing.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -2298,14 +2298,14 @@ Expected: FAIL — `s1/make_fixtures.py` missing.
 - [ ] **Step 4: Run the gate**
 
 ```bash
-uv run --python 3.12 s1/run_s1.py --config config.yaml
+uv run --python 3.12 milestones/s1/run_s1.py --config config.yaml
 ```
-Expected: `S1 GATE: PASS` with the arm scores, the A/B winner, and the re-derived `max_predict`. **A negative result is a finding, not a failure to hide** (§9 S1, R1) — if the root flails in both arms, record it in `s1/RESULTS.md` and stop for a decision rather than tuning prompts ad hoc.
+Expected: `S1 GATE: PASS` with the arm scores, the A/B winner, and the re-derived `max_predict`. **A negative result is a finding, not a failure to hide** (§9 S1, R1) — if the root flails in both arms, record it in `milestones/s1/RESULTS.md` and stop for a decision rather than tuning prompts ad hoc.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add s1/ tests/test_s1_fixtures.py config.yaml
+git add milestones/s1/ tests/test_s1_fixtures.py config.yaml
 git commit -m "feat: S1 fixtures, gate runner, and verdict (spec §9 S1)"
 ```
 

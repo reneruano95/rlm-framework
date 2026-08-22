@@ -360,7 +360,7 @@ def test_launch_log_parse_reads_the_build_line_b10375_ACTUALLY_prints(tmp_path):
 
 
 def test_launch_log_parse_binds_to_the_target_not_the_drafter(tmp_path):
-    """A speculative launch (`-md`, s2/DFLASH2.md) builds TWO contexts, so the
+    """A speculative launch (`-md`, milestones/s2/DFLASH2.md) builds TWO contexts, so the
     log carries two kv_cache lines and two flash_attn lines -- target first,
     drafter second. This parse used to take the LAST of each, so attaching a
     drafter silently moved §4's assertion off the target and onto the draft
@@ -458,7 +458,7 @@ def test_launch_leaf_builds_the_manager_from_config_flags(valid_config_file):
 def test_launch_leaf_carries_the_config_env_to_the_child(valid_config_file):
     """`servers.leaf.env` is merged over os.environ at launch. The CLI passed
     `env=None` here, which silently dropped ROCBLAS_USE_HIPBLASLT -- the
-    variable every S2 leaf measurement was taken with (`s2/run_occupancy.py`
+    variable every S2 leaf measurement was taken with (`milestones/s2/run_occupancy.py`
     :455) -- so a `--launch-leaf` S4 block would have been compared against
     numbers from a differently configured BLAS."""
     from rlm.cli import leaf_process_manager
@@ -775,7 +775,7 @@ GATE_ARMS = "rlm,b1,b2,b3"
 
 def _bench_argv(config_file, tmp_path, *extra):
     """Every path a bench run writes to, redirected into tmp: the ledger
-    (whose default is the pre-registered `s4/results/ledger.jsonl`) and the
+    (whose default is the pre-registered `milestones/s4/results/ledger.jsonl`) and the
     report. A test that wrote either into the repo would be a test that
     contaminated the artifact S4 is scored from."""
     argv = ["bench", "--config", str(config_file),

@@ -1,4 +1,4 @@
-"""S0 item 8's validated Windows package-power collector (s0/RESULTS.md:73-74):
+"""S0 item 8's validated Windows package-power collector (milestones/s0/RESULTS.md:73-74):
 1 Hz `Get-Counter '\\Energy Meter(rapl_package0_pkg)\\Energy'` — Energy is in
 picowatt-hours, Power in mW; energy_j = delta_pWh * 3.6e-9. Overhead measured
 +0.56% (noise) => energy_j is ENABLED on this box. The sampler's known failure

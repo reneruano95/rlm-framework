@@ -64,7 +64,7 @@ class Budgets:
     max_predict: dict[str, int] = field(default_factory=dict)
     #: v0.3.16: the same (cell, observation) pair repeating on consecutive
     #: root turns is a budget. 0 disables. At max-1 the scaffold corrects,
-    #: at max it kills -- measured (s2/REPLAY-LOOP-AB.md): once a cell has
+    #: at max it kills -- measured (milestones/s2/REPLAY-LOOP-AB.md): once a cell has
     #: repeated once the root re-emits it ~64% of the time, once it has
     #: repeated a few times ~92%, and it never calls final_answer from there.
     max_identical_turns: int = 0

@@ -2,7 +2,7 @@
 
 The envelope exists because of ONE measured number: asked about a fact that is
 not in the chunk, the leaf answered anyway 37/39 times (95%, flat across every
-chunk size -- `s2/RESULTS.md` finding 3). The `abstain` field is the mechanism
+chunk size -- `milestones/s2/RESULTS.md` finding 3). The `abstain` field is the mechanism
 under test; everything in this file is the instrument that makes it scoreable.
 
 The evidence half is measured near-inert going in (§10 R5: a span check passes

@@ -23,12 +23,12 @@ traces/
 # S3 gate: generated per-run artifacts (trace store, per-run configs with
 # dynamic fake-root ports). runs.jsonl and RESULTS.md are the record and are
 # committed.
-s3/results/store/
-s3/results/cfg-*.yaml
+milestones/s3/results/store/
+milestones/s3/results/cfg-*.yaml
 
 # upstream bundle: keep the scripts, issue text and verification data;
 # ignore stray bytecode
-upstream/__pycache__/
+milestones/upstream/__pycache__/
 
 # Tool caches and the venv. Each is currently ignored only by a tool-authored
 # inner .gitignore; naming them here means a recreated cache cannot show up

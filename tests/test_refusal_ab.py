@@ -1,7 +1,7 @@
-"""The refusal A/B's scorer (`s2/run_refusal_ab.py`).
+"""The refusal A/B's scorer (`milestones/s2/run_refusal_ab.py`).
 
 The experiment is worth exactly as much as this scorer. Its one rule: the four
-arms are judged by the SAME instrument `s2/RESULTS.md` was judged by, so an
+arms are judged by the SAME instrument `milestones/s2/RESULTS.md` was judged by, so an
 envelope reply is REDUCED to the plain-text answer `s2.run_sweep.classify`
 already scores rather than getting a taxonomy of its own. A second notion of
 "refusal" for the envelope arms would let the mechanism under test define the
@@ -145,8 +145,8 @@ def test_an_unparseable_envelope_is_MALFORMED_in_every_question_type():
 
 
 def test_a_plain_arm_is_scored_exactly_as_the_sweep_scored_it():
-    """The control arms must reproduce `s2/RESULTS.md`'s own numbers on
-    `s2/RESULTS.md`'s own strings, or the baseline column is not a baseline."""
+    """The control arms must reproduce `milestones/s2/RESULTS.md`'s own numbers on
+    `milestones/s2/RESULTS.md`'s own strings, or the baseline column is not a baseline."""
     assert _score("NONE", envelope=False, qtype="absent",
                   expected=None)["label"] == CORRECT
     assert _score("ENT-17687", envelope=False, qtype="absent",
@@ -218,7 +218,7 @@ def test_the_report_renders_all_four_arms_and_both_bold_columns():
 
 def test_the_report_re_derives_labels_rather_than_trusting_stored_ones():
     """A classifier fix must cost a re-read of a JSONL file, never a re-run of
-    the GPU -- the same rule `s2/run_sweep.py --phase report` follows."""
+    the GPU -- the same rule `milestones/s2/run_sweep.py --phase report` follows."""
     md = render_report([_record(label="CORRECT", raw_output="ENT-1")])
     assert "FALSE-POSITIVE" in md
     # the stored label said CORRECT; the raw output says otherwise, and the
@@ -243,7 +243,7 @@ def test_a_verbose_refusal_scores_FALSE_POSITIVE_but_hands_over_nothing():
     writes "the provided text does not contain ...", so a genuine refusal scores
     FALSE-POSITIVE. That biases against exactly the arms under test, since both
     treatments make refusals wordier. The list is NOT widened -- it is the
-    instrument `s2/RESULTS.md` was scored with -- so the report carries the
+    instrument `milestones/s2/RESULTS.md` was scored with -- so the report carries the
     mechanical sub-question instead: did the reply hand over an identifier?"""
     verbose = ("The provided text does not contain any mention of the "
                "Orstholtthorpe Chapterhouse or an associated archive key.")

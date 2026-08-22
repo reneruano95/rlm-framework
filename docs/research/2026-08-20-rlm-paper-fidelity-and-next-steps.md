@@ -1,7 +1,7 @@
 # Are we following the RLM paper? — fidelity audit and next steps
 
 **Date:** 2026-08-20 · **Status:** research brief + proposal (nothing here amends ARCHITECTURE.md or DIRECTION.md; §6 lists the decisions that would)
-**Inputs:** arXiv:2512.24601 v1 (HTML) and **v3 (2026-05-11, adds post-training)**; the live alexzhang13/rlm harness (PyPI `rlms` 0.1.3); mit-oasys model cards; PrimeIntellect-ai/prime-agent (v0.7.4) and its launch post; ARCHITECTURE.md v0.3.15, DIRECTION.md, `s4/RESULTS.md`, the delegation-arm plan, every file under `prompts/`, `rlm/`, `bench/`; the live ledger of run `9588328d` before it was stopped.
+**Inputs:** arXiv:2512.24601 v1 (HTML) and **v3 (2026-05-11, adds post-training)**; the live alexzhang13/rlm harness (PyPI `rlms` 0.1.3); mit-oasys model cards; PrimeIntellect-ai/prime-agent (v0.7.4) and its launch post; ARCHITECTURE.md v0.3.15, DIRECTION.md, `milestones/s4/RESULTS.md`, the delegation-arm plan, every file under `prompts/`, `rlm/`, `bench/`; the live ledger of run `9588328d` before it was stopped.
 **Reframing supplied today:** the project's purpose is *a self-improving RLM agent on local models*, in the spirit of prime-agent. §4–§6 are written against that goal.
 
 ---
@@ -54,7 +54,7 @@ Benchmark v1, checked task by task this session (`bench/corpus.py`, `bench/build
 | synthesis | 8 | set intersection of `^\[ENT-\d+\] (.+)$` across documents — 8/8 | constant-ish |
 | code QA | 7 | `^\s*(async\s+)?def NAME\(` inside `=== FILE:` sections — 7/7 (one repo: this project's own `rlm/`) | constant |
 
-**30/30 are code-solvable. None has the OOLONG property (a per-item label only an LM can produce). No task is quadratic.** §8's rule "≥1 aggregation task must defeat deterministic string matching — requiring semantic judgment per item" was satisfied in letter — `regex_at_chance` scores seven bag-of-words regexes on the *Disposition line alone* (`bench/corpus.py:265-305`) — but not in spirit: it never tests a parser that reads the header, and the S4 root wrote exactly that parser (`s4/RESULTS.md` §"What the root actually did"). The rule's stated purpose ("stops strategy templates from quietly turning the category REPL-only while the leaf-reliability surface ships unmeasured", ARCHITECTURE.md:333) was not achieved by construction.
+**30/30 are code-solvable. None has the OOLONG property (a per-item label only an LM can produce). No task is quadratic.** §8's rule "≥1 aggregation task must defeat deterministic string matching — requiring semantic judgment per item" was satisfied in letter — `regex_at_chance` scores seven bag-of-words regexes on the *Disposition line alone* (`bench/corpus.py:265-305`) — but not in spirit: it never tests a parser that reads the header, and the S4 root wrote exactly that parser (`milestones/s4/RESULTS.md` §"What the root actually did"). The rule's stated purpose ("stops strategy templates from quietly turning the category REPL-only while the leaf-reliability surface ships unmeasured", ARCHITECTURE.md:333) was not achieved by construction.
 
 Two smaller mismatches with the paper's baselines: the paper's "base model" is the **root** model single-shot; B1 is the **leaf** model (no root-single-shot arm exists). And the paper's key ablation, "RLM no sub-calls", is not a named arm — S4's `rlm` arm was it by accident.
 
@@ -118,7 +118,7 @@ Authored before run, frozen separately (`benchmark.version: v2`, its own manifes
 - **Keep code-solvable controls** (2–3 tasks) so the root is still scored for choosing code when code suffices — §8's original intent, now actually enforced.
 - **Arms:** `rlm`, a named `rlm-nosubcalls` (the paper's ablation, made explicit), `rlm-restricted` properly paired, `rlm-default-template` (prices divergence #5), B2 (the honest control). Drop B1/B3 unless a size class needs them.
 - **Train / held-out split from day one** (e.g. 60/40 by task), because §5.4 and §5.5 cannot be measured without it.
-- **Price it first** with `s2/aggregation_options.py`: per-item classification fits 640-token windows naturally (items are short); at 2.78 s/window serial a 300-window corpus is ~14 min/episode — inside 1,300 s. If R14's `--no-cont-batching` lead holds, this is also where fan-out would first pay.
+- **Price it first** with `milestones/s2/aggregation_options.py`: per-item classification fits 640-token windows naturally (items are short); at 2.78 s/window serial a 300-window corpus is ~14 min/episode — inside 1,300 s. If R14's `--no-cont-batching` lead holds, this is also where fan-out would first pay.
 
 ### 5.4 S6-lite — harness-level self-improvement under rlm-halo's discipline (no weights)
 prime-agent's mechanism, made I1-clean: a **learned registry layer** (Python helpers injected into the sandbox as skills; prompt notes; per-category strategy deltas) that a `rlm refine` step proposes from traces and the **scaffold applies between episodes** — versioned, sha-pinned into `config_snapshot`, rollback by refinement id, gated by the held-out split (I5: kept only if held-out success is unchanged or better). Never at runtime, never by the model's own choice mid-episode. This is the Voyager option S6 already names, and it is the only self-improvement path that works with frozen local models today. Hazard to pre-register: refinement overfitting the train split — the held-out gate is the whole point.
@@ -142,7 +142,7 @@ R13 reproducer + upstream issue (privacy defect in the multi-user story); R14 `-
 
 ## 7. Hygiene found on the way (small, do when touching the files)
 - `rlm/cli.py:2792-2793` help text says "default: all four"; ARM_ORDER has five.
-- `s4/RESULTS.md:210-211` says code QA "used real repos"; it is one repo — this project's own `rlm/` at `45597d43`.
+- `milestones/s4/RESULTS.md:210-211` says code QA "used real repos"; it is one repo — this project's own `rlm/` at `45597d43`.
 - ARCHITECTURE.md Q1 (:476) still calls the 32K chunk default "a guess" after 640/480 landed (:257); Appendix A is labelled v0.2 and shows `parallel: 8`, `max_wall_clock_s: 900`.
 - `prompts/strat-aggregation.v2.md:3` cites the 1,024/768 geometry; body text still holds at 640/480.
 - `config-thinkon.yaml` is pre-DFlash2 and pre-S4 in more than the thinking flag.
@@ -153,5 +153,5 @@ R13 reproducer + upstream issue (privacy defect in the multi-user story); R14 `-
 
 ## Postscript (2026-08-21)
 
-- **§5.1 done.** Root-only DFlash2 re-validation (`s4/RESULTS-dflash2-rlm-only.md`, run `c1740386`): 30/30 tasks, median wall 0.80× S4, energy 0.84×, tokens 1.05× — R4 met, DFlash2 kept. Two new `synth` episodes looped on one byte-identical cell (70× and 111×) until killed; three `rlm` episodes delegated for the first time (one with 83 leaf calls, correct, ~3× wall).
-- **Replay A/B done and adversarially reviewed** (`s2/REPLAY-LOOP-AB.md`): repetition *given* the loop state is the root model's, not the drafter's (≈64 % at the first repeat, ≈92 % once established, identical across DFlash2 / MTP / no speculation); *entry* into the state is not settled and leans against DFlash2 (11/88 vs 1/90 episodes with the entry condition, all code QA; a replicated shorter-reply bias). Owed: an entry-rate A/B (code QA × 3 seeds, `dflash` vs `mtp`, interleaved) and a spec amendment bundling a C5 repetition guard (`repetition_loop` outcome), per-turn seed derivation (the root is currently sampled with the same seed on every turn), and a fix for the doubled empty think block every past assistant turn is rendered with. §5.2's list grows by these three items; the rest of the sequence is unchanged.
+- **§5.1 done.** Root-only DFlash2 re-validation (`milestones/s4/RESULTS-dflash2-rlm-only.md`, run `c1740386`): 30/30 tasks, median wall 0.80× S4, energy 0.84×, tokens 1.05× — R4 met, DFlash2 kept. Two new `synth` episodes looped on one byte-identical cell (70× and 111×) until killed; three `rlm` episodes delegated for the first time (one with 83 leaf calls, correct, ~3× wall).
+- **Replay A/B done and adversarially reviewed** (`milestones/s2/REPLAY-LOOP-AB.md`): repetition *given* the loop state is the root model's, not the drafter's (≈64 % at the first repeat, ≈92 % once established, identical across DFlash2 / MTP / no speculation); *entry* into the state is not settled and leans against DFlash2 (11/88 vs 1/90 episodes with the entry condition, all code QA; a replicated shorter-reply bias). Owed: an entry-rate A/B (code QA × 3 seeds, `dflash` vs `mtp`, interleaved) and a spec amendment bundling a C5 repetition guard (`repetition_loop` outcome), per-turn seed derivation (the root is currently sampled with the same seed on every turn), and a fix for the doubled empty think block every past assistant turn is rendered with. §5.2's list grows by these three items; the rest of the sequence is unchanged.

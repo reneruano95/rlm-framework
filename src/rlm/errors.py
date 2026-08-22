@@ -128,7 +128,7 @@ class SlotMismatch(DispatchError):
     """The leaf answered on a slot other than the one C4 requested.
 
     An out-of-range `id_slot` is silently reassigned with HTTP 200 (measured:
-    asked for 200 on a 128-slot server, got 72 -- `s2/R13-mitigations.md`
+    asked for 200 on a 128-slot server, got 72 -- `milestones/s2/R13-mitigations.md`
     §4.5), so this is a contaminated answer, not a warning: the slot that
     served it may have held other documents."""
 

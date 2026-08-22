@@ -43,6 +43,6 @@ packages = ["src/rlm"]
 # `rlm/cli.py` and `rlm/verdict.py` take `bench.manifest` as a function-local
 # import precisely because `bench/` is deliberately NOT in the wheel (see
 # `src/rlm/bench.py`'s module docstring and `tests/test_import_rules.py`).
-# `s1/` and `s2/` resolve the same way -- `bench/vocab.py` imports both at
+# `milestones/s1/` and `milestones/s2/` resolve the same way -- `bench/vocab.py` imports both at
 # module import time, which is why those directories cannot be archived.
-dev-mode-dirs = [".", "src"]
+dev-mode-dirs = [".", "src", "milestones"]

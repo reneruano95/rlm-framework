@@ -69,7 +69,7 @@ MARGIN_GATE = 3
 #: is what lets a post-escalation grid be told apart from a ragged one.
 ESCALATION_SEEDS: tuple[int, ...] = (4, 5)
 
-#: s1/run_s1.py:521's contract, verbatim: everything below this line is
+#: milestones/s1/run_s1.py:521's contract, verbatim: everything below this line is
 #: hand-written and survives regeneration.
 NARRATIVE_MARKER = "<!-- HAND-WRITTEN FINDINGS BELOW — regeneration preserves this -->"
 
@@ -1148,7 +1148,7 @@ def _svg_path(report_path: str | pathlib.Path) -> pathlib.Path:
 def regenerate(report_path: str | pathlib.Path, generated: str) -> str:
     """Rebuild the generated half, preserving the hand-written half.
 
-    `s1/run_s1.py:521-535`'s contract verbatim: the tables and the verdict come
+    `milestones/s1/run_s1.py:521-535`'s contract verbatim: the tables and the verdict come
     from the record, and the findings — what the run actually meant — cannot be
     generated and must not be destroyed by re-running the report.
     """

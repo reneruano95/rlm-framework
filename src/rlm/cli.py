@@ -155,7 +155,7 @@ def parse_launch_log(path: str | os.PathLike) -> dict[str, Any]:
     `validate` reports as UNVERIFIED, never as a pass.
 
     FIRST OCCURRENCE WINS, and that is load-bearing since the DFlash2 swap
-    (2026-08-19, `s2/DFLASH2.md`). A speculative launch with `-md` builds TWO
+    (2026-08-19, `milestones/s2/DFLASH2.md`). A speculative launch with `-md` builds TWO
     contexts, so the log carries two `llama_kv_cache:` lines and two
     `flash_attn =` lines: the target's first, then the drafter's. This loop used
     to `update()` on every match, i.e. LAST wins, so the moment a drafter was
@@ -277,8 +277,8 @@ def leaf_process_manager(cfg: Config, *, launch: bool):
     `os.environ` by `LlamaServerProcess`), NOT from this process's environment
     alone. No `env=` is passed here precisely so that the launch environment is
     a config value `config_snapshot` records -- passing `env=None` is what
-    silently dropped ROCBLAS_USE_HIPBLASLT, which every leaf number in `s2/`
-    was measured with (`s2/run_occupancy.py:455`).
+    silently dropped ROCBLAS_USE_HIPBLASLT, which every leaf number in `milestones/s2/`
+    was measured with (`milestones/s2/run_occupancy.py:455`).
     """
     if cfg.scaffold.dispatcher != "real" or not launch:
         return None
@@ -1569,11 +1569,11 @@ BENCH_MANIFEST_PATH = REPO_ROOT / "bench" / "manifest.json"
 #: Where the generated half of the S4 report lands. `write_report` preserves
 #: everything below `verdict.NARRATIVE_MARKER`, so re-running a bench run
 #: regenerates the tables and never destroys the findings.
-DEFAULT_REPORT_PATH = REPO_ROOT / "s4" / "RESULTS.md"
+DEFAULT_REPORT_PATH = REPO_ROOT / "milestones" / "s4" / "RESULTS.md"
 
 # ---- the projection constants a --smoke run calibrates against -------------- #
 #
-# Copied from `s2/aggregation_options.py:19-38` rather than imported: `s2/` is
+# Copied from `milestones/s2/aggregation_options.py:19-38` rather than imported: `milestones/s2/` is
 # an analysis directory, not part of the shipped wheel (`pyproject.toml`
 # packages = ["rlm"]), and `rlm/` importing it would break `rlm` on install for
 # the sake of four floats. They are PROJECTIONS from measured inputs, never
@@ -2130,7 +2130,7 @@ async def run_escalation(ctx: BenchCtx, verdict, *, seeds: list[int],
 
 
 def projected_episode_s(entry, arm: str, *, wall_cap: float) -> float:
-    """What `s2/aggregation_options.py` predicts one (task, arm) episode costs.
+    """What `milestones/s2/aggregation_options.py` predicts one (task, arm) episode costs.
 
     Aggregation on a chunked arm is the only size-dependent case: its windows
     are stated in the manifest (§8 requires it, so "the affordability claim is
@@ -2186,7 +2186,7 @@ def print_calibration(records, manifest, cfg, *, arms, run_id, out) -> None:
     wall_cap = float(cfg.scaffold.budgets.max_wall_clock_s)
     print(f"\n--- smoke calibration (run_id {run_id}; NOT scored, no report "
           f"written) ---", file=out)
-    print(f"projection constants (s2/aggregation_options.py): "
+    print(f"projection constants (milestones/s2/aggregation_options.py): "
           f"{PROJ_NON_AGG_EXPENSIVE_S:.0f} s chunked-arm non-aggregation, "
           f"{PROJ_CHEAP_ARM_S:.0f} s single-shot, {PROJ_S_PER_WINDOW} s/window "
           f"aggregation (+{PROJ_ROOT_OVERHEAD_FRAC:.0%} root overhead)",

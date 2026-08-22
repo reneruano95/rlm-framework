@@ -16,7 +16,7 @@
 
 
 **Status:** planned, not implemented · **Date:** 2026-08-20
-**Answers:** `s4/RESULTS.md` §"The one thing to do next", option 2
+**Answers:** `milestones/s4/RESULTS.md` §"The one thing to do next", option 2
 **Blocks:** the DIRECTION.md §4a decision (is the appliance one model or two?)
 
 ## 1. The question, stated so it can be answered wrong
@@ -115,7 +115,7 @@ The DFlash2 root is 1.46× faster on decode than the MTP root S4 actually ran,
 which pulls the other way.
 
 The pass therefore settles **both** open items in one grid:
-- the S4 re-validation owed by the DFlash2 swap (`s2/DFLASH2.md` §7), and
+- the S4 re-validation owed by the DFlash2 swap (`milestones/s2/DFLASH2.md` §7), and
 - the delegation price, which is the project's oldest unanswered question.
 
 ## 7. Deliberately not in this plan
@@ -190,7 +190,7 @@ budget fixes that.
 So a synthesis kill is not the arm failing to run; it is the measurement. It
 belongs in the verdict as a cost result beside the categories that do complete
 (agg-02 986 s, needle-02 505 s, codeqa-01 323 s), and it is the first direct
-evidence on the question `s4/RESULTS.md` left open -- whether delegation earns
+evidence on the question `milestones/s4/RESULTS.md` left open -- whether delegation earns
 anything the root cannot get from code.
 
 `restricted_max_wall_clock_s: 2100` is kept anyway, on a separate argument: the

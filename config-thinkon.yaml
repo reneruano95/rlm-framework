@@ -1,6 +1,6 @@
 # VARIANT OF config.yaml -- identical except scaffold.root.enable_thinking IN THE v0.3.16 SCAFFOLD KEYS; NOTE the root-server block still describes the pre-DFlash2 (MTP, b10375) root and the 900 s wall clock -- it predates the 2026-08-19 swap and must be refreshed before any thinking A/B is run (see docs/research/2026-08-20-rlm-paper-fidelity-and-next-steps.md §7).
 # Exists so the S1 re-run can A/B the root's thinking with NO code change
-# and no edit to the shipped config. s2/ROOT-THINKING.md measured thinking
+# and no edit to the shipped config. milestones/s2/ROOT-THINKING.md measured thinking
 # ON as worth +3/8 answers single-turn but as destroying multi-turn prefix
 # reuse (85% -> 4.7%); this arm decides it on a whole episode, where both
 # effects are in scope at once.
@@ -22,7 +22,7 @@ servers:
     #  (1) dense, not MoE (no expert_count key).
     #  (2) attention layout: `arch = qwen35`, ssm.inner_size 6144 /
     #      state_size 128 / conv_kernel 4 -- IDENTICAL to the incumbent, so R7's
-    #      "different architecture" hazard did not materialise (s2/ARCH-LADDER.md).
+    #      "different architecture" hazard did not materialise (milestones/s2/ARCH-LADDER.md).
     #  (3) MTP head PRESENT (`nextn_predict_layers = 1`, block_count 65 vs 64);
     #      the incumbent's Q4_K_M had none, which is why §7 #4 was unmeasurable
     #      before this swap. Measured below.
@@ -44,7 +44,7 @@ servers:
     # Q4_K_M is 15.66 GB, byte-for-byte the same size as the incumbent quant, so
     # dual residency is unchanged and §4's headroom arithmetic still holds.
     model: 'D:\AI\models\lmstudio-community\Qwen3.8-27B-GGUF\Qwen3.8-27B-Q4_K_M.gguf'
-    # §7 #4 MEASURED 2026-08-15 on this box (`s2/mtp_bench.py`, `s2/MTP.md`),
+    # §7 #4 MEASURED 2026-08-15 on this box (`milestones/s2/mtp_bench.py`, `milestones/s2/MTP.md`),
     # median decode over 8 runs at temperature 0, 256 tokens, root-shaped
     # prompts: no speculation 12.87 t/s; `draft-mtp` n-max 2 -> 27.17 t/s
     # (2.11x); n-max 6 -> 26.33 t/s (2.05x, a wash); adding `ngram-mod` ->
@@ -89,7 +89,7 @@ servers:
     backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
     log_path: traces/logs/leaf-server.log
     ctx: 327680
-    # MEASURED AND PINNED 2026-08-13 (`s2/R13-slotcount.md`). `-np 128
+    # MEASURED AND PINNED 2026-08-13 (`milestones/s2/R13-slotcount.md`). `-np 128
     # -c 327680` = 2,560 tok/slot, 128 windows per leaf process, 2 rotations
     # per 200K-token corpus. The two memory axes separate cleanly: KV is priced
     # by the TOKEN budget (3,400 MiB at every `-np`, 10.625 KiB/token at q8_0)
@@ -113,7 +113,7 @@ servers:
     ub: 512
     b: 2048
     # `--cache-ram 0` ADDED 2026-08-14, for two independent measured reasons.
-    # (1) LATENCY (`s2/OCCUPANCY.md`): `--cache-idle-slots` is on by default and
+    # (1) LATENCY (`milestones/s2/OCCUPANCY.md`): `--cache-idle-slots` is on by default and
     #     saves every idle slot to a host-RAM prompt cache on each new task,
     #     against a `--cache-ram` default of 8,192 MiB while ONE slot of this
     #     config is 202.80 MiB -- 41 entries for a 128-slot pool. Past that the
@@ -121,7 +121,7 @@ servers:
     #     41, then N) at 37.5 ms each: 7,268 evictions, 272 s of a 543 s run,
     #     per-call wall 2.18 -> 6.69 s with `timings.prompt_ms` flat. This flag
     #     takes it to a flat 2.05-2.16 s at every occupancy 0-127.
-    # (2) MEASUREMENT CORRECTNESS (`s2/CACHE-INSTRUMENT.md`): the same host
+    # (2) MEASUREMENT CORRECTNESS (`milestones/s2/CACHE-INSTRUMENT.md`): the same host
     #     cache restores an idle slot's state onto a DIFFERENT slot, so under
     #     the default `timings.cache_n` is not a function of the prompts and
     #     not reproducible run to run (the same call reported 0 or 958). With
@@ -146,7 +146,7 @@ scaffold:
   # distance is (window + question), so 1,024 puts the system prefix ~47 tokens
   # PAST the measured fail point and the leaf stops obeying its own prefix --
   # 30/30 false positives at 1,024 against 0/45 with 45/45 literal recall at
-  # 640 (`s2/DISTANCE.md`; reproduced by accident in `s2/OCCUPANCY.md` §8,
+  # 640 (`milestones/s2/DISTANCE.md`; reproduced by accident in `milestones/s2/OCCUPANCY.md` §8,
   # 122/128 correct at 1,024 vs 128/128 twice at 640). The stride still puts
   # every token within `stride` tokens of the end of some window containing it.
   #
@@ -161,7 +161,7 @@ scaffold:
   # Leaf wall at serial dispatch with `--cache-ram 0`: ~1,180 s vs ~884 s,
   # +33%. Landed anyway: at 1,024 the leaf answers a question it cannot see the
   # instructions for, so the cheaper geometry buys answers R5 says are no
-  # evidence of anything. Occupancy does NOT discriminate (`s2/OCCUPANCY.md`
+  # evidence of anything. Occupancy does NOT discriminate (`milestones/s2/OCCUPANCY.md`
   # §6: both geometries drain the same 128-slot pool to the same ceiling, and
   # at peak the 640 call is the CHEAPER one, 6.35 s vs 6.87 s).
   #
@@ -173,7 +173,7 @@ scaffold:
   # the window -- ~950 of the 1,920, so the slot is over-provisioned by design.
   # The smaller window makes `-np 192` (1,706 tok/slot) GEOMETRICALLY feasible
   # for the first time; it stays refused on the measured memory floor (13.4%
-  # margin against the stated 15%, `s2/R13-slotcount.md`). `-np 128` stands.
+  # margin against the stated 15%, `milestones/s2/R13-slotcount.md`). `-np 128` stands.
   chunk: { size_tokens: 640, stride_tokens: 480, overhead_tokens: 1920, snap_to_boundary: true, snap_tolerance: 0.10 }
   truncation_cap_chars: 2000
   budgets:
@@ -202,7 +202,7 @@ scaffold:
     #                           1,024/768 (~884 s), so it does NOT discriminate
     #                           between the geometries. DELIBERATELY NOT
     #                           RE-DERIVED: it is a §9/§8 per-task-size-class
-    #                           derivation, and `s2/OCCUPANCY.md` §7 blocks it
+    #                           derivation, and `milestones/s2/OCCUPANCY.md` §7 blocks it
     #                           on a live defect -- concurrent leaf dispatch
     #                           corrupts the answer (31/32 correct serial,
     #                           7/32 at 2 in flight), so the only measured-
@@ -218,10 +218,10 @@ scaffold:
     max_subcalls: 926
     max_wall_clock_s: 900
     max_total_tokens: 1500000
-    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md: kills a same-cell/same-
+    # v0.3.16 (2026-08-21), milestones/s2/REPLAY-LOOP-AB.md: kills a same-cell/same-
     # observation loop at this many consecutive identical root turns. 0 disables.
     max_identical_turns: 3
-    # S1 re-derivation (§9 S1, s1/RESULTS.md): observed root answer lengths
+    # S1 re-derivation (§9 S1, milestones/s1/RESULTS.md): observed root answer lengths
     # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.
     # The leaf distribution (n=9: 1,1,7,7,7,7,7,31,35) is NOT usable: every
     # one of those calls came from the untemplated leaf path (finding F3), so
@@ -234,7 +234,7 @@ scaffold:
     root: { temperature: 0.7, top_p: 0.8, seed: 1 }
     leaf: { temperature: 0.3, top_p: 0.9, seed: 1 }
   prompts:
-    # S1 R1 A/B DECIDED 2026-08-13 (s1/RESULTS.md): root.v1 (tips-only) vs
+    # S1 R1 A/B DECIDED 2026-08-13 (milestones/s1/RESULTS.md): root.v1 (tips-only) vs
     # root.v2 (tips + two worked exemplars), 3 attempts each on both S1
     # fixtures. Result 6/6 vs 6/6 -- a tie at ceiling, no discrimination. The
     # pre-registered tie-break keeps the SIMPLER prompt: v2 buys +1,203 root
@@ -250,10 +250,10 @@ scaffold:
     # taught the hand-composed single string, so the running root emitted
     # chunk=None on every call and §7 #3's gate (b) would have scored a root
     # never taught the API it is graded on. v1/v2 remain on disk, unmodified and
-    # unpinned, as the recorded S1 arms; s1/run_s1.py re-pins them itself.
+    # unpinned, as the recorded S1 arms; milestones/s1/run_s1.py re-pins them itself.
     root: { path: prompts/root.v3.md, sha256: 3fb653e3eacafa50b53d12c08cc70982fe4a6ad19bf01cffbf7966771917b6b6 }
     # LEAF PREFIX: v1 REMAINS PINNED pending the S2 refusal A/B
-    # (`s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
+    # (`milestones/s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
     # refusal-strengthened arm; v1 is the control behind every leaf measurement
     # recorded so far -- including the 95% false-positive rate the A/B exists to
     # attack -- and is never edited. Whichever arm wins is pinned HERE, once,
@@ -281,7 +281,7 @@ scaffold:
       synthesis: { path: prompts/strat-synthesis.v1.md, sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c }
       code_qa: { path: prompts/strat-codeqa.v1.md, sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e }
       default: { path: prompts/strat-default.v1.md, sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415 }
-  # DECIDED BY THE S2 A/B (`s2/REFUSAL-AB.md`), not by taste. `enabled` appends
+  # DECIDED BY THE S2 A/B (`milestones/s2/REFUSAL-AB.md`), not by taste. `enabled` appends
   # the format block to the leaf prefix and makes C4 parse/validate the reply
   # scaffold-side; `grammar` is the SEPARATE server-side enforcement flag and is
   # never trusted even when on -- llama.cpp has documented silent fail-open on
@@ -304,9 +304,9 @@ scaffold:
     memory_limit_mb: 4096
     active_process_limit: 1
   root:
-    enable_thinking: true   # S1 RE-RUN ARM ONLY -- see s2/ROOT-THINKING.md
+    enable_thinking: true   # S1 RE-RUN ARM ONLY -- see milestones/s2/ROOT-THINKING.md
     window_tokens: 32768
-    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md §4: seed*1000 + turn, distinct
+    # v0.3.16 (2026-08-21), milestones/s2/REPLAY-LOOP-AB.md §4: seed*1000 + turn, distinct
     # per turn instead of the old fixed per-episode seed.
     seed_schedule: per_turn
     # v0.3.16 (2026-08-21): the completion alone, template re-renders the think
@@ -328,7 +328,7 @@ scaffold:
   # slots. 8 was S0's measured value; it may not exceed the pool, since every
   # in-flight call holds a slot.
   #
-  # LIVE BLOCKER, 2026-08-14 (`s2/OCCUPANCY.md` §7): THIS VALUE IS NOT SAFE.
+  # LIVE BLOCKER, 2026-08-14 (`milestones/s2/OCCUPANCY.md` §7): THIS VALUE IS NOT SAFE.
   # Concurrent leaf dispatch destroys the ANSWER, not merely the latency:
   # 31/32 correct serial, 7/32 at 2 in flight, 3/32 at 3, 2/32 at 4, 7/128 at
   # 8 -- degenerate text ('###/remainile'), not wrong answers. Reproduced with

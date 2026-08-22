@@ -1,7 +1,7 @@
 """Aggregation corpora for §8's frozen benchmark.
 
-No existing generator can build one. All three (s1/make_fixtures,
-s2/make_sweep_fixtures, s2/make_distance_fixtures) are single-needle shaped and
+No existing generator can build one. All three (milestones/s1/make_fixtures,
+milestones/s2/make_sweep_fixtures, milestones/s2/make_distance_fixtures) are single-needle shaped and
 assert exactly-one-identifier as a VALIDITY condition -- the opposite of what an
 aggregation task needs, which is many countable items whose total is the answer.
 

@@ -4,7 +4,7 @@
 WHY THIS EXISTS. The leaf server returns content from documents previously
 held on the same slot: measured under a paired control in one process with
 byte-identical prompts, a shared slot leaked 24/54 and a virgin slot 0/54
-(Fisher p = 4.4e-9, `s2/R13.md` §1). Prevention is a slot-allocation rule
+(Fisher p = 4.4e-9, `milestones/s2/R13.md` §1). Prevention is a slot-allocation rule
 (`rlm.dispatcher.SlotPool`); this module is the free check that runs beside
 it, because the prevention is bounded rather than proven: **138 virgin-slot
 calls with zero leaks give a 95% upper bound of 2.2%, not zero, and a 200K
@@ -30,12 +30,12 @@ bugs to be fixed later, and both are pinned by tests in
      identifier-shaped strings, and no widening of the pattern set changes
      that.
   2. **A contaminated REFUSAL is invisible**, and this is a real observed
-     case, not a hypothetical -- `s2/R13.md` §4 quotes an answer that
+     case, not a hypothetical -- `milestones/s2/R13.md` §4 quotes an answer that
      correctly refuses (the fact really was absent) while enumerating four
      entity names belonging to two documents held earlier on the same slot.
      The names are not identifier-shaped, and a proper-noun class would flag
      ordinary capitalised English shared across chunks. The reproducer's own
-     oracle could afford one (`_PROPER` in `s2/r13_repro.py`) only because its
+     oracle could afford one (`_PROPER` in `milestones/s2/r13_repro.py`) only because its
      fixture corpus is procedurally generated coinages; a real corpus is not.
 
 So a clean verdict is evidence, not a certificate. `detected is None`
@@ -43,7 +43,7 @@ So a clean verdict is evidence, not a certificate. `detected is None`
 and it must never be recorded as False, which reads as "checked and clean".
 
 THE PATTERN SET is derived from the strings that actually leaked in
-`s2/R13.md`, not from imagination:
+`milestones/s2/R13.md`, not from imagination:
 
   * UUIDs -- `8243843a-ecc2-4f29-9122-60b53028b36b` (§4, the true key),
     `1251d802-86aa-4e75-96be-aefc175c1e8e` (§4, the leaked one);
@@ -67,7 +67,7 @@ from dataclasses import dataclass, field
 
 #: One alternation, tried in this order, so a UUID is captured whole rather
 #: than as its constituent hex runs. Case-insensitive: the leaked strings and
-#: their chunk-side originals differ in case in real answers (`s2/R13.md` §4).
+#: their chunk-side originals differ in case in real answers (`milestones/s2/R13.md` §4).
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 _ENT_CODE = r"\bENT-\d{4,6}\b"
 _HEX_RUN = r"\b[0-9a-f]{8,}\b"
@@ -127,7 +127,7 @@ class ChunkIndex:
     costs one regex pass over the ANSWER plus a dict lookup per candidate --
     O(answer), not O(corpus). Re-scanning the corpus per answer would cost
     O(corpus) on each of ~848 leaf calls in a 200K-token episode
-    (`s2/R13-mitigations.md` §8.1), which is the difference between a free
+    (`milestones/s2/R13-mitigations.md` §8.1), which is the difference between a free
     check and a check nobody leaves switched on.
 
     `by_token` maps the LOWERCASED token to the first chunk id (in corpus
@@ -158,7 +158,7 @@ class ChunkIndex:
         return cls(by_token=by_token, chunk_count=count)
 
     def foreign(self, answer: str, *, sent: str) -> LeakVerdict:
-        """R13's oracle, verbatim in its definition (`s2/R13.md` §2): a leak is
+        """R13's oracle, verbatim in its definition (`milestones/s2/R13.md` §2): a leak is
         a string that is (a) absent from the document that was actually sent,
         (b) absent from the question, and (c) present in another document of
         the corpus. `sent` is therefore the WHOLE user segment -- chunk and

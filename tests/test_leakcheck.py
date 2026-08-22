@@ -2,7 +2,7 @@
 """R13's foreign-string detector (spec §10 R13 (3), §5 C4).
 
 The corpus fixtures below are cut down from the real leaked answers quoted in
-`s2/R13.md` §4 -- the same identifier shapes, the same two documents, so the
+`milestones/s2/R13.md` §4 -- the same identifier shapes, the same two documents, so the
 detector is tested against the failure it was built for rather than against an
 invented one.
 """
@@ -17,7 +17,7 @@ from rlm.leakcheck import (
     identifier_tokens,
 )
 
-# s2/R13.md §4: chunk `s2-1024-p50` and chunk `s2-2048-p50`, whose keys and
+# milestones/s2/R13.md §4: chunk `s2-1024-p50` and chunk `s2-2048-p50`, whose keys and
 # entity names the leaked answers mixed together.
 CHUNK_1024 = (
     "Custody note for the Prylfennwick Trust. The archive key issued to the "
@@ -50,7 +50,7 @@ def check(answer: str, *, sent: str = CHUNK_8192, question: str = QUESTION,
 
 
 def test_a_uuid_belonging_to_another_chunk_is_a_leak():
-    """s2/R13.md §4, trial 1: the 2048 chunk was asked an absent-fact question
+    """milestones/s2/R13.md §4, trial 1: the 2048 chunk was asked an absent-fact question
     and answered with the 1024 chunk's key."""
     verdict = check("The archive key is 1251d802-86aa-4e75-96be-aefc175c1e8e.",
                     sent=CHUNK_2048)
@@ -95,7 +95,7 @@ def test_a_long_alphanumeric_token_is_identifier_shaped():
 
 
 def test_an_identifier_from_the_chunk_that_was_sent_is_not_a_leak():
-    """s2/R13.md §6 #2: 75 of the sweep's answers quote an identifier from
+    """milestones/s2/R13.md §6 #2: 75 of the sweep's answers quote an identifier from
     their OWN chunk. Those are the ordinary case, not contamination."""
     verdict = check("The archive key is 8243843a-ecc2-4f29-9122-60b53028b36b.")
     assert not verdict.detected
@@ -104,7 +104,7 @@ def test_an_identifier_from_the_chunk_that_was_sent_is_not_a_leak():
 
 
 def test_an_identifier_present_in_no_chunk_is_not_a_leak():
-    """s2/R13.md §6 #2: 3 answers quote `7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d`,
+    """milestones/s2/R13.md §6 #2: 3 answers quote `7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d`,
     a fabricated placeholder present in no chunk. Fabrication is R5's problem,
     not R13's -- the detector must not annex it."""
     verdict = check("The archive key is 7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d.")
@@ -147,7 +147,7 @@ def test_LIMIT_paraphrased_leakage_is_not_caught():
 
 def test_LIMIT_a_contaminated_refusal_is_not_caught():
     """Stated limit 2 (§10 R13 (3)) -- and a REAL observed case, quoted
-    verbatim in s2/R13.md §4: the answer correctly refuses (the fact really is
+    verbatim in milestones/s2/R13.md §4: the answer correctly refuses (the fact really is
     absent) while enumerating four entities belonging to two documents held
     earlier on the same slot. The refusal is right, the model is contaminated,
     and the detector says nothing, because entity NAMES are not

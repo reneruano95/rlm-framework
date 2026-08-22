@@ -38,7 +38,7 @@ from rlm.errors import ServerRotationError
 
 #: Wait this long for a fresh server to answer /health before giving up. A cold
 #: load of the 20.6 GB leaf GGUF measured 10.4 s and a warm one 4.6-5.1 s
-#: (`s2/R13-mitigations.md` §3), so this is ~10x the measured worst case: long
+#: (`milestones/s2/R13-mitigations.md` §3), so this is ~10x the measured worst case: long
 #: enough that a slow load is not mistaken for a failure, short enough that a
 #: server which will never come up does not burn the whole wall clock.
 DEFAULT_START_TIMEOUT_S = 120.0
@@ -131,7 +131,7 @@ class LlamaServerProcess:
         #: from config by default, for the same reason `argv` does: a launch
         #: value invented in code is one `config_snapshot` cannot record (R11),
         #: and ROCBLAS_USE_HIPBLASLT was set for every leaf measurement in
-        #: `s2/` while this launch path silently dropped it. An explicit `env=`
+        #: `milestones/s2/` while this launch path silently dropped it. An explicit `env=`
         #: still wins, so a harness that builds its own environment can.
         self.env: dict[str, str] = dict(server_cfg.env if env is None else env)
         self._health = health_probe

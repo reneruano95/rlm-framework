@@ -14,7 +14,7 @@ text of the sha256-pinned `prompts/leaf-prefix.v1.md` via
 (chunk, question) pair composed into the user message here, not in the
 sandbox. Skipping the template is base-model prompting against an
 instruct-tuned model, which is what made every leaf answer in the S1 gate
-junk (s1/RESULTS.md F3).
+junk (milestones/s1/RESULTS.md F3).
 
 WHAT KEEPS THE PREFIX THE PREFIX, stated exactly. It is NOT "model text lands
 in the user message, so its ChatML markers are just user content" -- that
@@ -50,7 +50,7 @@ The semaphore is `asyncio.Semaphore(cfg.scaffold.dispatch_concurrency)`, owned
 here -- NOT `servers.leaf.parallel`, which since v0.2.6 sizes the never-reuse
 slot POOL (how many windows one leaf process serves before it is rotated, a
 memory-derived number: 62.8125 MiB of recurrent state per slot,
-`s2/R13-slotcount.md`) rather than how many calls may be in flight.
+`milestones/s2/R13-slotcount.md`) rather than how many calls may be in flight.
 Nothing the model runs may resize it, choose a server, or change a port. It
 is held only around each individual dispatch attempt, not across a retry's
 backoff sleep -- this window's slot is its own and can be handed to nothing
@@ -62,7 +62,7 @@ SLOT DISCIPLINE (v0.2.6, R13) -- the correctness contract of this module.
 The leaf returns content from documents previously held on the same slot.
 Measured under a paired control in ONE process with byte-identical prompts at
 the same moment: shared pinned slot 24/54 leaked, virgin slot 0/54 (Fisher
-p = 4.4e-9, `s2/R13.md` §1). It survives a cold full re-prefill
+p = 4.4e-9, `milestones/s2/R13.md` §1). It survives a cold full re-prefill
 (`timings.cache_n == 0`) and survives `action=erase` returning a truthful
 `n_erased`, and a verified full-attention control model leaked MORE than the
 hybrid -- so it is neither the prompt cache nor recurrent state, and no
@@ -71,7 +71,7 @@ configuration flag suppresses it. `cache_prompt: false` (15/18) and
 mitigations. The only measured-clean configurations are one process per
 document and ONE NEVER-REUSED SLOT PER WINDOW, and the second costs a slot
 rather than a process (13.4 s per 200K corpus against 29 min of redundant
-model loading, `s2/R13-mitigations.md` §8.2).
+model loading, `milestones/s2/R13-mitigations.md` §8.2).
 
 So C4 owns slot assignment: `SlotPool`, sized by the server's `--parallel`,
 hands each window one slot that no other window will ever get, and REFUSES
@@ -275,7 +275,7 @@ def window_key(chunk: str | None, call_id: str) -> str:
 
     Identity is the chunk's bytes: two calls carrying the same chunk are two
     questions about one window and share its slot (warm, measured clean --
-    `s2/R13-mitigations.md` §4.3). A call with no `chunk=` is the single-string
+    `milestones/s2/R13-mitigations.md` §4.3). A call with no `chunk=` is the single-string
     form, where C4 cannot see where the document ends and therefore cannot
     prove two such calls carry the same document; the safe reading is that
     they do not, so each gets a window of its own. That costs slots on the
@@ -414,7 +414,7 @@ def predicted_reuse(n_resident: int, lcp: int, ub: int) -> int:
     to 497 tokens), and b10375's HOST prompt cache restores an idle slot's state
     onto a DIFFERENT slot (so it over-reported against §4's per-slot model by up
     to +961). Scored against this function, `cache_n` is EXACT on 239/239 calls
-    at `-ub` 512 and 128 -- `s2/CACHE-INSTRUMENT.md` §3.
+    at `-ub` 512 and 128 -- `milestones/s2/CACHE-INSTRUMENT.md` §3.
 
     TWO PRECONDITIONS, both load-bearing:
 
@@ -423,7 +423,7 @@ def predicted_reuse(n_resident: int, lcp: int, ub: int) -> int:
       stops being a function of the prompts at all. `config.yaml` pins it.
     * `ub + 4` is a property of a BUILD and a FLAG (R11), measured at 512 and
       at 128 (gaps 516 and 132). Re-measure it whenever `-ub` or the llama.cpp
-      build changes; `s2/run_cache_instrument.py` is the regression test.
+      build changes; `milestones/s2/run_cache_instrument.py` is the regression test.
 
     The `+ 4` is the generation-prompt markup -- the same 4 tokens a
     byte-identical re-send still re-evaluates (962 reused of 966).
@@ -764,7 +764,7 @@ class DispatchTarget:
     #: Does this target's prefix ask for the JSON envelope, and must C4
     #: therefore parse and validate one scaffold-side (spec §5, `rlm.envelope`)?
     #: Off by default: the envelope is opt-in, decided by the S2 A/B
-    #: (`s2/REFUSAL-AB.md`), and every measurement recorded before it exists was
+    #: (`milestones/s2/REFUSAL-AB.md`), and every measurement recorded before it exists was
     #: taken with plain-text answers.
     envelope: bool = False
 
@@ -921,7 +921,7 @@ class LLMDispatcher:
         # may be in flight at once, tuned against S0's flat aggregate prefill.
         # The POOL is `servers.leaf.parallel`: how many WINDOWS this process can
         # serve before it must be rotated, sized by the measured 62.8125 MiB of
-        # per-slot recurrent state (`s2/R13-slotcount.md`). Passing the pool
+        # per-slot recurrent state (`milestones/s2/R13-slotcount.md`). Passing the pool
         # size as the semaphore would put 128 calls on the wire because the
         # memory bill happened to allow 128 slots.
         return cls(targets=targets, parallel=cfg.scaffold.dispatch_concurrency,
@@ -1339,7 +1339,7 @@ class LLMDispatcher:
         # D14: render through the server's OWN chat template, never post the
         # caller's string raw -- that is base-model prompting against an
         # instruct-tuned model, and it made every leaf answer in the S1 gate
-        # junk (`''` or a bare `<think></think>`; s1/RESULTS.md F3).
+        # junk (`''` or a bare `<think></think>`; milestones/s1/RESULTS.md F3).
         #
         # I1 + §4: the system prefix is prepended HERE, scaffold-side, from a
         # constant the sandbox cannot reach, and the model's own text is

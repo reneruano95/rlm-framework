@@ -81,7 +81,7 @@ class ServerConfig(_Strict):
     #: and loads no backend DLL). Here rather than in code for the same reason
     #: `extra_flags` is: a launch value invented in code is one
     #: `config_snapshot` cannot record (R11), and ROCBLAS_USE_HIPBLASLT is set
-    #: for every leaf measurement in `s2/` (`s2/run_occupancy.py:455`) while
+    #: for every leaf measurement in `milestones/s2/` (`milestones/s2/run_occupancy.py:455`) while
     #: the scaffold's own launch path dropped it.
     env: dict[str, str] = {}
 
@@ -157,7 +157,7 @@ class Budgets(_Strict):
     #: 522 = 261 windows x 2 questions, one full pass over a 200K-token corpus
     #: at §7 #2's window 1,024 / stride 768 geometry. The old default of 32
     #: covered 24,832 tokens -- 12.4% of such a corpus -- and coverage broke
-    #: silently rather than loudly (`s2/R13-mitigations.md` §8.3).
+    #: silently rather than loudly (`milestones/s2/R13-mitigations.md` §8.3).
     max_subcalls: int = 522
     max_wall_clock_s: int = 900
     #: The DELEGATION arm's wall clock, when it must differ from the shared one.
@@ -166,7 +166,7 @@ class Budgets(_Strict):
     #:
     #: It exists because `max_wall_clock_s` was derived for a call volume this
     #: arm exceeds BY CONSTRUCTION. §8's 1300 s comes from
-    #: `s2/aggregation_options.py`: 604 sub-calls x 2.78 s = 1,199 s plus 8.4%.
+    #: `milestones/s2/aggregation_options.py`: 604 sub-calls x 2.78 s = 1,199 s plus 8.4%.
     #: An arm that must delegate for every READ, not only for every question,
     #: sits at that ceiling on arrival -- measured, synth-01 completed 629 leaf
     #: calls and was killed still running.
@@ -176,7 +176,7 @@ class Budgets(_Strict):
     #: under the same kill threshold as rlm/b1/b2/b3.
     restricted_max_wall_clock_s: int | None = None
     max_total_tokens: int = 1_500_000
-    #: v0.3.16 (s2/REPLAY-LOOP-AB.md). The same (cell, observation) pair on
+    #: v0.3.16 (milestones/s2/REPLAY-LOOP-AB.md). The same (cell, observation) pair on
     #: consecutive root turns: correct at max-1, kill at max as
     #: budget_kill/max_identical_turns. 0 disables; 1 is refused because the
     #: first occurrence of any cell already satisfies `run >= 1` and would
@@ -460,7 +460,7 @@ class Config(_Strict):
         # Under R13's never-reuse policy it means something else entirely: the
         # SLOT POOL, i.e. how many WINDOWS one leaf process can serve before it
         # must be rotated -- sized by the measured per-slot memory bill
-        # (62.8125 MiB of recurrent state per slot, `s2/R13-slotcount.md`), not
+        # (62.8125 MiB of recurrent state per slot, `milestones/s2/R13-slotcount.md`), not
         # by throughput. Dispatch concurrency is still a throughput lever, and
         # S0 measured aggregate prefill FLAT across slots, so the two numbers
         # answer different questions. Keeping the equality at the measured pool
@@ -512,7 +512,7 @@ class Config(_Strict):
         # scoring query.
         #
         # BOTH methods are guarded, deliberately. When the root moved from
-        # `draft-mtp` to `draft-dflash` (s2/DFLASH2.md) a check that only knew
+        # `draft-mtp` to `draft-dflash` (milestones/s2/DFLASH2.md) a check that only knew
         # the token "draft-mtp" would have gone VACUOUS -- `mtp: false` plus
         # DFlash flags satisfies it while reintroducing exactly the silent lie
         # it exists to prevent. A new `--spec-type` value must arrive here too.

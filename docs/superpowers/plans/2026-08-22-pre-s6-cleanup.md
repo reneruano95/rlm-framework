@@ -1,7 +1,10 @@
 # Pre-S6 cleanup — plan
 
-**Date:** 2026-08-22 · **Status:** **EXECUTED 2026-08-22 — Stages 0–5, plus a `src/` migration the plan did not contain.**
-Stage 6 (spec-version event) and Stage 7 (six owner decisions) remain open. Deviations from the plan as written are recorded in §5 of this file under each stage; the two largest are that the **`s0`–`s4` retirement was refused** (§0.1 — `s1`/`s2` are live importable packages) and the **331-site prose-citation sweep was refused** (three classes of false positive, one of them a functional break in the sandbox destination strings).
+**Date:** 2026-08-22 · **Status:** **EXECUTED 2026-08-22 — Stages 0–5, plus two structural moves this plan did not contain.**
+
+The two moves: `rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/ upstream/` → `milestones/`. The second **reverses §0.1's verdict below**, which is left in place as the record of a conclusion that was wrong — see §0.1a. Top level went from 14 directories to 8. Everything temporary is now deleted rather than tracked: `sandbox_bootstrap/`, `**/__pycache__/`, `.pytest_cache/`, `.hypothesis/`, `milestones/s3/results/store/`.
+
+Still refused, and still for the reason given: the **331-site `rlm/` prose sweep** (three classes of false positive, one of them a functional break in the sandbox destination strings). Stage 6 (spec-version event) and Stage 7 (six owner decisions) remain open.
 **Goal (owner, 2026-08-22):** retire finished milestones · delete what is genuinely dead · navigability for S6. Disk reclaim explicitly **not** a goal.
 **Method:** nine read-only agents (seven area inventories, a layout proposal, a destruction audit). Findings marked **[V]** were re-verified in-session; **[R]** are agent-reported and cited but not re-measured.
 
@@ -17,7 +20,7 @@ Two of the three stated goals are therefore mostly unavailable, and saying so is
 
 ### 0.1 "Retire finished milestones" — blocked, verified **[V]**
 
-`s1/` and `s2/` are **live importable packages that the frozen benchmark and the test suite depend on at import time**:
+`milestones/s1/` and `milestones/s2/` are **live importable packages that the frozen benchmark and the test suite depend on at import time**:
 
 ```
 bench/build.py:34        from s1.make_fixtures import approx_tokens
@@ -27,17 +30,33 @@ tests/test_bench_corpus.py:17, test_distance.py:19-37, test_refusal_ab.py:16-25,
 tests/test_s1_fixtures.py:14, test_s2_sweep.py:17-19        (7 test modules)
 ```
 
-`bench/vocab.py` is reached by `bench/corpus.py`, which is reached by `tests/test_bench_corpus.py` — so moving `s1/` or `s2/` makes **`pytest` fail at collection**, not at assert time. Beyond imports: `tests/test_bench_corpus.py:111-112` globs their fixture directories from the repo root; ~53 scripts under `s2/audit/` hardcode the absolute path and ~60 more depend on nesting depth via `parents[1]`/`parents[2]`, so even an archive that *changes depth* breaks the half that currently works **[R]**.
+`bench/vocab.py` is reached by `bench/corpus.py`, which is reached by `tests/test_bench_corpus.py` — so moving `milestones/s1/` or `milestones/s2/` makes **`pytest` fail at collection**, not at assert time. Beyond imports: `tests/test_bench_corpus.py:111-112` globs their fixture directories from the repo root; ~53 scripts under `milestones/s2/audit/` hardcode the absolute path and ~60 more depend on nesting depth via `parents[1]`/`parents[2]`, so even an archive that *changes depth* breaks the half that currently works **[R]**.
 
 `ARCHITECTURE.md` cites into the milestone tree ~55 times against 5 citations into `docs/` **[R]**. `docs/` is not this project's documentation tree; the `sN/` directories are, and each record sits beside the runner and JSONL that make it reproducible under I4/I5.
 
-**Verdict: s0–s4 stay where they are.** The navigability problem they cause is real and is solved by a README, not by moving 414 files.
+**Verdict at the time: s0–s4 stay where they are.** ~~The navigability problem they cause is real and is solved by a README, not by moving 414 files.~~
+
+### 0.1a That verdict was wrong — the move was done the same day
+
+Every obstacle above is real and every one is *mechanical*. Measuring instead of asserting produced the numbers that made it tractable:
+
+| obstacle | measured | resolution |
+|---|---|---|
+| 7 external modules `import s1` / `import s2` | 7 | one line: `dev-mode-dirs = [".", "src", "milestones"]` puts `milestones/` on the dev path, so the import statements never change |
+| depth anchors `parents[N]` | 54 sites | **41 bumped +1**; the other 13 resolve *inside* `s2/` and survive a move untouched. Resolved each anchor rather than bumping blindly |
+| hardcoded `D:\PROJECTS\…` absolute paths | 70 | rewritten. These were **already** welded to this one checkout, so the move added no new fragility |
+| repo-relative `s2/…` references | 936 across 220 files | rewritten, then **every resulting `milestones/…` path verified to exist on disk** — a stronger check than the test suite, because the ~113 audit scripts are not covered by tests |
+| path-component form `REPO_ROOT / "s4"` | 32 | rewritten separately; the two `tmp_path / "s1"` sites in tests were deliberately spared |
+
+One real defect was introduced and caught: the absolute-path rewrite inserted a **single** backslash where JSON and escaped-string contexts need `\\`, producing `milestones\s1`. Three files, 19 sites, caught by `tests/test_s1_fixtures.py` failing. Fixed.
+
+The honest lesson is not "the obstacles were imaginary." It is that **"blocked" was a claim about cost stated as a claim about possibility**, and the cost was never measured before the verdict was written. The frozen set in §1 is a different matter — those are pinned by sha256 or by 614 episode snapshots, and they genuinely cannot move.
 
 ### 0.2 "Delete what's genuinely dead" — nearly empty, and two candidates were wrong **[V]**
 
 - `prompts/leaf-envelope.v1.md` was flagged "no live reference, delete candidate" by one agent. It is referenced at `tests/test_envelope_wiring.py:83, 107, 272`. Deleting it fails the suite.
-- `s2/results/sweep-run1-shared-server.jsonl` looks like contaminated garbage. It is the **known-leaking positive control** ("17 foreign in 54 calls") that validated the leak detector which certified every other run in the milestone clean **[R]**. Deleting it makes every clean verdict in S2 unfalsifiable.
-- `s2/OVERLAP-CONTROLS.md` is the only tracked file nothing references — and it is a *pre-registration* of what overlapping windows do to B2's reducer and B3's BM25 IDF, and S4 shipped B2/B3 **[R]**. Whether its warnings were honoured is recorded nowhere else.
+- `milestones/s2/results/sweep-run1-shared-server.jsonl` looks like contaminated garbage. It is the **known-leaking positive control** ("17 foreign in 54 calls") that validated the leak detector which certified every other run in the milestone clean **[R]**. Deleting it makes every clean verdict in S2 unfalsifiable.
+- `milestones/s2/OVERLAP-CONTROLS.md` is the only tracked file nothing references — and it is a *pre-registration* of what overlapping windows do to B2's reducer and B3's BM25 IDF, and S4 shipped B2/B3 **[R]**. Whether its warnings were honoured is recorded nowhere else.
 
 In a repo with this reproducibility discipline, "dead" and "evidence behind a gate verdict" are indistinguishable from the outside. What genuinely is dead: 28 zero-byte tracked `.log` files **[V]**, build caches, and one duplicated binary blob (§2 Stage 1).
 
@@ -65,8 +84,8 @@ Abbreviated from the full audit; each row is a thing whose move or edit breaks s
 | `bench/manifest.json`, `bench/tasks/`, `bench/corpora/` | Repo-relative path strings live *inside* the JSON whose sha256 is `benchmark.manifest_sha256` (`config.yaml:584`). **No move is both correct and pin-preserving** | "the frozen benchmark moved…" (`rlm/bench.py:181-186`) |
 | `rlm/dispatcher.py`, `budget.py`, `serverproc.py`, `trace.py` — the **names** | These four paths are the literal ground-truth answers of 7 of 30 frozen codeqa tasks | **No error at all.** Silent scoring corruption — the one hazard with zero failure signal |
 | `rlm/` at exactly one level below root | `rlm/bench.py:63`, `rlm/cli.py:113` define `REPO_ROOT = parents[1]`. A `src/` layout silently repoints it | `FileNotFoundError` under a directory that does not exist |
-| `s1/`, `s2/` as top-level packages | §0.1 **[V]** | `pytest` fails at collection |
-| `s4/RESULTS.md`, `s4/results/ledger.jsonl` | Hardcoded `DEFAULT_REPORT_PATH` / `LEDGER_PATH`; two deliberate tripwire tests. Worse without them: `rlm bench` silently starts a fresh ledger instead of resuming | `test_bench.py:884`, `test_cli.py:1316` |
+| `milestones/s1/`, `milestones/s2/` as top-level packages | §0.1 **[V]** | `pytest` fails at collection |
+| `milestones/s4/RESULTS.md`, `milestones/s4/results/ledger.jsonl` | Hardcoded `DEFAULT_REPORT_PATH` / `LEDGER_PATH`; two deliberate tripwire tests. Worse without them: `rlm bench` silently starts a fresh ledger instead of resuming | `test_bench.py:884`, `test_cli.py:1316` |
 | `traces/` (db + blobs together) | 67,136 refs are episode-relative paths resolved against `blob_root`; sole episode truth under I4 | All 67,136 break at once |
 | `sandbox_bootstrap/` the **directory** | Carries a one-time `icacls /grant *S-1-15-2-1` ACE; absolute path at `config.yaml:498` | AppContainer child cannot read its own script, no obvious cause |
 | `.gitattributes` | `*.md text eol=lf` + `bench/corpora/** -text` are what make every content hash reproducible across clones | Breaks 13 prompt pins and 24 corpus hashes on the **next fresh clone** — invisibly on the machine where it changed |
@@ -113,19 +132,19 @@ Pick and run **three replay canaries** before anything moves: one pre-root-swap 
 
 ### Stage 3 — tracked deletions and one move (one commit)
 
-Delete the 28 zero-byte `s2/logs/*.log` and `s0/logs/*.log` **[V]** — `llama-server` writes everything to stderr, so every stdout capture is empty and only the `.err` siblings are ever cited. Then `git mv s2/logs/s1-{leaf,root}.err s1/logs/` — two S1 artifacts misfiled under S2, and grep across the tree returns zero references to either filename.
+Delete the 28 zero-byte `milestones/s2/logs/*.log` and `milestones/s0/logs/*.log` **[V]** — `llama-server` writes everything to stderr, so every stdout capture is empty and only the `.err` siblings are ever cited. Then `git mv milestones/s2/logs/s1-{leaf,root}.err milestones/s1/logs/` — two S1 artifacts misfiled under S2, and grep across the tree returns zero references to either filename.
 
 **Precheck:** `grep -rn "s1-root\.err\|s1-leaf\.err" --include='*.py' --include='*.md' --include='*.yaml' --include='*.ps1' .` must be empty. **Verify:** pytest green, tree clean.
 
 ### Stage 4 — source and config one-liners (one commit)
 
-`pyproject.toml:5` description (pins spec v0.2.2; ships v0.3.16) · `rlm/cli.py:2788-2789` and `rlm/arms.py:532` "all four" → five (text only; validation reads `ARM_ORDER`) · `tests/test_sandbox_manager.py:45` → `REPO_ROOT`-derived (the one absolute machine path in the suite) · `.gitignore` +3 lines (`.venv/`, `.pytest_cache/`, `.hypothesis/` are currently ignored only by tool-authored inner files) · a one-line sync note in each of `upstream/r13_repro.py` and `s2/r13_repro.py` (byte-identical duplicates with **independent live citations** — dedup in either direction breaks one).
+`pyproject.toml:5` description (pins spec v0.2.2; ships v0.3.16) · `rlm/cli.py:2788-2789` and `rlm/arms.py:532` "all four" → five (text only; validation reads `ARM_ORDER`) · `tests/test_sandbox_manager.py:45` → `REPO_ROOT`-derived (the one absolute machine path in the suite) · `.gitignore` +3 lines (`.venv/`, `.pytest_cache/`, `.hypothesis/` are currently ignored only by tool-authored inner files) · a one-line sync note in each of `milestones/upstream/r13_repro.py` and `milestones/s2/r13_repro.py` (byte-identical duplicates with **independent live citations** — dedup in either direction breaks one).
 
 **Verify:** pytest green, canary 1 replays. None of these renames one of the four codeqa-answer modules.
 
 ### Stage 5 — the legibility layer (the actual deliverable)
 
-1. **`README.md`** — one line per top-level directory tagged *live code / frozen artifact / evidence record / machine-bound one-off / gitignored-but-load-bearing*; the three facts that cost the most to rediscover (`s1/` and `s2/` are importable packages pytest depends on; `traces/` is gitignored **and** is sole episode truth under I4; `tools/llamacpp-vulkan-dflash2/` has no zip and cannot be rebuilt from a release); the five commands; a "before you move anything" block naming §1's frozen set; and the stated constraint that **this checkout cannot be relocated**.
+1. **`README.md`** — one line per top-level directory tagged *live code / frozen artifact / evidence record / machine-bound one-off / gitignored-but-load-bearing*; the three facts that cost the most to rediscover (`milestones/s1/` and `milestones/s2/` are importable packages pytest depends on; `traces/` is gitignored **and** is sole episode truth under I4; `tools/llamacpp-vulkan-dflash2/` has no zip and cannot be rebuilt from a release); the five commands; a "before you move anything" block naming §1's frozen set; and the stated constraint that **this checkout cannot be relocated**.
 2. **`docs/README.md`** — the three-genre convention, plus the note that `plans/` checkboxes are not a done/not-done signal (ground truth is §9's gate status lines and the changelog).
 3. **`CHANGELOG.md`** — §14's body extracted; §14 becomes a 3-line stub so line 5's amendment rule, line 3's "(changelog: §14)" and the three plan citations still resolve.
 4. **Appendix A** → a pointer to `config.yaml` plus the §5 cross-field validator list; heading kept so `plans/2026-08-13-capa1-scaffold.md:11` still resolves.
@@ -143,8 +162,8 @@ These sit inside pre-registered gate text, which line 5's amendment rule makes v
 
 | # | Decision | Note |
 |---|---|---|
-| 1 | `tools/llamacpp-rocm-b10488/` — **1,108,556,858 B, the largest single reclaim** | Referenced by **no config**; the only mention anywhere is a *comment* at `config.yaml:89` **[V]**. It is the binary behind the committed `upstream/r13-b10488-*.jsonl` and `r14-b10488-*.jsonl` bug reports; deleting costs a re-extract **plus** an AMD-wheel re-graft to answer a maintainer question |
-| 2 | `config-thinkon.yaml` + `s1/run_thinking_ab.py` | Loads cleanly, but its root block predates the DFlash2 swap: MTP + `--spec-type draft-mtp` + `llamacpp-vulkan` against `config.yaml`'s DFlash2 + `draft-dflash` + `llamacpp-vulkan-dflash2`, ~8 further deltas. The driver's docstring asserts "differ in exactly one key (verified)" with **no runtime assertion**, and `assert_props` compares only `model_path`/`total_slots`/`n_ctx` — all identical. **A thinking A/B run today would attribute an entire serving-stack difference to one boolean.** Refresh, or retire both and close the question with `s2/ROOT-THINKING.md`. Either way, add the assertion |
+| 1 | `tools/llamacpp-rocm-b10488/` — **1,108,556,858 B, the largest single reclaim** | Referenced by **no config**; the only mention anywhere is a *comment* at `config.yaml:89` **[V]**. It is the binary behind the committed `milestones/upstream/r13-b10488-*.jsonl` and `r14-b10488-*.jsonl` bug reports; deleting costs a re-extract **plus** an AMD-wheel re-graft to answer a maintainer question |
+| 2 | `config-thinkon.yaml` + `milestones/s1/run_thinking_ab.py` | Loads cleanly, but its root block predates the DFlash2 swap: MTP + `--spec-type draft-mtp` + `llamacpp-vulkan` against `config.yaml`'s DFlash2 + `draft-dflash` + `llamacpp-vulkan-dflash2`, ~8 further deltas. The driver's docstring asserts "differ in exactly one key (verified)" with **no runtime assertion**, and `assert_props` compares only `model_path`/`total_slots`/`n_ctx` — all identical. **A thinking A/B run today would attribute an entire serving-stack difference to one boolean.** Refresh, or retire both and close the question with `milestones/s2/ROOT-THINKING.md`. Either way, add the assertion |
 | 3 | `traces/rlm.duckdb` compaction (~203.5 MiB) | 814 of 1,634 blocks free. `VACUUM` is a **no-op** in DuckDB 1.5.5 — it needs `ATTACH` + `COPY FROM DATABASE` + swap, which changes the file identity of the I4 truth. Free blocks get reused, so this is a one-time tidy, not a leak. **Recommend deferring past S6** |
 | 4 | `prompts/strat-aggregation.v2.md:3` stale 1,024/768 comment | The loader strips the comment so it never reaches the model; the sha256 covers it anyway. Ship a v3, or accept it. **Do not silently edit v2** — it breaks byte-level comparability with frozen S4 run `1cbafb8f` |
 | 5 | `docs/research/2026-08-22-avo-arc-agi-3-dossier.md` + `docs/superpowers/specs/` | The only untracked paths in the tree. Coupled by `[R]` citations — commit together or not at all. Committing the design makes an S6 slice that `ARCHITECTURE.md` §9 marks "UNSCHEDULED. Do not build." look scheduled unless a status header travels with it |
@@ -154,7 +173,7 @@ These sit inside pre-registered gate text, which line 5's amendment rule makes v
 
 ## 3. Not proposed, and why
 
-**`s2/` is not moved, renamed, split or archived** (§0.1) — the single most inviting target and a live package. **`s2/audit/` is not archived**: 113 re-runnable falsification scripts (~440 KB), collectively cited by `ARCH-LADDER.md:184`, and ~53 hardcode the absolute path so the move breaks them anyway; the `_*_out.txt` beside them are the only written record of the refutation round's verdicts. **`s2/results/sweep-run1-shared-server.jsonl` and `ub.jsonl` are not deleted** (§0.2 — the second documents a trap; deleting it removes the documentation, not the trap). **Nothing is pruned from `traces/logs/`** — two audit scripts iterate the whole directory. **`upstream/r13_repro.py` is not deduplicated** against its s2 twin. **The `sN/*.md` measurement records are not moved into `docs/`.** **No `src/` layout.** **The benchmark is not re-frozen** to normalise `bench/manifest.json`'s path strings — no move is both correct and pin-preserving, and §8's comparability rule makes a re-freeze incomparable with the v1 grid behind S4's +30/+13/+29. **The 171 plan checkboxes are not retroactively ticked** — that would fabricate a per-task history. **The absolute-path contamination is not fixed**: 63+ scripts, a project with its own testing burden and no S6 payoff; it belongs in the README as a stated constraint.
+**`milestones/s2/` is not moved, renamed, split or archived** (§0.1) — the single most inviting target and a live package. **`milestones/s2/audit/` is not archived**: 113 re-runnable falsification scripts (~440 KB), collectively cited by `ARCH-LADDER.md:184`, and ~53 hardcode the absolute path so the move breaks them anyway; the `_*_out.txt` beside them are the only written record of the refutation round's verdicts. **`milestones/s2/results/sweep-run1-shared-server.jsonl` and `ub.jsonl` are not deleted** (§0.2 — the second documents a trap; deleting it removes the documentation, not the trap). **Nothing is pruned from `traces/logs/`** — two audit scripts iterate the whole directory. **`milestones/upstream/r13_repro.py` is not deduplicated** against its s2 twin. **The `sN/*.md` measurement records are not moved into `docs/`.** **No `src/` layout.** **The benchmark is not re-frozen** to normalise `bench/manifest.json`'s path strings — no move is both correct and pin-preserving, and §8's comparability rule makes a re-freeze incomparable with the v1 grid behind S4's +30/+13/+29. **The 171 plan checkboxes are not retroactively ticked** — that would fabricate a per-task history. **The absolute-path contamination is not fixed**: 63+ scripts, a project with its own testing burden and no S6 payoff; it belongs in the README as a stated constraint.
 
 ---
 

@@ -2,7 +2,7 @@
 
 WHY THIS EXISTS, as a number. The S2 sweep asked the leaf about a fact that was
 not in the chunk, 39 times across every chunk size from 1K to 32K. It answered
-anyway **37 times (95%)**, and the rate is the one figure in `s2/RESULTS.md`
+anyway **37 times (95%)**, and the rate is the one figure in `milestones/s2/RESULTS.md`
 that is FLAT across the size axis. Worse, the wrong answers are not fabrications
 but MISATTRIBUTIONS: 59 of 66 quote an identifier that genuinely occurs in the
 chunk, belonging to a different entity. So the spec's original defence -- check
@@ -13,7 +13,7 @@ question**, and this module must not be read as claiming otherwise.
 The field that might actually work is `abstain`: an explicit, cheap, structured
 channel for "not here", separated from the answer text so the scaffold reads a
 BOOLEAN rather than pattern-matching prose for refusal phrases. That is the
-hypothesis the S2 A/B tests (`s2/REFUSAL-AB.md`); this module is its instrument,
+hypothesis the S2 A/B tests (`milestones/s2/REFUSAL-AB.md`); this module is its instrument,
 and the evidence half ships with it so the A/B prices the whole envelope --
 format cost included -- rather than a flattering half of it.
 
@@ -31,7 +31,7 @@ WHAT IS DELIBERATELY NOT HERE.
     `steps.error_detail`.
   * **No scoring.** Whether `abstain=True` beside a substantive `answer` counts
     as a refusal is a SCORING question and belongs to the scorer
-    (`s2/run_sweep.py`), which must apply the same rule to the plain-text arms.
+    (`milestones/s2/run_sweep.py`), which must apply the same rule to the plain-text arms.
     This module reports what the model emitted.
 
 Isolated by the §5 dependency rule (`tests/test_import_rules.py`): stdlib only,

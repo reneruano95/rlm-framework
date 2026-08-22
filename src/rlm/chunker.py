@@ -101,7 +101,7 @@ class ChunkConfig:
 #: initial search span. Any value is correct -- the span doubles until it
 #: actually holds `target` tokens -- so this only decides how many probes the
 #: doubling costs. 4 brackets the 3.77 chars/token measured over the S2 fixture
-#: corpus (`s2/fixtures/manifest.json`).
+#: corpus (`milestones/s2/fixtures/manifest.json`).
 _CHARS_PER_TOKEN_GUESS = 4
 
 

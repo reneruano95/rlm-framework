@@ -536,7 +536,7 @@ class MockLlamaServer:
         concurrent requests pinned to slot 5 were all queued onto slot 5). An
         OUT-OF-RANGE one is silently reassigned and still answers HTTP 200 --
         measured on a 128-slot server: asked for 200, got 72
-        (`s2/R13-mitigations.md` §4.5). No error, no warning, and the caller
+        (`milestones/s2/R13-mitigations.md` §4.5). No error, no warning, and the caller
         believes it holds a virgin slot while sharing a used one."""
         if self.slot_override is not None:
             return self.slot_override

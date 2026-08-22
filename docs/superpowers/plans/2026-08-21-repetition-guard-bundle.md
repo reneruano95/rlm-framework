@@ -14,7 +14,7 @@
 
 **Tech Stack:** Python 3.12, pydantic config (`rlm/config.py`), asyncio episode runner (`rlm/episode.py`), `BudgetEnforcer` (`rlm/budget.py`), `RootConversation` (`rlm/rootclient.py`), `rlm replay` (`rlm/cli.py`), pytest + the `episode_env` / `fake_root_server` / `mock_episode_env` fixtures in `tests/conftest.py`. Run tests with `.venv/Scripts/python.exe -m pytest`.
 
-**Spec:** `s2/REPLAY-LOOP-AB.md` §4 (the three changes and why), `s4/RESULTS-dflash2-rlm-only.md` § Findings items 1–2 (the two loop episodes `9d9e47fb`, `0c1c397d`), ARCHITECTURE.md §5 C5 (budgets), §6 (outcome semantics, state rule), §14 (changelog); D26 (append-only conversation) in `docs/superpowers/plans/2026-08-13-capa1-scaffold.md:675`. The chat template that decides the history-mode design is Qwen3.8-27B's (extracted to `tests/fixtures/repetition/qwen38_chat_template.jinja` in Task 1):
+**Spec:** `milestones/s2/REPLAY-LOOP-AB.md` §4 (the three changes and why), `milestones/s4/RESULTS-dflash2-rlm-only.md` § Findings items 1–2 (the two loop episodes `9d9e47fb`, `0c1c397d`), ARCHITECTURE.md §5 C5 (budgets), §6 (outcome semantics, state rule), §14 (changelog); D26 (append-only conversation) in `docs/superpowers/plans/2026-08-13-capa1-scaffold.md:675`. The chat template that decides the history-mode design is Qwen3.8-27B's (extracted to `tests/fixtures/repetition/qwen38_chat_template.jinja` in Task 1):
 
 ```jinja
 {%- elif message.role == "assistant" %}
@@ -34,7 +34,7 @@
         {{- '<think>\n' }}
 ```
 
-Every past assistant turn is rendered with the template's own `<think>\n…\n</think>\n\n` block; `content` is emitted verbatim after it. Today `rootclient.py:172` stores `content = assistant_prefix(rendered) + raw` where `assistant_prefix` is the generation prompt's `<think>\n\n</think>\n\n` — hence two blocks per turn in every stored render (`s2/results/replay-loop-ab/stimuli/9d9e47fb-onset.rendered.txt`: 17 `<think>` for 9 assistant markers).
+Every past assistant turn is rendered with the template's own `<think>\n…\n</think>\n\n` block; `content` is emitted verbatim after it. Today `rootclient.py:172` stores `content = assistant_prefix(rendered) + raw` where `assistant_prefix` is the generation prompt's `<think>\n\n</think>\n\n` — hence two blocks per turn in every stored render (`milestones/s2/results/replay-loop-ab/stimuli/9d9e47fb-onset.rendered.txt`: 17 `<think>` for 9 assistant markers).
 
 ## Global Constraints
 
@@ -270,7 +270,7 @@ def test_no_turns_are_noted_after_a_breach():
 
 @pytest.mark.parametrize("episode, onset_turn", [("9d9e47fb", 9), ("0c1c397d", 5)])
 def test_the_recorded_loops_are_killed_at_the_third_identical_turn(episode, onset_turn):
-    """The two production loops (s4/RESULTS-dflash2-rlm-only.md), replayed
+    """The two production loops (milestones/s4/RESULTS-dflash2-rlm-only.md), replayed
     through the enforcer: the correction lands on the first repeat and the
     kill on the second, i.e. turn onset+2 instead of turn 79 / 116."""
     turns = json.loads((FIXTURES / f"{episode}.json").read_text(encoding="utf-8"))["turns"]
@@ -309,7 +309,7 @@ class Budgets:
     max_predict: dict[str, int] = field(default_factory=dict)
     #: v0.3.16: the same (cell, observation) pair repeating on consecutive
     #: root turns is a budget. 0 disables. At max-1 the scaffold corrects,
-    #: at max it kills -- measured (s2/REPLAY-LOOP-AB.md): once a cell has
+    #: at max it kills -- measured (milestones/s2/REPLAY-LOOP-AB.md): once a cell has
     #: repeated once the root re-emits it ~64% of the time, once it has
     #: repeated a few times ~92%, and it never calls final_answer from there.
     max_identical_turns: int = 0
@@ -390,7 +390,7 @@ In `rlm/config.py`, class `Budgets(_Strict)`: insert the new field and validator
 
 ```python
     max_total_tokens: int = 1_500_000
-    #: v0.3.16 (s2/REPLAY-LOOP-AB.md). The same (cell, observation) pair on
+    #: v0.3.16 (milestones/s2/REPLAY-LOOP-AB.md). The same (cell, observation) pair on
     #: consecutive root turns: correct at max-1, kill at max as
     #: budget_kill/max_identical_turns. 0 disables; 1 is refused because the
     #: first occurrence of any cell already satisfies `run >= 1` and would
@@ -421,12 +421,12 @@ Wire the dataclass in `rlm/episode.py:445-458` — add to the `BudgetLimits(...)
 In `config.yaml`, after the `max_total_tokens: 1500000` line in `scaffold.budgets`:
 
 ```yaml
-    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md. The root re-emitting the SAME
+    # v0.3.16 (2026-08-21), milestones/s2/REPLAY-LOOP-AB.md. The root re-emitting the SAME
     # cell and getting the SAME observation is a loop the model does not leave
     # on its own: measured, once a cell has repeated once it repeats again ~64%
     # of the time, after a few repeats ~92%, and final_answer is never called
     # from there. Two production episodes ran 70 and 111 identical turns until
-    # context_exhausted / wall_clock (s4/RESULTS-dflash2-rlm-only.md). This is
+    # context_exhausted / wall_clock (milestones/s4/RESULTS-dflash2-rlm-only.md). This is
     # a C5 budget like the others: at max-1 consecutive identical turns the
     # scaffold appends a correction to the observation; at max the episode
     # ends budget_kill / max_identical_turns. 0 disables.
@@ -761,7 +761,7 @@ In `RootConversation.turn()`, replace the `completion(...)` call's `seed=self._s
   root:
     enable_thinking: false
     window_tokens: 32768
-    # v0.3.16 (2026-08-21), s2/REPLAY-LOOP-AB.md §4. Until now the root was
+    # v0.3.16 (2026-08-21), milestones/s2/REPLAY-LOOP-AB.md §4. Until now the root was
     # sampled with the SAME seed on every turn of an episode. When two
     # consecutive turns see near-identical histories -- a cell re-run against
     # an unchanged observation -- the sampler then makes the same choices, and
@@ -1154,7 +1154,7 @@ ALLOWED_KINDS = frozenset({
     # with its own `<think>\n\n</think>\n\n` before the content; storing
     # assistant_prefix(rendered) + raw put a second one in front of every past
     # turn in every S4 and re-validation request (stimuli in
-    # s2/results/replay-loop-ab/: 17 think blocks for 9 assistant markers).
+    # milestones/s2/results/replay-loop-ab/: 17 think blocks for 9 assistant markers).
     # `raw` stores the completion itself, so the next render is the previous
     # render + the model's tokens, byte for byte, and the history is what the
     # model actually saw. `prefix_plus_raw` is the old rule, which `rlm replay`
@@ -1238,14 +1238,14 @@ Expected: `root_view_hash: OK`, `message array: OK`.
 - [ ] **Step 1: Version and status**
 
 Line 3: `**Spec version:** \`rlm-runtime-spec-v0.3.16\` (changelog: §14)`.
-Line 4, append to the end of the status sentence before "§7 numbers are on-box measurements": ` **v0.3.16 (2026-08-21): C5 gains \`max_identical_turns\`; the RLM arm's root conversation samples per-turn seeds; the root history is stored as the raw completion (\`history_mode: raw\`) — after the DFlash2 re-validation's two 70- and 111-turn repetition loops (\`s4/RESULTS-dflash2-rlm-only.md\`, \`s2/REPLAY-LOOP-AB.md\`).**`
+Line 4, append to the end of the status sentence before "§7 numbers are on-box measurements": ` **v0.3.16 (2026-08-21): C5 gains \`max_identical_turns\`; the RLM arm's root conversation samples per-turn seeds; the root history is stored as the raw completion (\`history_mode: raw\`) — after the DFlash2 re-validation's two 70- and 111-turn repetition loops (\`milestones/s4/RESULTS-dflash2-rlm-only.md\`, \`milestones/s2/REPLAY-LOOP-AB.md\`).**`
 
 - [ ] **Step 2: §5 C5 budgets line (line 143)**
 
 After `` `max_predict` per call, **per role** (root 1024; leaf 512 default, …phantom tokens across 32 subcalls). `` append:
 
 ```
-**`max_identical_turns` (default 3; 0 disables; 1 refused — v0.3.16).** A root turn whose cell (stripped) and C3 observation are byte-identical to the previous turn's is counted; at `max − 1` consecutive identical turns the scaffold appends `repetition_observation()` to the observation (part of `observation_view`, so replay needs nothing); at `max` the episode ends `budget_kill / max_identical_turns`. Measured basis (`s2/REPLAY-LOOP-AB.md`): given one repeat the root repeats again ≈64 % of the time, given several ≈92 %, and it never reaches `final_answer` from there; the enforcer sees the un-annotated view so the note cannot mask the next repeat.
+**`max_identical_turns` (default 3; 0 disables; 1 refused — v0.3.16).** A root turn whose cell (stripped) and C3 observation are byte-identical to the previous turn's is counted; at `max − 1` consecutive identical turns the scaffold appends `repetition_observation()` to the observation (part of `observation_view`, so replay needs nothing); at `max` the episode ends `budget_kill / max_identical_turns`. Measured basis (`milestones/s2/REPLAY-LOOP-AB.md`): given one repeat the root repeats again ≈64 % of the time, given several ≈92 %, and it never reaches `final_answer` from there; the enforcer sees the un-annotated view so the note cannot mask the next repeat.
 ```
 
 - [ ] **Step 3: §6 outcome_reason conventions (line 189)**
@@ -1263,7 +1263,7 @@ After the final-answer-channel paragraph (line 175) add:
 Append to the §10 table after R12:
 
 ```
-| R15 | **Verbatim-repetition attractor in the root** (v0.3.16): after an empty or unchanged observation following a prose-free cell, Qwen3.8-27B re-emits the identical cell — ≈6 % at onset, ≈64 % after one repeat, ≈92 % after several, `final_answer` never — independent of speculative drafter or build (`s2/REPLAY-LOOP-AB.md`: DFlash2 61/120, MTP 65/120, none 67/120; two production episodes ran 70 and 111 turns). The same seed on every turn (pre-v0.3.16) turned the per-turn rate into certainty. Entry into the state was ~10× more frequent under the DFlash2 root in the re-validation (11/88 vs 1/90 episodes, code QA only) — unexplained. | C5 `max_identical_turns` (correct at 2, kill at 3) bounds the cost at three turns; `seed_schedule: per_turn` removes the lock-step; `history_mode: raw` removes the doubled think block from the state the attractor lives in. **Owed:** an entry-rate A/B (code QA × 3 seeds, `dflash` vs `mtp`, interleaved) before R4's "success unchanged" is clean; a prompt A/B on non-benchmark fixtures asking for one line of intent before each cell. |
+| R15 | **Verbatim-repetition attractor in the root** (v0.3.16): after an empty or unchanged observation following a prose-free cell, Qwen3.8-27B re-emits the identical cell — ≈6 % at onset, ≈64 % after one repeat, ≈92 % after several, `final_answer` never — independent of speculative drafter or build (`milestones/s2/REPLAY-LOOP-AB.md`: DFlash2 61/120, MTP 65/120, none 67/120; two production episodes ran 70 and 111 turns). The same seed on every turn (pre-v0.3.16) turned the per-turn rate into certainty. Entry into the state was ~10× more frequent under the DFlash2 root in the re-validation (11/88 vs 1/90 episodes, code QA only) — unexplained. | C5 `max_identical_turns` (correct at 2, kill at 3) bounds the cost at three turns; `seed_schedule: per_turn` removes the lock-step; `history_mode: raw` removes the doubled think block from the state the attractor lives in. **Owed:** an entry-rate A/B (code QA × 3 seeds, `dflash` vs `mtp`, interleaved) before R4's "success unchanged" is clean; a prompt A/B on non-benchmark fixtures asking for one line of intent before each cell. |
 ```
 
 - [ ] **Step 5: (removed) — D26 is not in ARCHITECTURE.md.** Its sentence is carried by the §6 paragraph in Step 3. Nothing to do.
@@ -1273,7 +1273,7 @@ Append to the §10 table after R12:
 Insert above the v0.3.15 entry:
 
 ```
-- **v0.3.16 — 2026-08-21. Repetition guard bundle (`s2/REPLAY-LOOP-AB.md`; plan `docs/superpowers/plans/2026-08-21-repetition-guard-bundle.md`).** The DFlash2 root-only re-validation passed 30/30 (`s4/RESULTS-dflash2-rlm-only.md`) but two `synth` episodes re-emitted one byte-identical cell 70× and 111× until killed. A five-arm replay A/B showed repetition *given the state* is the model's (≈64 % after one repeat, ≈92 % established, in every arm) and an adversarial review showed *entry* was ~10× more frequent under DFlash2 in code QA — recorded as R15, entry-rate A/B owed. Three scaffold changes, all config-recorded: **C5 `max_identical_turns`** (correct at 2, kill at 3 as `budget_kill / max_identical_turns` — no new outcome, no schema or verdict change; the recorded loops now die at turns 11 and 7); **`scaffold.root.seed_schedule: per_turn`** (the RLM arm's root had sampled with one seed on every turn, turning a 64 % repeat into 70/70 and 111/111; B2's one-shot reduce is unchanged); **`scaffold.root.history_mode: raw`** (the stored history carried two empty think blocks per past turn because `assistant_prefix + raw` was re-rendered behind the template's own block; `history_message()` is now the one rule the loop and `rlm replay` share, old snapshots replay under the old rule, and a `root_history / diverged` lifecycle kind monitors prefix extension). §5 C5, §6, §10 R15 amended; no invariant or gate changes; on-box smoke: one real episode under `raw` rendered one think block per turn with zero `root_history / diverged` events and replayed OK.
+- **v0.3.16 — 2026-08-21. Repetition guard bundle (`milestones/s2/REPLAY-LOOP-AB.md`; plan `docs/superpowers/plans/2026-08-21-repetition-guard-bundle.md`).** The DFlash2 root-only re-validation passed 30/30 (`milestones/s4/RESULTS-dflash2-rlm-only.md`) but two `synth` episodes re-emitted one byte-identical cell 70× and 111× until killed. A five-arm replay A/B showed repetition *given the state* is the model's (≈64 % after one repeat, ≈92 % established, in every arm) and an adversarial review showed *entry* was ~10× more frequent under DFlash2 in code QA — recorded as R15, entry-rate A/B owed. Three scaffold changes, all config-recorded: **C5 `max_identical_turns`** (correct at 2, kill at 3 as `budget_kill / max_identical_turns` — no new outcome, no schema or verdict change; the recorded loops now die at turns 11 and 7); **`scaffold.root.seed_schedule: per_turn`** (the RLM arm's root had sampled with one seed on every turn, turning a 64 % repeat into 70/70 and 111/111; B2's one-shot reduce is unchanged); **`scaffold.root.history_mode: raw`** (the stored history carried two empty think blocks per past turn because `assistant_prefix + raw` was re-rendered behind the template's own block; `history_message()` is now the one rule the loop and `rlm replay` share, old snapshots replay under the old rule, and a `root_history / diverged` lifecycle kind monitors prefix extension). §5 C5, §6, §10 R15 amended; no invariant or gate changes; on-box smoke: one real episode under `raw` rendered one think block per turn with zero `root_history / diverged` events and replayed OK.
 ```
 
 - [ ] **Step 7: Commit**
@@ -1289,7 +1289,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ## Self-review
 
-**Spec coverage.** `s2/REPLAY-LOOP-AB.md` §4 asks for: a C5 repetition guard with a correction then a named termination (Tasks 2–3 — named by reason, not by a new outcome; the plan says why), a unit test on the two recorded histories (Task 2 step 1, last test), per-turn seed derivation (Task 4), the doubled-think-block fix with `rlm replay` kept exact (Tasks 5–6, with the store's own loop episodes replayed in Task 6 step 5), and a spec amendment with a version bump (Task 8). The entry-rate A/B and the prompt A/B are recorded as owed in R15, not built here — they are measurements, not scaffold changes, and belong to their own plan.
+**Spec coverage.** `milestones/s2/REPLAY-LOOP-AB.md` §4 asks for: a C5 repetition guard with a correction then a named termination (Tasks 2–3 — named by reason, not by a new outcome; the plan says why), a unit test on the two recorded histories (Task 2 step 1, last test), per-turn seed derivation (Task 4), the doubled-think-block fix with `rlm replay` kept exact (Tasks 5–6, with the store's own loop episodes replayed in Task 6 step 5), and a spec amendment with a version bump (Task 8). The entry-rate A/B and the prompt A/B are recorded as owed in R15, not built here — they are measurements, not scaffold changes, and belong to their own plan.
 
 **Placeholder scan.** Every code step carries the code; every run step carries the command and the expected output. Two steps defer to a quick `grep` to confirm an import or a name already in the file (`BudgetLimits`, `BudgetBreach`, `assistant_prefix` in `cli.py`) — those are confirmations, not design left open.
 

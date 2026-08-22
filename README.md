@@ -29,16 +29,21 @@ tells you whether you may touch it.
 | `bench/` | **live code + frozen artifact** | The benchmark builder *and* frozen v1 (`manifest.json`, `tasks/`, `corpora/`). The frozen half is pinned by `benchmark.manifest_sha256`. |
 | `tests/` | **live code** | 958 tests. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant. |
 | `prompts/` | **frozen artifact** | 18 sha-pinned prompt files. See "before you move anything". |
-| `s0/ s1/ s2/ s3/ s4/` | **evidence record** *(and `s1`/`s2` are also live packages — see below)* | One directory per milestone gate. Each `RESULTS.md` is the evidence behind a published verdict. |
-| `upstream/` | **evidence record** | llama.cpp defect reproducers and issue drafts (R13 slot leak, R14 continuous batching). Ahead of the `s2/` docs it derives from. |
+| `milestones/` | **evidence record** *(and `s1`/`s2` are also live packages — see below)* | `s0/`–`s4/` one per gate, plus `upstream/` (llama.cpp defect reproducers for R13 and R14). Each `RESULTS.md` is the evidence behind a published verdict. Consolidated here from five top-level directories on 2026-08-22. |
 | `docs/` | **live documents** | Research, specs, plans. Conventions in [`docs/README.md`](docs/README.md). |
-| `traces/` | **gitignored, and irreplaceable** | The trace store: DuckDB + 67,136 blobs. Under I4 this is the *sole* episode truth. Not in git. Not reconstructible. |
-| `tools/` | **gitignored, machine-bound** | Three live llama.cpp builds. Not in git, ~2.3 GB. |
-| `sandbox_bootstrap/` | **gitignored, generated, load-bearing** | Regenerated from `src/rlm/` every run — but the *directory* carries a one-time ACL grant. Delete it freely; never relocate it. |
+| `traces/` | **gitignored, and irreplaceable** | The trace store: DuckDB + 67,136 blobs. Under I4 this is the *sole* episode truth. Not in git. Not reconstructible. Kept at the top level deliberately — it is the project's most valuable artifact, not a build output. |
+| `tools/` | **gitignored, machine-bound** | Three live llama.cpp builds, ~2.3 GB. |
+
+Anything not listed above is temporary and is deleted on sight:
+`sandbox_bootstrap/`, `**/__pycache__/`, `.pytest_cache/`, `.hypothesis/`, and
+`milestones/s3/results/store/`. `sandbox_bootstrap/` looks load-bearing because
+the directory carries a one-time `icacls /grant *S-1-15-2-1` ACE — it is not.
+`rlm validate` recreates the directory, its four staged files **and** the ACE.
+Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
 
 ## Three things that cost the most to rediscover
 
-1. **`s1/` and `s2/` are importable Python packages the build and the test suite
+1. **`milestones/s1/` and `milestones/s2/` are importable Python packages the build and the test suite
    depend on.** `bench/build.py` and `bench/vocab.py` import them at module import
    time, and seven test modules import them directly — so moving either makes
    `pytest` fail at *collection*. They look like finished milestones. They are not
@@ -82,7 +87,7 @@ trace store alone. Several things are therefore frozen, and two of them fail
   `src/rlm/cli.py` define `REPO_ROOT = parents[2]`.
 - **`src/rlm/schema.sql` beside `src/rlm/trace.py`** — a `with_name()` sibling
   lookup, not declared package data.
-- **`s4/RESULTS.md` and `s4/results/ledger.jsonl`** — hardcoded paths with two
+- **`milestones/s4/RESULTS.md` and `milestones/s4/results/ledger.jsonl`** — hardcoded paths with two
   deliberate tripwire tests. Move them and `rlm bench` silently starts a *fresh*
   ledger instead of resuming.
 - **`.gitattributes`** — `*.md text eol=lf` and `bench/corpora/** -text` are what
@@ -106,19 +111,27 @@ Two silent ones, stated plainly because they produce no error:
 ## This checkout cannot be relocated
 
 The absolute path `D:\PROJECTS\rlm-halo-framework` is baked into 63+ scripts under
-`s1/` and `s2/`, both config files, and all 614 episode snapshots. Moving the
+`milestones/s1/` and `milestones/s2/`, both config files, and all 614 episode snapshots. Moving the
 checkout produces silent `FileNotFoundError`s with no fallback. This is a known,
 accepted constraint, not an oversight: those scripts have already produced their
 committed output, and making them portable is a project with its own testing
 burden and no current payoff.
 
-## Note on paths in prose
+## Two renames on 2026-08-22, and what was swept
 
-The package moved from `rlm/` to `src/rlm/` on 2026-08-22. Citations written
-before that date — in `ARCHITECTURE.md`, in `s0/`–`s4/`, in `upstream/`, and in
-docstrings — spell the old path. They were not swept: the milestone documents are
-frozen measurement records that correctly describe where a file was when it was
-measured, and a mechanical rewrite would also have corrupted the sandbox
-*destination* strings in `src/rlm/sandbox/manager.py` and the citations to the
-upstream `alexzhang13/rlm` harness, which are a different project. There is
-exactly one `episode.py`; read `rlm/x.py` in prose as `src/rlm/x.py`.
+`rlm/` → `src/rlm/`, and `s0/ s1/ s2/ s3/ s4/ upstream/` → `milestones/`.
+
+**Milestone paths were swept everywhere** — 936 repo-relative references across
+220 files, 70 absolute paths, 41 depth anchors (`parents[N]` → `parents[N+1]`,
+applied only where the anchor resolved to the repo root; the 13 that resolve
+inside `s2/` were left alone because they survive the move), and 32 path-component
+constructions (`REPO_ROOT / "s4"`). Every resulting `milestones/…` path was then
+checked to exist on disk.
+
+**`rlm/` paths in prose were deliberately *not* swept.** A mechanical rewrite
+would have hit three classes of false positive, one of them a functional break:
+the sandbox *destination* strings in `src/rlm/sandbox/manager.py:101-103`, which
+describe the layout inside `sandbox_bootstrap/` and must stay `rlm/`; citations to
+the upstream `alexzhang13/rlm` harness, a different project; and a module that
+does not exist. There is exactly one `episode.py` — read `rlm/x.py` in prose as
+`src/rlm/x.py`.
