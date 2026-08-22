@@ -5,7 +5,7 @@ WHY THIS EXISTS. The leaf server returns content from documents previously
 held on the same slot: measured under a paired control in one process with
 byte-identical prompts, a shared slot leaked 24/54 and a virgin slot 0/54
 (Fisher p = 4.4e-9, `milestones/s2/R13.md` §1). Prevention is a slot-allocation rule
-(`rlm.dispatcher.SlotPool`); this module is the free check that runs beside
+(`rlm.serve.dispatcher.SlotPool`); this module is the free check that runs beside
 it, because the prevention is bounded rather than proven: **138 virgin-slot
 calls with zero leaks give a 95% upper bound of 2.2%, not zero, and a 200K
 episode is ~848 leaf calls -- so the evidence permits roughly 19 contaminated

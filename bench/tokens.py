@@ -27,7 +27,7 @@ def approx_tokens(text: str) -> int:
     """The offline token proxy: ~4 chars per token.
 
     Stated, not measured -- deliberately the same approximation
-    `rlm.dispatcher.MockDispatcher.count_tokens` documents, so the one place in
+    `rlm.serve.dispatcher.MockDispatcher.count_tokens` documents, so the one place in
     this repo that guesses at token counts guesses the same way every time. It
     is monotonic in prefix length and deterministic, which is all a binary
     search over prefixes requires. It is NOT what a control document is cut

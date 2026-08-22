@@ -18,7 +18,7 @@ import duckdb
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
-from rlm.rootclient import extract_cell, strip_reasoning  # noqa: E402
+from rlm.serve.rootclient import extract_cell, strip_reasoning  # noqa: E402
 
 EPISODES = {
     "9d9e47fb-9501-429f-a05c-31df2e01e158": "synth-01",   # 70x, context_exhausted

@@ -1,7 +1,7 @@
 import io
 import json
 
-from rlm.lifecycle import ALLOWED_KINDS, Lifecycle
+from rlm.trace.lifecycle import ALLOWED_KINDS, Lifecycle
 
 
 def test_writes_jsonl_to_file_and_stream(tmp_path):
@@ -44,5 +44,5 @@ def test_never_raises_into_the_caller(tmp_path):
 def test_root_history_is_a_lifecycle_kind():
     """v0.3.16: the history-divergence monitor is a lifecycle event, and
     Lifecycle.event refuses unknown kinds with ValueError."""
-    from rlm.lifecycle import ALLOWED_KINDS
+    from rlm.trace.lifecycle import ALLOWED_KINDS
     assert "root_history" in ALLOWED_KINDS

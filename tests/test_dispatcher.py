@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from rlm.config import Config
-from rlm.dispatcher import LLMDispatcher, MockDispatcher, predicted_reuse
+from rlm.serve.dispatcher import LLMDispatcher, MockDispatcher, predicted_reuse
 from rlm.errors import DispatchError, StepStatus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -619,7 +619,7 @@ async def test_root_role_is_not_a_valid_dispatch_target_from_config(minimal_cfg_
 
 
 def test_a_slot_pool_never_hands_out_the_same_index_twice():
-    from rlm.dispatcher import SlotPool
+    from rlm.serve.dispatcher import SlotPool
 
     pool = SlotPool(4)
     handed = [pool.acquire(f"w{i}") for i in range(4)]
@@ -633,7 +633,7 @@ def test_a_slot_pool_keeps_one_window_on_its_own_slot():
     DIFFERENT document. A second question about the same window is
     same-document reuse -- warm, and measured clean (0/72 at 3 calls per slot,
     0/54 at 9). It is the one performance lever that survives R13."""
-    from rlm.dispatcher import SlotPool
+    from rlm.serve.dispatcher import SlotPool
 
     pool = SlotPool(4)
     assert pool.acquire("window-a") == pool.acquire("window-a") == 0
@@ -646,7 +646,7 @@ def test_an_exhausted_slot_pool_demands_a_restart_instead_of_wrapping():
     """Wrapping around would silently reintroduce R13 -- the scaffold would
     believe it held a virgin slot while handing document B the slot that held
     document A. The pool must refuse, loudly."""
-    from rlm.dispatcher import SlotPool, SlotPoolExhausted
+    from rlm.serve.dispatcher import SlotPool, SlotPoolExhausted
 
     pool = SlotPool(2)
     pool.acquire("w0")
@@ -699,7 +699,7 @@ async def test_a_call_with_no_chunk_still_gets_a_window_of_its_own(mock_server):
 
 
 async def test_pool_exhaustion_signals_a_restart_and_dispatches_nothing(mock_server):
-    from rlm.dispatcher import SlotPoolExhausted
+    from rlm.serve.dispatcher import SlotPoolExhausted
 
     d = mock_server.dispatcher(parallel=2, slot_pool=2)
     await d.query("Q?", role="leaf", call_id="c1", chunk="w0")
@@ -722,7 +722,7 @@ async def test_a_reassigned_slot_is_caught_and_logged_as_an_error(mock_server):
     honest, so a mismatch is a contaminated answer (status=error), never a
     warning -- and it is not retried, because a retry would re-ask for the
     same slot and learn nothing."""
-    from rlm.dispatcher import SlotMismatch
+    from rlm.serve.dispatcher import SlotMismatch
 
     mock_server.slot_override = 7          # asked for 0, answered on 7
     d = mock_server.dispatcher(parallel=4)
@@ -744,7 +744,7 @@ async def test_the_answer_off_a_foreign_slot_is_leak_checked_before_it_is_discar
     reproducing condition, a document answered from a slot that has held other
     documents. The answer is still discarded (status=error, SlotMismatch
     raised); what changes is that the trace records what was in it."""
-    from rlm.dispatcher import SlotMismatch
+    from rlm.serve.dispatcher import SlotMismatch
 
     mock_server.slot_override = 7            # asked for 0, answered on 7
     mock_server.answer = f"The archive key is {FOREIGN_UUID}."
@@ -766,7 +766,7 @@ async def test_a_clean_answer_off_a_foreign_slot_is_recorded_as_checked(mock_ser
     happened to return nothing foreign records `False` (checked, clean),
     because a verdict invented by the error path would be worth nothing in the
     S4 contamination count §8 now requires per arm."""
-    from rlm.dispatcher import SlotMismatch
+    from rlm.serve.dispatcher import SlotMismatch
 
     mock_server.slot_override = 7
     d = mock_server.dispatcher(parallel=4)
@@ -781,7 +781,7 @@ async def test_a_clean_answer_off_a_foreign_slot_is_recorded_as_checked(mock_ser
 async def test_the_fixture_reproduces_the_silent_reassignment_it_guards_against(mock_server):
     """Fidelity check on the fake server: without this behaviour the
     assertion above would agree with any implementation at all."""
-    from rlm.dispatcher import ServerClient
+    from rlm.serve.dispatcher import ServerClient
 
     client = ServerClient(mock_server.base_url, timeout=5.0)
     try:
@@ -1247,7 +1247,7 @@ async def test_health_is_a_poll_not_an_assertion(mock_server):
     while the model loads, and a refused connection in the seconds after the
     old process is killed -- so `health()` returns False for them instead of
     raising. Raising would fail every rotation that actually worked."""
-    from rlm.dispatcher import ServerClient
+    from rlm.serve.dispatcher import ServerClient
 
     client = ServerClient(mock_server.base_url, timeout=5.0)
     try:
@@ -1415,7 +1415,7 @@ async def test_the_mock_dispatcher_accepts_the_same_seed_keyword():
     the dry run exists to exercise."""
     import hashlib
 
-    from rlm.dispatcher import MockDispatcher, compose_leaf_user
+    from rlm.serve.dispatcher import MockDispatcher, compose_leaf_user
 
     composed = compose_leaf_user("q", None)
     key = f"leaf:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
@@ -1428,7 +1428,7 @@ async def test_the_mock_dispatcher_accepts_the_same_seed_keyword():
 # n_predict is PER CALL too (S4 Task 12, fix wave 2).
 #
 # §8's B2 sizes its per-chunk summary budget so that ALL of them fit 80% of the
-# ROOT window (`rlm.arms.b2_summary_n_predict`). A budget the caller can only
+# ROOT window (`rlm.measure.arms.b2_summary_n_predict`). A budget the caller can only
 # RECORD is not a budget: at 299 chunks the formula says 87 tokens while the
 # leaf would decode up to its own `max_predict`, putting ~150K tokens of
 # summary into a reduce prompt sized for 0.8 x 32K. Same shape as the seed
@@ -1468,7 +1468,7 @@ async def test_every_retry_of_one_call_decodes_to_the_same_budget(
 async def test_the_mock_dispatcher_accepts_the_n_predict_keyword_too():
     import hashlib
 
-    from rlm.dispatcher import MockDispatcher, compose_leaf_user
+    from rlm.serve.dispatcher import MockDispatcher, compose_leaf_user
 
     composed = compose_leaf_user("q", None)
     key = f"leaf:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
@@ -1530,7 +1530,7 @@ def _dead_client(timeout: float = 2.0):
     different errno and takes the whole timeout to arrive."""
     import socket
 
-    from rlm.dispatcher import ServerClient
+    from rlm.serve.dispatcher import ServerClient
 
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -1585,7 +1585,7 @@ def test_a_connect_failures_os_error_number_survives_into_the_message():
     that twice to check that the number survives the three re-wraps."""
     import httpx
 
-    from rlm.dispatcher import _transport_guard
+    from rlm.serve.dispatcher import _transport_guard
 
     refused = OSError(22, "the connection was refused", None, 10061)
     with pytest.raises(DispatchError) as caught:

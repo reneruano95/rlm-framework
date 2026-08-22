@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from rlm.envelope import (
+from rlm.serve.envelope import (
     Envelope,
     ParseResult,
     normalize_ws,
@@ -219,7 +219,7 @@ def test_a_missing_chunk_is_NOT_CHECKED_rather_than_false():
     """`chunk=None` is the single-string `llm_query` form: the scaffold cannot
     see where the document ended, so it has not checked anything. Recording
     False there would read as 'checked and failed' -- the same mistake
-    `rlm.leakcheck` refuses to make with its tri-state verdict."""
+    `rlm.serve.leakcheck` refuses to make with its tri-state verdict."""
     assert verify_evidence(["anything"], chunk=None) == (None,)
 
 

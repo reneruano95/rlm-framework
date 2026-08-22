@@ -7,7 +7,7 @@ root only ever sees C3-truncated observations of code it wrote about
 `context`, so this module's output has exactly two destinations — the
 sandbox heap, and the C6 blob store as ground truth.
 
-The chunker is the other half of C2 and lives in `rlm.chunker` (it has to,
+The chunker is the other half of C2 and lives in `rlm.context.chunker` (it has to,
 so the injected token counter keeps this module free of any LLM client —
 `tests/test_import_rules.py` lints both).
 

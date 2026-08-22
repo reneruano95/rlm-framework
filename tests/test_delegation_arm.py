@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-from rlm.bench import ARM_ORDER, ARM_PROFILE, RESIDENT_PROFILE
+from rlm.measure.bench import ARM_ORDER, ARM_PROFILE, RESIDENT_PROFILE
 from rlm.episode import run_episode
 
 pytestmark_win = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")

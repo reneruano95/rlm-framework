@@ -53,8 +53,8 @@ from typing import Any, Awaitable, Callable
 import duckdb
 import yaml
 
-from rlm.arms import run_b1, run_b2, run_b3
-from rlm.bench import (
+from rlm.measure.arms import run_b1, run_b2, run_b3
+from rlm.measure.bench import (
     ARM_ORDER,
     BENCH_PROFILE,
     LEDGER_PATH,
@@ -70,10 +70,10 @@ from rlm.bench import (
 # The two hook defaults `assert_bench_wiring` has to be able to RECOGNISE. They
 # are private to `rlm/bench.py` because nothing else should install them; this
 # module is the composition root that must detect them still installed.
-from rlm.bench import _no_hook as _BENCH_NO_HOOK
-from rlm.bench import _no_task_loader as _BENCH_NO_TASK_LOADER
+from rlm.measure.bench import _no_hook as _BENCH_NO_HOOK
+from rlm.measure.bench import _no_task_loader as _BENCH_NO_TASK_LOADER
 from rlm.config import Config, PromptRegistry, load_config
-from rlm.dispatcher import LLMDispatcher, MockDispatcher, ServerClient
+from rlm.serve.dispatcher import LLMDispatcher, MockDispatcher, ServerClient
 from rlm.episode import (
     Task,
     assert_props,
@@ -90,14 +90,14 @@ from rlm.errors import (
     ServerRotationError,
     StepStatus,
 )
-from rlm.lifecycle import Lifecycle
+from rlm.trace.lifecycle import Lifecycle
 from rlm.power import PowerSampler, read_pkg_temp_c
-from rlm.rootclient import extract_cell, history_message
-from rlm.serverproc import LlamaServerProcess
+from rlm.serve.rootclient import extract_cell, history_message
+from rlm.serve.serverproc import LlamaServerProcess
 from rlm.sandbox import winproc
 from rlm.sandbox.manager import SandboxManager, install_bootstrap
 from rlm.trace import TraceLogger, recover_orphans, unpack_blob
-from rlm.verdict import (
+from rlm.measure.verdict import (
     BASELINES,
     RLM_ARM,
     PairResult,
@@ -127,7 +127,7 @@ from rlm.errors import (  # noqa: E402,F401
 # contact, so it belongs under §5's dependency-rule lint rather than in the
 # composition root. Re-exported here -- `rlm validate` and the tests import it
 # from `rlm.cli`.
-from rlm.launchlog import log_is_current, parse_launch_log  # noqa: E402
+from rlm.serve.launchlog import log_is_current, parse_launch_log  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -594,7 +594,7 @@ def cmd_run(args) -> int:
 # dependency-rule lint, which enforces that instead of leaving it to
 # convention. `_verify_online` and `cmd_replay` stay HERE, because --online
 # contacts a server by design.
-from rlm.replay import (  # noqa: E402
+from rlm.trace.replay import (  # noqa: E402
     PromptDrift, _blob, _first_difference, _read_episode, _rederive_messages,
     _rendered, _render_transcript, episode_config,
 )
@@ -738,10 +738,10 @@ def cmd_replay(args) -> int:
 # small always-exempt set -- `dispatcher.py`, `rootclient.py`, `config.py`,
 # `lifecycle.py`, `errors.py`, `__init__.py`) MUST appear in `ISOLATED`
 # (`test_lint_covers_every_isolated_module_that_exists`), and every module IN
-# `ISOLATED` is forbidden from importing `rlm.dispatcher`/`rlm.rootclient`
+# `ISOLATED` is forbidden from importing `rlm.serve.dispatcher`/`rlm.serve.rootclient`
 # directly (`FORBIDDEN_RLM`). `ServerOrchestra` needs `ServerClient` for the §4
 # handshake (`rlm.episode.handshake` takes one as its first argument) -- so a
-# `benchserve.py` housing it would have to import `rlm.dispatcher`, which is
+# `benchserve.py` housing it would have to import `rlm.serve.dispatcher`, which is
 # exactly the one import `ISOLATED` membership forbids. There is no import
 # shape that gets HTTP into a new isolated module; the class joins
 # `leaf_process_manager` here instead of widening the exemption list, exactly
@@ -785,7 +785,7 @@ def cmd_replay(args) -> int:
 # `restart()` -- see `rlm.episode.Episode._rotate_leaf`) and
 # `orchestra.b2_process_manager()` for `run_b2` (which cannot, so its
 # manager wraps the re-handshake in). Both target the resident leaf --
-# `rlm.bench.ARM_PROFILE` runs both arms there exclusively.
+# `rlm.measure.bench.ARM_PROFILE` runs both arms there exclusively.
 #
 # EVERYTHING THAT TOUCHES A PROCESS, THE NETWORK, OR THE OS IS INJECTED --
 # `rlm/arms.py`'s own discipline, restated here: `process_factory` defaults to
@@ -878,7 +878,7 @@ def bench_leaf_raw(raw_cfg: dict) -> dict:
     `servers.bench_leaf`'s fields.
 
     Raw rather than validated because it has a second caller: §8's B1/B3 arms
-    need this swap AND `rlm.bench.seeded_config`'s per-seed patch applied to
+    need this swap AND `rlm.measure.bench.seeded_config`'s per-seed patch applied to
     the same dict, and composing two raw patches then validating ONCE is the
     only order in which every cross-field rule sees the config the arm will
     actually run under. Validating here first and re-patching afterwards would
@@ -897,10 +897,10 @@ def bench_leaf_raw(raw_cfg: dict) -> dict:
 def bench_leaf_config(raw_cfg: dict) -> Config:
     """The `Config` §8's B1/B3 dispatcher is built against: `servers.leaf`
     REPLACED by `servers.bench_leaf`'s fields, so `LLMDispatcher.from_config`
-    (and `rlm.arms.bench_slot_capacity`) read the TRUE 2-slot/524288-ctx
+    (and `rlm.measure.arms.bench_slot_capacity`) read the TRUE 2-slot/524288-ctx
     topology instead of the resident 128-slot one.
 
-    Patches the RAW dict and re-validates -- `rlm.bench.seeded_config`'s
+    Patches the RAW dict and re-validates -- `rlm.measure.bench.seeded_config`'s
     pattern, verbatim: never mutate a built `Config`, so every cross-field
     rule in `rlm.config` (slot capacity vs chunk budget, dispatch_concurrency
     vs parallel) runs again against the swapped-in values rather than being
@@ -952,12 +952,12 @@ class HandshakingProcessManager(LeafProcessManager):
     every restart.
 
     Required because `arms.py` cannot itself speak HTTP (the dependency
-    rule -- see `rlm.arms.ArmEpisode._rotate_leaf`'s docstring), and `run_b2`
+    rule -- see `rlm.measure.arms.ArmEpisode._rotate_leaf`'s docstring), and `run_b2`
     has no built-in re-handshake of its own -- unlike `run_episode`, which is
     why THAT caller gets the plain base class instead (ledgered ruling: do
     not double-handshake the 'rlm' arm). Ledgered ruling: restore §5's full
     rotation contract ("stop -> start -> re-handshake -> resume") for `run_b2`,
-    the one caller that was missing it. `rlm.arms.ArmEpisode._rotate_leaf`'s
+    the one caller that was missing it. `rlm.measure.arms.ArmEpisode._rotate_leaf`'s
     own docstring names this exact composition as the way to close that gap.
     """
 
@@ -1009,7 +1009,7 @@ class ServerOrchestra:
         self.current_profile: str | None = None
         #: Wall time the MOST RECENT swap spent stopped-to-healthy. §8
         #: excludes this from per-task wall-clock BY CONSTRUCTION: every
-        #: caller awaits it from `rlm.bench._prepare`, entirely before that
+        #: caller awaits it from `rlm.measure.bench._prepare`, entirely before that
         #: function's caller (`_run_cell`) reads its own clock for `t0`.
         self.last_relaunch_s: float = 0.0
 
@@ -1188,7 +1188,7 @@ class ServerOrchestra:
             self.root_proc = None
         self.current_profile = None
 
-    # -- the BenchCtx hook surface (rlm.bench.BenchCtx) ------------------- #
+    # -- the BenchCtx hook surface (rlm.measure.bench.BenchCtx) ------------------- #
 
     async def quiesce(self, profile: str) -> dict[str, bool]:
         """`BenchCtx.quiesce_fn` -- the §5 C5 quiesce point, reusing
@@ -1222,7 +1222,7 @@ class ServerOrchestra:
 
     # -- the ProcessManager run_b2/run_episode rotate mid-episode --------- #
     #
-    # BOTH arms run exclusively on the resident topology (`rlm.bench.ARM_PROFILE`),
+    # BOTH arms run exclusively on the resident topology (`rlm.measure.bench.ARM_PROFILE`),
     # so both managers target the OWNED resident leaf -- but they are NOT
     # interchangeable (ledgered ruling): `run_episode` already re-handshakes
     # itself after `process_manager.restart()` (`Episode._rotate_leaf` ->
@@ -1293,7 +1293,7 @@ DEFAULT_REPORT_PATH = REPO_ROOT / "runs" / "RESULTS.md"
 # §8's projection constants and the --smoke calibration table live in
 # `rlm/projection.py`: pure arithmetic, no server contact, so they sit under
 # the §5 dependency-rule lint instead of in the composition root.
-from rlm.projection import (  # noqa: E402
+from rlm.measure.projection import (  # noqa: E402
     CHUNKED_ARMS, PROJ_CHEAP_ARM_S, PROJ_NON_AGG_EXPENSIVE_S,
     PROJ_ROOT_OVERHEAD_FRAC, PROJ_S4_BUDGET_H, PROJ_S_PER_WINDOW,
     print_calibration, projected_episode_s, projected_grid_hours,
@@ -1303,7 +1303,7 @@ from rlm.projection import (  # noqa: E402
 def _raw_config(path: Path) -> dict:
     """`load_config`'s input, kept.
 
-    `rlm.bench.seeded_config` patches the RAW dict and re-validates for every
+    `rlm.measure.bench.seeded_config` patches the RAW dict and re-validates for every
     seed (never mutating a built `Config`), so a bench run needs both halves
     and `load_config` returns only one.
     """
@@ -1421,7 +1421,7 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
         refused for want of a `servers.bench_leaf` block it never uses, and a
         run that does ask for B1/B3 without one gets `run_b1`'s own per-cell
         refusal (a `config_refused` ledger row), which is what
-        `rlm.bench._run_cell` is written to contain.
+        `rlm.measure.bench._run_cell` is written to contain.
         """
         cfg = bench_cfgs.get(seed)
         if cfg is None:
@@ -1574,7 +1574,7 @@ def pool_rotating_swap(orchestra, *, resident_dispatcher, bench_dispatcher):
     contamination paragraph names.
 
     Rotating AFTER the swap returns is what makes it safe: `rotate_pool`
-    refuses with calls in flight, and `rlm.bench._prepare` runs the swap
+    refuses with calls in flight, and `rlm.measure.bench._prepare` runs the swap
     strictly between cells, with nothing dispatched.
 
     Both directions rotate, and the resident one matters as much: the RLM/B2
@@ -1697,7 +1697,7 @@ def bench_exit_code(verdict, escalated=None) -> int:
 # `rlm/escalation.py`: JSON and verdict inspection, no server contact, so it
 # sits under the §5 dependency-rule lint. Executing the plan stays here,
 # because it drives arms against live servers.
-from rlm.escalation import (  # noqa: E402
+from rlm.measure.escalation import (  # noqa: E402
     escalation_plan_path, load_escalation_plan, save_escalation_plan,
 )
 
@@ -2102,7 +2102,7 @@ def cmd_bench(args) -> int:
 # The bundle builder lives in `rlm/export.py`: it must depend on the trace
 # store and nothing else, so it sits under §5's dependency-rule lint. An
 # export that needed a live server would be one nobody else could reproduce.
-from rlm.export import _export, _export_filter  # noqa: E402
+from rlm.trace.export import _export, _export_filter  # noqa: E402
 
 
 def cmd_export(args) -> int:

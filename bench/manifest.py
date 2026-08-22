@@ -32,7 +32,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from rlm.checkers import CHECKERS, near_miss_suite
+from rlm.measure.checkers import CHECKERS, near_miss_suite
 
 # §8's pre-registered split at N=30 (ARCHITECTURE.md, 2026-08-15).
 CATEGORY_SPLIT = {"needle": 8, "aggregation": 7, "synthesis": 8, "code_qa": 7}

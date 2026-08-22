@@ -26,7 +26,7 @@ import urllib.request
 from pathlib import Path
 
 from bench.manifest import BenchmarkManifest
-from rlm.checkers import check
+from rlm.measure.checkers import check
 from rlm.episode import Task
 
 REPO = Path(__file__).resolve().parents[1]

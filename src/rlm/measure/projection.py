@@ -18,9 +18,9 @@ from __future__ import annotations
 # §8's pre-registered within-block arm order. Imported rather than duplicated:
 # the calibration table projects a cost per arm, and a projection over a
 # DIFFERENT arm list than the one the grid runs is a silently wrong number.
-# `rlm.bench` is itself lint-covered, so this does not widen the dependency
+# `rlm.measure.bench` is itself lint-covered, so this does not widen the dependency
 # surface -- see tests/test_import_rules.py.
-from rlm.bench import ARM_ORDER
+from rlm.measure.bench import ARM_ORDER
 
 
 # ---- the projection constants a --smoke run calibrates against -------------- #

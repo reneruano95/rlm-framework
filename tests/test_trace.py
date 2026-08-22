@@ -80,7 +80,7 @@ def test_recover_orphans_tombstones_null_outcome_episodes(tmp_path):
     db = tmp_path / "t.duckdb"
     con = duckdb.connect(str(db))
     con.execute((__import__("pathlib").Path(__file__).parents[1]
-                 / "src" / "rlm" / "schema.sql").read_text())
+                 / "src" / "rlm" / "trace" / "schema.sql").read_text())
     ep = str(uuid.uuid4())
     con.execute(
         "INSERT INTO episodes (episode_id, task_id, task_hash, started_at) "
@@ -161,7 +161,7 @@ def test_the_leak_columns_are_added_to_a_pre_existing_steps_table(tmp_path):
     INSERT after the upgrade fails against the operator's real database."""
     import pathlib
 
-    schema = (pathlib.Path(__file__).parents[1] / "src" / "rlm" / "schema.sql").read_text()
+    schema = (pathlib.Path(__file__).parents[1] / "src" / "rlm" / "trace" / "schema.sql").read_text()
     pre_r13 = (schema.split("-- Migration for stores")[0]
                .replace("    leak_detected BOOLEAN,\n", "")
                .replace("    leak_detail TEXT,\n", ""))
@@ -202,7 +202,7 @@ async def test_the_rotation_stamp_rides_on_the_step_that_triggered_it(tmp_path):
 def test_the_rotation_column_is_added_to_a_pre_existing_steps_table(tmp_path):
     import pathlib
 
-    schema = (pathlib.Path(__file__).parents[1] / "src" / "rlm" / "schema.sql").read_text()
+    schema = (pathlib.Path(__file__).parents[1] / "src" / "rlm" / "trace" / "schema.sql").read_text()
     pre = (schema.split("-- Migration for stores")[0]
            .replace("    server_rotation INTEGER,\n", ""))
     assert "server_rotation" not in pre

@@ -106,7 +106,7 @@ async def mock_llm_query(payload: dict) -> str:
 
     Composes the two payload fields the way C4 does, so what the child sent is
     visible in the answer."""
-    from rlm.dispatcher import compose_leaf_user
+    from rlm.serve.dispatcher import compose_leaf_user
 
     return f"MOCK:{compose_leaf_user(payload['question'], payload.get('chunk'))}"
 
@@ -578,7 +578,7 @@ class MockLlamaServer:
                     slot_pool: int | None = None,
                     envelope: bool = False):
         from rlm.config import Retries
-        from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient, SlotPool
+        from rlm.serve.dispatcher import DispatchTarget, LLMDispatcher, ServerClient, SlotPool
 
         client = ServerClient(self.base_url, timeout=5.0)
         # The REAL registry prefix by default (§4/§5: the leaf prefix is
@@ -747,8 +747,8 @@ class FakeRootServer:
 
     def conversation(self, *, system: str | None = None, enable_thinking: bool | None = None,
                      seed_schedule: str | None = None, history_mode: str | None = None):
-        from rlm.dispatcher import ServerClient
-        from rlm.rootclient import RootConversation
+        from rlm.serve.dispatcher import ServerClient
+        from rlm.serve.rootclient import RootConversation
 
         raw = copy.deepcopy(self._base_cfg_dict)
         raw["servers"]["root"]["port"] = self.port
@@ -809,7 +809,7 @@ class CannedDispatcher:
     """
 
     def __init__(self, fixtures: dict[str, str] | None = None, *, parallel: int = 8) -> None:
-        from rlm.dispatcher import MockDispatcher
+        from rlm.serve.dispatcher import MockDispatcher
 
         self._inner = MockDispatcher(dict(fixtures or {}), parallel=parallel)
         #: The `seed=`/`n_predict=` every caller passed, in order. §8's seed
@@ -837,7 +837,7 @@ class CannedDispatcher:
         self.n_predicts.append(n_predict)
         import hashlib
 
-        from rlm.dispatcher import compose_leaf_user
+        from rlm.serve.dispatcher import compose_leaf_user
 
         composed = compose_leaf_user(prompt, chunk)
         key = f"{role}:{hashlib.sha256(composed.encode('utf-8')).hexdigest()}"
@@ -892,7 +892,7 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
         _point_at_mock_leaf(raw, over["leaf_port"])
     if over.get("leaf_seed") is not None:
         # §8's replicate identity, patched on the RAW dict exactly as
-        # `rlm.bench.seeded_config` patches it per attempt.
+        # `rlm.measure.bench.seeded_config` patches it per attempt.
         raw["scaffold"]["sampling"]["leaf"]["seed"] = over["leaf_seed"]
     if over.get("history_mode") is not None:
         raw["scaffold"]["root"]["history_mode"] = over["history_mode"]
@@ -938,7 +938,7 @@ class _EpisodeEnv:
 
     async def run(self):
         from rlm.episode import run_episode
-        from rlm.lifecycle import Lifecycle
+        from rlm.trace.lifecycle import Lifecycle
         from rlm.trace import TraceLogger
 
         tl = TraceLogger(self.cfg.trace.db_path, self.cfg.trace.blob_root)

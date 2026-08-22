@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from rlm.leakcheck import (
+from rlm.serve.leakcheck import (
     ChunkIndex,
     NOT_CHECKED,
     foreign_identifiers,

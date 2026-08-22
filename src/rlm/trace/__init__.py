@@ -1,0 +1,73 @@
+"""C6: the trajectory record -- write it, replay it, export it.
+
+`rlm.trace` was a module before 2026-08-22 and is a package now. Everything it
+exported is re-exported here, so `from rlm.trace import TraceLogger` is
+unchanged. The store lives in `rlm/trace/store.py` beside `schema.sql`, which
+`store.py` finds with `with_name` -- the two must stay siblings."""
+from __future__ import annotations
+
+from rlm.trace.store import (  # noqa: F401
+    BLOB_MAGIC,
+    BRIDGE_DESYNC,
+    BRIDGE_DESYNC_REASON,
+    EPISODE_OPEN_COLS,
+    INSERT_EPISODE,
+    INSERT_STEP,
+    SANDBOX_DEATH_REASON,
+    SANDBOX_DIED_MID_CELL,
+    STEP_COLS,
+    TraceLogger,
+    _CloseMsg,
+    _EPISODE_OPEN_DEFAULTS,
+    _MetricsMsg,
+    _OpenMsg,
+    _SCHEMA_PATH,
+    _STEP_DEFAULTS,
+    _STEP_TEXT_FIELDS,
+    _Shutdown,
+    _StepMsg,
+    _SupersedeMsg,
+    _schema_sql,
+    _scrub,
+    blob_rel,
+    pack_blob,
+    recover_orphans,
+    safe_json,
+    safe_text,
+    sweep_orphan_blobs,
+    unpack_blob,
+    utc_now,
+)
+
+__all__ = [
+    "BLOB_MAGIC",
+    "BRIDGE_DESYNC",
+    "BRIDGE_DESYNC_REASON",
+    "EPISODE_OPEN_COLS",
+    "INSERT_EPISODE",
+    "INSERT_STEP",
+    "SANDBOX_DEATH_REASON",
+    "SANDBOX_DIED_MID_CELL",
+    "STEP_COLS",
+    "TraceLogger",
+    "_CloseMsg",
+    "_EPISODE_OPEN_DEFAULTS",
+    "_MetricsMsg",
+    "_OpenMsg",
+    "_SCHEMA_PATH",
+    "_STEP_DEFAULTS",
+    "_STEP_TEXT_FIELDS",
+    "_Shutdown",
+    "_StepMsg",
+    "_SupersedeMsg",
+    "_schema_sql",
+    "_scrub",
+    "blob_rel",
+    "pack_blob",
+    "recover_orphans",
+    "safe_json",
+    "safe_text",
+    "sweep_orphan_blobs",
+    "unpack_blob",
+    "utc_now",
+]

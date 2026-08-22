@@ -14,7 +14,7 @@ import pytest
 
 from rlm.config import Config
 from rlm.errors import ServerRotationError
-from rlm.serverproc import LlamaServerProcess, launch_argv
+from rlm.serve.serverproc import LlamaServerProcess, launch_argv
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 

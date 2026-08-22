@@ -14,7 +14,7 @@ server against itself. Inside `rlm/cli.py` nothing maintained that -- the
 composition root imports HTTP clients and dispatchers, so only convention stood
 between this code and a shortcut. Here §5's dependency-rule lint
 (`tests/test_import_rules.py` ISOLATED) enforces it: no `httpx`, no
-`rlm.dispatcher`, no `rlm.rootclient`, checked on every run.
+`rlm.serve.dispatcher`, no `rlm.serve.rootclient`, checked on every run.
 
 Reaching this required splitting `rlm/roottext.py` out of `rlm/rootclient.py`
 first: `history_message` and `extract_cell` are needed here and were sitting
@@ -38,7 +38,7 @@ import duckdb
 from rlm.config import Config, PromptRegistry
 from rlm.errors import ActionType, Actor, ConfigError, RlmError, StepStatus
 from rlm.episode import compose_user_message, no_cell_observation
-from rlm.roottext import extract_cell, history_message
+from rlm.serve.roottext import extract_cell, history_message
 from rlm.trace import unpack_blob
 
 

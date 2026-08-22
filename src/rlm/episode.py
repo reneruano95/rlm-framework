@@ -61,10 +61,10 @@ from rlm import trace as tracemod
 from rlm.budget import MAX_IDENTICAL_TURNS
 from rlm.budget import Budgets as BudgetLimits
 from rlm.budget import BudgetEnforcer
-from rlm.chunker import ChunkConfig, split
+from rlm.context.chunker import ChunkConfig, split
 from rlm.config import Config, config_snapshot
 from rlm.context import load_context
-from rlm.dispatcher import ServerClient, compose_leaf_user
+from rlm.serve.dispatcher import ServerClient, compose_leaf_user
 from rlm.errors import (
     ActionType,
     Actor,
@@ -76,9 +76,9 @@ from rlm.errors import (
     SlotPoolExhausted,
     StepStatus,
 )
-from rlm.rootclient import RootConversation
+from rlm.serve.rootclient import RootConversation
 from rlm.sandbox.manager import SandboxManager
-from rlm.truncate import observation_view
+from rlm.context.truncate import observation_view
 
 # The kill code every scaffold-initiated TerminateJobObject carries. D10: an
 # exit code is not an outcome channel -- `outcome_reason` comes from the kill
@@ -197,7 +197,7 @@ class Task:
         # a hedge. An unknown name still raises rather than defaulting: a
         # typo'd checker silently becoming `contains` is exactly the permissive
         # failure §8 warns converts R5 confabulation into false passes.
-        from rlm.checkers import check as _run_checker
+        from rlm.measure.checkers import check as _run_checker
         return _run_checker(mode, value, self.answer)
 
 
@@ -444,7 +444,7 @@ class _EpisodeRun:
         self.restrict_chunks = restrict_chunks
         self._chunks: list[str] = []
         self.dispatcher = dispatcher
-        # Who owns the leaf PROCESS (rlm.serverproc.ProcessManager), or None
+        # Who owns the leaf PROCESS (rlm.serve.serverproc.ProcessManager), or None
         # when nobody does -- the servers were launched outside `rlm run`, and
         # a rotation is then impossible rather than optional.
         self.process_manager = process_manager
@@ -547,7 +547,7 @@ class _EpisodeRun:
 
         The payload carries `chunk` and `question` as SEPARATE fields, and the
         composition into §4's `[chunk][question]` user segment happens
-        scaffold-side (`rlm.dispatcher.compose_leaf_user`) -- the same string
+        scaffold-side (`rlm.serve.dispatcher.compose_leaf_user`) -- the same string
         is then what C5 admits against and what C6 logs as `action_payload`,
         because it is the string that was actually sent.
         """
@@ -1256,7 +1256,7 @@ def _full_observation(out) -> bytes:
 
 
 def _as_cell_output(text: str):
-    from rlm.truncate import CellOutput
+    from rlm.context.truncate import CellOutput
 
     return CellOutput(stdout=text)
 

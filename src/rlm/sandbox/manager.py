@@ -74,7 +74,7 @@ from rlm.bridge import BridgeError, BridgeParent
 from rlm.errors import SandboxError
 from rlm.sandbox import winproc
 from rlm.sandbox.winjob import Job
-from rlm.truncate import CellOutput
+from rlm.context.truncate import CellOutput
 
 STILL_ACTIVE = 259
 

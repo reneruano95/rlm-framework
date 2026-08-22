@@ -26,7 +26,7 @@ WHAT IS DELIBERATELY NOT HERE.
     scaffold-side, here, in process, on the bytes that came back.
   * **No model calls.** Span verification is a whitespace-normalized substring
     test. Zero tokens, no second opinion, no judge.
-  * **No retry policy.** C4 owns retries (`rlm.dispatcher`); this module
+  * **No retry policy.** C4 owns retries (`rlm.serve.dispatcher`); this module
     returns a verdict and a reason, and the reason is what lands in
     `steps.error_detail`.
   * **No scoring.** Whether `abstain=True` beside a substantive `answer` counts
@@ -58,7 +58,7 @@ _WS_RE = re.compile(r"\s+")
 #: A leading `<think>...</think>`. `enable_thinking` is off for the leaf by
 #: default (config `scaffold.leaf.enable_thinking`), but S1 (F3) measured leaf
 #: replies consisting of nothing but a think block, so a parser that dies on one
-#: would be scoring the sampler. Independent of `rlm.rootclient.strip_reasoning`
+#: would be scoring the sampler. Independent of `rlm.serve.rootclient.strip_reasoning`
 #: on purpose: that module is C4-adjacent and this one must import nothing.
 _THINK_RE = re.compile(r"^\s*<think>.*?</think>", re.DOTALL)
 _FENCE_RE = re.compile(r"^```[a-zA-Z0-9_+-]*\s*\n?(.*?)\n?```\s*$", re.DOTALL)
@@ -117,7 +117,7 @@ def verify_evidence(evidence: Sequence[str], *, chunk: str | None) -> tuple[bool
     `None` means NOT CHECKED, and it is not the same claim as False. `chunk=None`
     is `llm_query`'s single-string form, where the scaffold cannot see where the
     document ended and therefore has checked nothing -- recording False there
-    would read as "checked and failed", the mistake `rlm.leakcheck` refuses to
+    would read as "checked and failed", the mistake `rlm.serve.leakcheck` refuses to
     make with its own tri-state verdict.
 
     An empty or whitespace-only span is False, never True: `""` is a substring
@@ -189,7 +189,7 @@ def payload(result: ParseResult, *, chunk: str | None) -> dict:
     beside a substantive answer counts as a refusal is a SCORING rule and lives
     with the scorer, which has to apply the same rule to the plain-text arms.
 
-    `evidence_ok` is tri-state for the same reason `rlm.leakcheck`'s verdict is:
+    `evidence_ok` is tri-state for the same reason `rlm.serve.leakcheck`'s verdict is:
     None means nothing was checked -- no chunk (the single-string call form) or
     no spans to check (an abstention) -- and must never be read as a pass.
     """

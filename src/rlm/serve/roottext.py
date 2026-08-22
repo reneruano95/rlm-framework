@@ -6,7 +6,7 @@ turn becomes, derive a per-turn seed, strip reasoning, extract the REPL cell.
 
 WHY THIS IS ITS OWN MODULE, and what it unblocks. These functions used to live
 in `rlm/rootclient.py` next to `RootConversation`, which holds a `ServerClient`
--- so `rlm.rootclient` is in the dependency rule's FORBIDDEN_RLM set and no
+-- so `rlm.serve.rootclient` is in the dependency rule's FORBIDDEN_RLM set and no
 lint-covered module may import it. That is a real cost, not a label: the replay
 path needs `history_message` and `extract_cell` to re-derive an episode from
 the trace store, and could not be isolated while they sat behind an HTTP

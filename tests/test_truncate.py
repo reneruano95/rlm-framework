@@ -1,7 +1,7 @@
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from rlm.truncate import MIN_MARKER_CAP, CellOutput, observation_view, truncate_view
+from rlm.context.truncate import MIN_MARKER_CAP, CellOutput, observation_view, truncate_view
 
 CAP = 2000
 

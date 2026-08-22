@@ -2,7 +2,7 @@
 a headline p-value must be recomputable from the record; no scipy)."""
 import math
 
-from rlm.stats import (fractional_score, needs_escalation, paired_bootstrap_ci,
+from rlm.measure.stats import (fractional_score, needs_escalation, paired_bootstrap_ci,
                         sign_test_p, task_passes)
 
 

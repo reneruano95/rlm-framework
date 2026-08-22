@@ -21,7 +21,7 @@ from bench.manifest import BenchmarkManifest, TaskEntry
 
 from rlm.errors import ActionType, Actor, Outcome, StepStatus
 from rlm.trace import TraceLogger
-from rlm.verdict import (
+from rlm.measure.verdict import (
     MARGIN_GATE,
     NARRATIVE_MARKER,
     VerdictError,
@@ -55,7 +55,7 @@ OUTCOMES = {
 def _snapshot(run_id: str, arm: str, seed: int, *, chunk: int = 32768,
               block: int = 0) -> dict:
     """The two `config_snapshot` sub-trees the verdict reads: `bench` (the
-    identity `rlm.bench.bench_extra` writes) and the chunk size §8's chunk-size
+    identity `rlm.measure.bench.bench_extra` writes) and the chunk size §8's chunk-size
     lock puts on the verdict line."""
     return {"scaffold": {"chunk": {"size_tokens": chunk}},
             "bench": {"run_id": run_id, "arm": arm, "seed": seed, "block": block}}

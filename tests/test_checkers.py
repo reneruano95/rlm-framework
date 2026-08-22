@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from rlm.checkers import CHECKERS, check, near_miss_suite
+from rlm.measure.checkers import CHECKERS, check, near_miss_suite
 
 UUID_A = "7311d8a3-c2ce-4f44-bed4-d57b1e2feb89"
 UUID_B = "48e81295-9489-33be-cc30-430d702be6c3"

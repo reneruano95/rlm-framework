@@ -15,7 +15,7 @@ from rlm import cli
 from rlm.cli import main
 from rlm.config import load_config
 from rlm.errors import ActionType, Actor, Outcome, StepStatus
-from rlm.lifecycle import Lifecycle
+from rlm.trace.lifecycle import Lifecycle
 from rlm.trace import TraceLogger, utc_now
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
@@ -446,7 +446,7 @@ def test_without_launch_leaf_the_run_owns_nothing_and_says_so_once(valid_config_
 
 def test_launch_leaf_builds_the_manager_from_config_flags(valid_config_file):
     from rlm.cli import leaf_process_manager
-    from rlm.serverproc import launch_argv
+    from rlm.serve.serverproc import launch_argv
 
     cfg = load_config(valid_config_file)
     manager = leaf_process_manager(cfg, launch=True)
@@ -564,8 +564,8 @@ def test_run_takes_launch_leaf_and_defaults_to_off():
 # are replaced by recorders, so what is under test is the WIRING -- which hook
 # reaches which runner, which config each arm is handed, what the escalation
 # phase drives, which exit code the gate produces -- rather than a model. The
-# frozen manifest, the real task files, the real scheduler (`rlm.bench`) and
-# the real scorer (`rlm.verdict`) all run for real; only the two ends that
+# frozen manifest, the real task files, the real scheduler (`rlm.measure.bench`) and
+# the real scorer (`rlm.measure.verdict`) all run for real; only the two ends that
 # need a GPU are doubles.
 # =========================================================================== #
 
@@ -660,7 +660,7 @@ class _StubSampler:
     collector's overhead at noise and §8 makes energy a scorecard column), so a
     bench test that did not stub this would spawn a real 1 Hz Get-Counter child
     per test. It reports `alive() is False`, which is the honest "no readings"
-    state `rlm.bench._stamp_metrics` records as NULL rather than as a
+    state `rlm.measure.bench._stamp_metrics` records as NULL rather than as a
     fabricated zero."""
 
     def __init__(self, *_a, **_kw) -> None:
@@ -850,7 +850,7 @@ def test_bench_refuses_an_unbound_hook(valid_config_file, tmp_path):
     with no quiesce, no §4 re-assertion and no leaf relaunch -- every B1/B3
     cell measured against the RLM topology. So the composition root asserts
     the wiring instead of assuming it."""
-    from rlm.bench import ARM_ORDER, BenchCtx, BenchLedger
+    from rlm.measure.bench import ARM_ORDER, BenchCtx, BenchLedger
     from rlm.errors import ConfigError
 
     cfg = load_config(valid_config_file)
@@ -989,7 +989,7 @@ def test_each_arm_is_handed_its_own_profile_and_process_manager(
     # because `kwargs.get("slot_id", 0) == 0` would pass either way.
     import inspect
 
-    from rlm.arms import run_b1, run_b3
+    from rlm.measure.arms import run_b1, run_b3
     assert "slot_id" not in by_arm["b1"]["kwargs"]
     assert "slot_id" not in by_arm["b3"]["kwargs"]
     assert inspect.signature(run_b1).parameters["slot_id"].default == 0
@@ -1017,7 +1017,7 @@ def test_the_orchestra_hooks_are_the_ones_the_scheduler_drives(
 def test_the_ledger_carries_the_relaunch_the_orchestra_reported(
         valid_config_file, tmp_path, fake_orchestra, monkeypatch):
     """The whole path for the one column the store cannot hold:
-    `ServerOrchestra.swap_to` returns its `last_relaunch_s`, `rlm.bench._prepare`
+    `ServerOrchestra.swap_to` returns its `last_relaunch_s`, `rlm.measure.bench._prepare`
     catches it, and the cell that PAID for the swap ledgers it. §8 excludes
     relaunch time from per-task wall-clock, so without this the ~10 s a swap
     costs would be spent 179 times over a full grid and recorded nowhere."""
@@ -1064,7 +1064,7 @@ def test_a_gate_pass_exits_zero_and_writes_the_report(
     """RLM 4/4, every baseline 0/4 -> margin +4 against all three, which clears
     §8's +3 threshold. The report is written with the narrative marker
     preserved, and the exit code is the gate."""
-    from rlm.verdict import NARRATIVE_MARKER
+    from rlm.measure.verdict import NARRATIVE_MARKER
 
     rc, _arms = _graded(valid_config_file, tmp_path, monkeypatch,
                         _baselines_fail_everything())
@@ -1357,7 +1357,7 @@ def test_the_arm_runners_hand_every_arm_the_blocks_own_seed(
     """The bench half of the per-call-seed fix.
 
     §8's three replicates are three seeds of the WHOLE system, and
-    `rlm.bench.seeded_config` re-seeds the CONFIG per attempt. What the arm
+    `rlm.measure.bench.seeded_config` re-seeds the CONFIG per attempt. What the arm
     runners must therefore hand each arm is a config carrying THAT block's
     seed -- on both the root and the leaf, and on the bench-profile arms too,
     which derive their own `Config` and could silently keep the shipped one.
@@ -1528,7 +1528,7 @@ class _PooledDispatcher:
     """
 
     def __init__(self, size: int = 2) -> None:
-        from rlm.dispatcher import SlotPool
+        from rlm.serve.dispatcher import SlotPool
 
         self._SlotPool = SlotPool
         self.slots = SlotPool(size)
@@ -1545,7 +1545,7 @@ class _PooledDispatcher:
         # B1/B3 call with `chunk=None`, so every call is its own window and no
         # window is ever repeated -- which is exactly why a 2-slot pool is
         # spent after two calls and why the pool MUST be rotated per block.
-        from rlm.dispatcher import window_key
+        from rlm.serve.dispatcher import window_key
 
         window = window_key(chunk, call_id)
         slot = self.slots.acquire(window)           # raises SlotPoolExhausted
@@ -1568,12 +1568,12 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
     restarted with two virgin slots — §8's two single-shot arms failing 58 of
     60 blocks structurally, which is a manufactured result, not a measurement.
 
-    Driven through the REAL scheduler (`rlm.bench.run_block`) with the REAL
+    Driven through the REAL scheduler (`rlm.measure.bench.run_block`) with the REAL
     swap wrapper, over two blocks, because one block cannot see the defect.
     """
     import copy as copymod
 
-    from rlm.bench import ARM_ORDER, BenchCtx, BenchLedger, build_blocks
+    from rlm.measure.bench import ARM_ORDER, BenchCtx, BenchLedger, build_blocks
     from rlm.config import Config
     from rlm.episode import Task
 
@@ -1622,7 +1622,7 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
         quiesce_fn=_noop, handshake_fn=_noop, swap_servers_fn=swap,
         repo_root=Path(tmp_path))
 
-    from rlm.bench import run_block
+    from rlm.measure.bench import run_block
 
     records = []
     for block in build_blocks(manifest, [1])[:2]:
@@ -1708,7 +1708,7 @@ async def test_a_relaunch_that_measured_zero_seconds_still_rotates(tmp_path):
 
 
 async def test_the_swap_hook_still_reports_what_the_relaunch_cost(tmp_path):
-    """The wrapper must stay transparent: `rlm.bench._prepare` ledgers the
+    """The wrapper must stay transparent: `rlm.measure.bench._prepare` ledgers the
     hook's return value as `relaunch_s`."""
     class _Orchestra:
         async def swap_to(self, profile):

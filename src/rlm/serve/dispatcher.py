@@ -1,4 +1,4 @@
-"""C4 LLMDispatcher -- the ONLY module (with `rlm.rootclient`) permitted to
+"""C4 LLMDispatcher -- the ONLY module (with `rlm.serve.rootclient`) permitted to
 talk to a model server (spec §5).
 
 D14 binds: POST /apply-template then POST /completion with the returned
@@ -90,14 +90,14 @@ the three primitives that make someone else's rotation safe --
 replaced), `rotate_pool()` (a new process means a new pool; carrying old
 assignments onto it would be R13 reintroduced by R13's own mitigation), and
 `resume()`. The episode runner drives them and a process manager injected by
-the CLI owns the process (`rlm.serverproc`). Both questions about the
+the CLI owns the process (`rlm.serve.serverproc`). Both questions about the
 same window go to that window's own slot -- same-document reuse is warm and
 measured clean (0/72), and it is the one performance lever R13 leaves intact.
 Every reply's `id_slot` is ASSERTED against the requested one, because an
 out-of-range request is silently reassigned with HTTP 200 (asked 200, got 72),
 which would leave the scaffold certain it held a virgin slot while sharing a
 used one. And every answer is run through R13's foreign-string detector
-(`rlm.leakcheck`), whose verdict lands on the step as `leak_detected` /
+(`rlm.serve.leakcheck`), whose verdict lands on the step as `leak_detected` /
 `leak_detail`.
 
 None of this makes the leaf clean: 138 virgin-slot calls with zero leaks give
@@ -125,7 +125,7 @@ recorded three -- three draws of one leaf, reported as three seeds. The
 override is what makes the recorded value true; `None` keeps the target's.
 
 `from_config()` builds ONLY a "leaf" target: root
-traffic never goes through LLMDispatcher (see `rlm.rootclient.
+traffic never goes through LLMDispatcher (see `rlm.serve.rootclient.
 RootConversation`, which talks to a raw `ServerClient` with its own
 `cfg.scaffold.sampling.root`), so a "root" DispatchTarget here would be
 dead code that could silently apply the leaf-sized semaphore to root
@@ -146,9 +146,9 @@ from typing import Any, Callable
 import httpx
 
 from rlm.config import Config, Retries
-from rlm.envelope import ParseResult as EnvelopeParse
-from rlm.envelope import parse as envelope_parse
-from rlm.envelope import payload as envelope_payload
+from rlm.serve.envelope import ParseResult as EnvelopeParse
+from rlm.serve.envelope import parse as envelope_parse
+from rlm.serve.envelope import payload as envelope_payload
 from rlm.errors import (
     ActionType,
     Actor,
@@ -161,7 +161,7 @@ from rlm.errors import (
     StepStatus,
     TransportError,
 )
-from rlm.leakcheck import NOT_CHECKED, ChunkIndex, LeakVerdict
+from rlm.serve.leakcheck import NOT_CHECKED, ChunkIndex, LeakVerdict
 from rlm.trace import utc_now
 
 # --------------------------------------------------------------------------- #
@@ -189,7 +189,7 @@ from rlm.trace import utc_now
 #: The floor set: neutralised whether or not /props can be read. `<think>`/
 #: `</think>` are here because the leaf runs with `enable_thinking` false, and
 #: a model-authored `</think>` would close a reasoning block the template
-#: opened -- `rlm.rootclient.strip_reasoning` splits on the LAST one.
+#: opened -- `rlm.serve.rootclient.strip_reasoning` splits on the LAST one.
 CONTROL_MARKERS: tuple[str, ...] = (
     "<|im_start|>", "<|im_end|>", "<think>", "</think>",
 )
@@ -508,7 +508,7 @@ def _transport_guard(what: str) -> "Iterator[None]":
     """C4's client boundary: no `httpx` type may cross it (spec §5 C4).
 
     Wraps the HTTP library's exceptions in `rlm.errors` ones so that the whole
-    scaffold -- the arms, the episode runner, `rlm.bench`, and above all
+    scaffold -- the arms, the episode runner, `rlm.measure.bench`, and above all
     `rlm.cli`'s exit-code taxonomy, which is written in `except RlmError` --
     sees ONE named failure family instead of a third-party one. See
     `TransportError` for what an unnamed exception costs.
@@ -615,7 +615,7 @@ class ServerClient:
         two interesting ones are indistinguishable from faults and both mean
         "not yet" -- 503 while the model loads, and a refused connection in the
         seconds after a slot-pool rotation kills the old process. A rotation's
-        readiness wait (`rlm.serverproc`) is built on exactly this, and a
+        readiness wait (`rlm.serve.serverproc`) is built on exactly this, and a
         rotation that treated a refused connection as an error would fail every
         time it worked.
         """
@@ -762,7 +762,7 @@ class DispatchTarget:
     #: `max_subcalls` of them per episode -- to learn nothing new.
     prefix_sha256: str | None = None
     #: Does this target's prefix ask for the JSON envelope, and must C4
-    #: therefore parse and validate one scaffold-side (spec §5, `rlm.envelope`)?
+    #: therefore parse and validate one scaffold-side (spec §5, `rlm.serve.envelope`)?
     #: Off by default: the envelope is opt-in, decided by the S2 A/B
     #: (`milestones/s2/REFUSAL-AB.md`), and every measurement recorded before it exists was
     #: taken with plain-text answers.
@@ -804,7 +804,7 @@ def _new_step(call_id: str, retry_idx: int, role: str, *,
         "latency_queue_ms": None,
         "latency_prefill_ms": None,
         "latency_decode_ms": None,
-        # R13's detector (rlm.leakcheck), filled on every answered leaf call.
+        # R13's detector (rlm.serve.leakcheck), filled on every answered leaf call.
         # None means NOT CHECKED -- never "checked and clean".
         "leak_detected": None,
         "leak_detail": None,
@@ -870,7 +870,7 @@ class LLMDispatcher:
         ServerConfig carries no host field.
 
         ONLY a "leaf" target is built. Root traffic never goes through
-        LLMDispatcher -- `rlm.rootclient.RootConversation` talks to a raw
+        LLMDispatcher -- `rlm.serve.rootclient.RootConversation` talks to a raw
         `ServerClient` directly with `cfg.scaffold.sampling.root` -- so a
         "root" DispatchTarget here would be dead code that real traffic
         never reaches, and would silently apply the leaf-sized semaphore to
@@ -1052,7 +1052,7 @@ class LLMDispatcher:
     def leak_verdict(self, answer: str, sent: str) -> LeakVerdict:
         """R13's foreign-string check for one answer: identifier-shaped tokens
         that are absent from what was sent (chunk AND question) and present in
-        another chunk. Zero model calls; see `rlm.leakcheck` for its two
+        another chunk. Zero model calls; see `rlm.serve.leakcheck` for its two
         stated limits and for why a clean verdict is evidence rather than a
         certificate."""
         if self._chunk_index is None:
@@ -1215,7 +1215,7 @@ class LLMDispatcher:
                      n_predict: int | None = None) -> "str | dict[str, Any]":
         """Dispatch one leaf call. Returns the answer STRING, or -- when this
         target asks for the JSON envelope -- the parsed envelope as a dict
-        (`rlm.envelope.payload`). Off by default, so every existing caller and
+        (`rlm.serve.envelope.payload`). Off by default, so every existing caller and
         every measurement recorded before the S2 A/B keeps the string. `prompt` is the QUESTION; `chunk`, when
         given, is the excerpt it is about, and C4 composes
         `[system prefix][chunk][question]` from the two (§4). `chunk=None`
@@ -1253,7 +1253,7 @@ class LLMDispatcher:
         `n_predict` OVERRIDES `target.max_predict` FOR THIS CALL, on the same
         terms and for a related reason: §8's B2 sizes its per-chunk summary
         budget so that ALL of them fit 80% of the ROOT window
-        (`rlm.arms.b2_summary_n_predict`), and a budget the caller can only
+        (`rlm.measure.arms.b2_summary_n_predict`), and a budget the caller can only
         RECORD is not a budget. Unenforced, a 299-chunk aggregation corpus
         decodes 299 x `max_predict` tokens of summary into a reduce prompt
         sized for 0.8 x 32K -- the arm overflows the root window by

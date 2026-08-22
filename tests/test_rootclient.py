@@ -3,7 +3,7 @@ import hashlib
 
 import pytest
 
-from rlm.rootclient import extract_cell, strip_reasoning
+from rlm.serve.rootclient import extract_cell, strip_reasoning
 
 
 def test_strip_reasoning_keeps_the_tail_after_the_last_close_tag():
@@ -72,7 +72,7 @@ async def test_root_sampling_params_reach_the_server(fake_root_server, minimal_c
     assert body["seed"] == expected["seed"] * 1000 + 1  # per_turn schedule (v0.3.16): turn 1
 
 
-from rlm.rootclient import turn_seed
+from rlm.serve.rootclient import turn_seed
 
 
 def test_turn_seed_is_the_base_when_fixed_and_derived_when_per_turn():
@@ -128,7 +128,7 @@ async def test_history_renders_one_think_block_per_past_turn(fake_root_server):
     assert second.rendered.startswith(first.rendered + first.raw.strip() + "<|im_end|>\n")
 
 
-from rlm.rootclient import history_message, split_reasoning
+from rlm.serve.rootclient import history_message, split_reasoning
 
 
 def test_split_reasoning_separates_a_leading_think_block():

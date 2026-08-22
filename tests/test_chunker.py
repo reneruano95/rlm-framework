@@ -2,7 +2,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from rlm.chunker import ChunkConfig, split
+from rlm.context.chunker import ChunkConfig, split
 
 
 def words(n: int) -> str:

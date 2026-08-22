@@ -19,7 +19,7 @@ import pytest
 from conftest import CannedDispatcher, _decode_episode_row, _rows
 
 from rlm import episode as episodemod
-from rlm.arms import (
+from rlm.measure.arms import (
     ARM_ERROR,
     CHECKER_FAILED,
     NO_ANSWER,
@@ -99,7 +99,7 @@ class _ScriptedDispatcher(CannedDispatcher):
                      n_predict: int | None = None) -> str:
         self.seeds.append(seed)
         self.n_predicts.append(n_predict)
-        from rlm.dispatcher import compose_leaf_user
+        from rlm.serve.dispatcher import compose_leaf_user
 
         self.prompts.append(prompt)
         composed = compose_leaf_user(prompt, chunk)
@@ -167,7 +167,7 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
         if chunk is not None:
             raw["scaffold"]["chunk"].update(chunk)
         if leaf_seed is not None:
-            # §8's replicate identity. `rlm.bench.seeded_config` patches this
+            # §8's replicate identity. `rlm.measure.bench.seeded_config` patches this
             # per attempt on the RAW dict, exactly as this does.
             raw["scaffold"]["sampling"]["leaf"]["seed"] = leaf_seed
         return Config.model_validate(raw)
@@ -318,7 +318,7 @@ def test_outcome_for_error_maps_the_three_failure_classes():
 def test_arm_snapshot_keys_do_not_shadow_config_fields(bench_cfg):
     """`config_snapshot` merges `extra` over the config dump, so a key that
     collides silently replaces a whole config section."""
-    from rlm.arms import SNAPSHOT_KEYS
+    from rlm.measure.arms import SNAPSHOT_KEYS
 
     cfg = bench_cfg()
     assert not (set(SNAPSHOT_KEYS) & set(type(cfg).model_fields))
@@ -695,7 +695,7 @@ async def test_b3_runs_r13s_detector_on_an_unselected_chunk(bench_cfg):
     `size_tokens=50` (`4*50-3 = 197` chars) is chosen so C2's char-count
     binary search (content-agnostic under `MockDispatcher`'s `(len+3)//4`)
     cuts EXACTLY at the end of chunk A, regardless of chunk B's content --
-    verified directly against `rlm.chunker.split` before being relied on here.
+    verified directly against `rlm.context.chunker.split` before being relied on here.
     """
     cfg = bench_cfg(chunk={"size_tokens": 50, "stride_tokens": 50,
                             "snap_to_boundary": False})
@@ -927,7 +927,7 @@ def test_settled_tokens_matches_the_episode_runners_implementation():
     """`arms._settled_tokens` is `rlm/episode.py::settled_tokens`, duplicated
     (the dependency rule -- see the module docstring). Pinned equal so the
     duplication cannot drift in silence."""
-    from rlm.arms import _settled_tokens
+    from rlm.measure.arms import _settled_tokens
 
     attempts = [{"tokens_in": 10, "tokens_out": 5},
                 {"tokens_in": None, "tokens_out": None},
@@ -936,11 +936,11 @@ def test_settled_tokens_matches_the_episode_runners_implementation():
 
 
 def test_strip_reasoning_matches_rootclients_implementation():
-    """`arms._strip_reasoning` is `rlm.rootclient.strip_reasoning`, duplicated
-    for the same import-rule reason (`arms.py` may not import `rlm.rootclient`
+    """`arms._strip_reasoning` is `rlm.serve.rootclient.strip_reasoning`, duplicated
+    for the same import-rule reason (`arms.py` may not import `rlm.serve.rootclient`
     -- `tests/test_import_rules.py`). Pinned equal here."""
-    from rlm.arms import _strip_reasoning
-    from rlm.rootclient import strip_reasoning
+    from rlm.measure.arms import _strip_reasoning
+    from rlm.serve.rootclient import strip_reasoning
 
     samples = [
         "<think>\nreasoning\n</think>\nFINAL",
@@ -963,8 +963,8 @@ async def b2_root_client(fake_root_server):
     """A real `ServerClient` pointed at `FakeRootServer`, injected as B2's
     `root_client` -- exactly how a real bench run injects a `ServerClient`
     built against `servers.root.port`. `arms.py` never constructs its own
-    (the dependency rule: it may not import `rlm.dispatcher`)."""
-    from rlm.dispatcher import ServerClient
+    (the dependency rule: it may not import `rlm.serve.dispatcher`)."""
+    from rlm.serve.dispatcher import ServerClient
 
     client = ServerClient(fake_root_server.base_url, timeout=5.0)
     yield client
@@ -995,7 +995,7 @@ class _PerChunkDispatcher(CannedDispatcher):
                      n_predict: int | None = None) -> str:
         self.seeds.append(seed)
         self.n_predicts.append(n_predict)
-        from rlm.dispatcher import compose_leaf_user
+        from rlm.serve.dispatcher import compose_leaf_user
 
         self.prompts.append(prompt)
         composed = compose_leaf_user(prompt, chunk)
@@ -1037,7 +1037,7 @@ def _reply_by_marker(prompt: str) -> str:
 
 #: C2's partition chunker (size_tokens=10, snap off) cuts this 94-char corpus
 #: into EXACTLY three windows -- [37, 37, 20] chars -- verified directly
-#: against `rlm.chunker.split` before being relied on here, the same
+#: against `rlm.context.chunker.split` before being relied on here, the same
 #: discipline `test_b3_runs_r13s_detector_on_an_unselected_chunk` documents.
 _B2_CORPUS = "A" * 37 + "B" * 37 + "C" * 20
 _B2_CHUNKS = ["A" * 37, "B" * 37, "C" * 20]
@@ -1292,7 +1292,7 @@ class _RotatingDispatcher(_PerChunkDispatcher):
     async def query(self, prompt: str, *, role: str, call_id: str,
                      chunk: str | None = None, seed: int | None = None,
                      n_predict: int | None = None) -> str:
-        from rlm.dispatcher import _new_step
+        from rlm.serve.dispatcher import _new_step
 
         self.call_count += 1
         retry_idx = len([s for s in self._inner.steps if s.get("call_id") == call_id])
@@ -1329,7 +1329,7 @@ class _RotatingDispatcher(_PerChunkDispatcher):
 
 
 class _FakeProcessManager:
-    """The `rlm.serverproc.ProcessManager` duck type: one method,
+    """The `rlm.serve.serverproc.ProcessManager` duck type: one method,
     `.restart()`. `fail=True` makes it raise `ServerRotationError`, the same
     exception a real `LlamaServerProcess.restart()` raises when the
     replacement never comes up."""
@@ -1546,7 +1546,7 @@ async def test_b2_without_a_process_manager_closes_as_error_on_slot_pool_exhaust
 #
 # §8's three replicates are three seeds of the WHOLE system, and a bench run
 # holds ONE leaf dispatcher across all of them while re-seeding the CONFIG per
-# attempt (`rlm.bench.seeded_config`). An arm that let C4's construction-time
+# attempt (`rlm.measure.bench.seeded_config`). An arm that let C4's construction-time
 # seed stand would send the same leaf seed for all three while
 # `config_snapshot` recorded three different ones -- three draws of one leaf,
 # reported as three seeds, and every §8 margin computed over them.
@@ -1635,7 +1635,7 @@ async def test_b2_maps_a_root_transport_failure_to_server_unreachable(
     in `DispatchError`, so a leaf that dies is `error/server_unreachable` and
     §8's rerun-once applies to it. B2's reduce step talks to the root DIRECTLY,
     and an httpx error there used to propagate out of `run_b2`, past
-    `rlm.bench._run_cell` (which contains only `ConfigError`) and out of the
+    `rlm.measure.bench._run_cell` (which contains only `ConfigError`) and out of the
     whole grid: one root hiccup at hour 12 ends a 39-hour run."""
     import httpx
 
@@ -1673,7 +1673,7 @@ def test_the_transport_family_is_recognised_without_importing_httpx():
 
     import httpx
 
-    from rlm.arms import is_transport_error
+    from rlm.measure.arms import is_transport_error
 
     assert is_transport_error(httpx.ConnectError("x"))
     assert is_transport_error(httpx.ReadTimeout("x"))
@@ -1688,7 +1688,7 @@ def test_the_transport_family_is_recognised_without_importing_httpx():
 # 0f798a78, cell 16/16 = codeqa-01/b3): B3 assembles its prompt by chunking the
 # corpus through C2, whose boundary binary search is ~12,000 `/tokenize` round
 # trips, and ONE of them died in transport. `_b3_prompt` runs before the episode
-# row is opened and `rlm.bench._run_cell` contains only `ConfigError`, so the
+# row is opened and `rlm.measure.bench._run_cell` contains only `ConfigError`, so the
 # exception went all the way out of `run_bench` -- and because `httpx` types are
 # not `RlmError`, `rlm.cli.cmd_bench`'s taxonomy (which turns named failures
 # into `refused: ...` + exit 2 + a resume hint, and deliberately lets unnamed
@@ -1704,7 +1704,7 @@ async def test_b3_chunk_counting_contains_a_dead_transport_as_an_rlm_error(
     import httpx
 
     from rlm.config import Retries
-    from rlm.dispatcher import DispatchTarget, LLMDispatcher, ServerClient, SlotPool
+    from rlm.serve.dispatcher import DispatchTarget, LLMDispatcher, ServerClient, SlotPool
     from rlm.errors import RlmError, TransportError
 
     cfg = bench_cfg()

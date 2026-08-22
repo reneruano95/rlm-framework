@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 
 from rlm.errors import ConfigError
-from rlm.verdict import BASELINES, PairResult, RLM_ARM, Verdict
+from rlm.measure.verdict import BASELINES, PairResult, RLM_ARM, Verdict
 
 
 def escalation_plan_path(ledger_path, run_id: str) -> Path:

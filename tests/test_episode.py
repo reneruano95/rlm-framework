@@ -413,7 +413,7 @@ async def test_the_corpus_reaches_c4_so_every_leaf_answer_is_leak_checked(
 # that triggered it; and its wall-clock counted inside the episode's.
 #
 # The runner drives it; the process is owned by an injected manager
-# (`rlm.serverproc.ProcessManager`), so these tests need no llama-server -- and
+# (`rlm.serve.serverproc.ProcessManager`), so these tests need no llama-server -- and
 # C4 keeps having no code path that restarts anything.
 # --------------------------------------------------------------------------- #
 
@@ -796,7 +796,7 @@ async def test_every_leaf_call_carries_this_episodes_seed(episode_env):
 
     §8's three replicates are three seeds of the WHOLE system. A bench run
     holds ONE leaf dispatcher across all of them and re-seeds the CONFIG per
-    attempt (`rlm.bench.seeded_config`), so an episode that let C4's
+    attempt (`rlm.measure.bench.seeded_config`), so an episode that let C4's
     construction-time seed stand would decode all three replicates identically
     while `config_snapshot` recorded that they differed -- three draws of one
     leaf, reported as three seeds.

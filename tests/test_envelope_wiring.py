@@ -183,7 +183,7 @@ async def test_evidence_is_verified_against_the_chunk_not_the_answer(mock_server
 
 async def test_evidence_is_NOT_CHECKED_without_a_chunk(mock_server):
     """The single-string call form: C4 cannot see where the document ended, so
-    it has checked nothing. None, never False (`rlm.leakcheck`'s discipline)."""
+    it has checked nothing. None, never False (`rlm.serve.leakcheck`'s discipline)."""
     mock_server.answer = GOOD
     d = mock_server.dispatcher(envelope=True)
     out = await d.query("q", role="leaf", call_id="c1")

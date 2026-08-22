@@ -36,7 +36,7 @@ mitigation gives every window one never-reused slot, sized to `--parallel`
 without a rotation `SlotPoolExhausted` would end every such task `error`
 partway through the map -- a manufactured contamination-class loss, not a
 finding about the task. `ArmEpisode` therefore accepts an optional
-`process_manager` (the `rlm.serverproc.ProcessManager` duck type: one method,
+`process_manager` (the `rlm.serve.serverproc.ProcessManager` duck type: one method,
 `.restart()`) and `call_leaf` rotates through it on `SlotPoolExhausted` ONLY
 (§5 C4: a FAILED server is never restarted, only a HEALTHY one whose pool
 served its `--parallel` windows), mirroring `rlm/episode.py::_rotate_leaf`'s
@@ -44,7 +44,7 @@ quiesce -> restart -> `rotate_pool()` -> resume sequence with one guarantee
 deliberately narrowed and documented (`ArmEpisode._rotate_leaf`'s docstring):
 this module cannot re-run §4's `/props` handshake against the restarted
 process, because it cannot talk HTTP at all (`FORBIDDEN_ROOTS` in
-`tests/test_import_rules.py`), not merely `rlm.dispatcher`. `None` (no
+`tests/test_import_rules.py`), not merely `rlm.serve.dispatcher`. `None` (no
 `process_manager` injected) is today's behaviour, unchanged: a clean
 `error/slot_pool_exhausted`, never a crash. B1/B3 never pass one -- their one
 call each cannot exhaust a pool sized >= 1.
@@ -120,7 +120,7 @@ import duckdb
 from rlm import trace as tracemod
 from rlm.budget import BudgetEnforcer
 from rlm.budget import Budgets as BudgetLimits
-from rlm.chunker import ChunkConfig, split
+from rlm.context.chunker import ChunkConfig, split
 from rlm.config import Config, PromptRegistry, config_snapshot
 from rlm.context import DOCUMENT_SEPARATOR, load_context
 from rlm.errors import (
@@ -371,15 +371,15 @@ def _settled_tokens(attempts: list[dict[str, Any]]) -> tuple[int, int]:
             sum(a.get("tokens_out") or 0 for a in attempts))
 
 
-#: `rlm.rootclient.strip_reasoning`'s think-block regex, copied verbatim —
+#: `rlm.serve.rootclient.strip_reasoning`'s think-block regex, copied verbatim —
 #: see `_strip_reasoning`'s docstring for why it is copied rather than
 #: imported.
 _THINK_BLOCK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
 
 
 def _strip_reasoning(text: str) -> str:
-    """`rlm.rootclient.strip_reasoning`, DUPLICATED ON PURPOSE: `arms.py` may
-    not import `rlm.rootclient` (`tests/test_import_rules.py`'s
+    """`rlm.serve.rootclient.strip_reasoning`, DUPLICATED ON PURPOSE: `arms.py` may
+    not import `rlm.serve.rootclient` (`tests/test_import_rules.py`'s
     `FORBIDDEN_RLM` — it is C4's HTTP client, exactly what the module
     docstring's "THIS MODULE NEVER IMPORTS C4" forbids). B2's root call still
     needs D16's belt-and-braces strip (a leading `<think>...</think>` block,
@@ -445,7 +445,7 @@ class ArmEpisode:
         self.arm = arm
         self.bench_extra = dict(bench_extra or {})
         # §5 C4's rotation (v0.2.6), B2's leaf topology only: the object that
-        # owns the leaf PROCESS (`rlm.serverproc.ProcessManager`'s duck type —
+        # owns the leaf PROCESS (`rlm.serve.serverproc.ProcessManager`'s duck type —
         # one method, `.restart()`), never constructed here (arms.py may not
         # start or stop processes any more than it may talk HTTP). `None` is
         # "current behaviour" -- `SlotPoolExhausted` propagates unrotated, the
@@ -706,7 +706,7 @@ class ArmEpisode:
             "role": "leaf", "call_id": call_id, "chunk": chunk,
             # THIS EPISODE'S SEED, PER CALL -- never the one the dispatcher was
             # built with. §8 re-seeds the CONFIG for each of its three
-            # replicates (`rlm.bench.seeded_config`) while one bench run holds
+            # replicates (`rlm.measure.bench.seeded_config`) while one bench run holds
             # a single leaf dispatcher across all of them, so a
             # construction-time seed would give every replicate the same leaf
             # draw while `config_snapshot` recorded three different ones.
@@ -790,7 +790,7 @@ class ArmEpisode:
         really is what config describes. `arms.py` cannot do that: it is one
         of the ISOLATED modules `tests/test_import_rules.py` forbids from
         importing an HTTP client AT ALL (`FORBIDDEN_ROOTS` blocks `httpx`
-        *and* the stdlib `http`/`socket`, not merely `rlm.dispatcher`) — there
+        *and* the stdlib `http`/`socket`, not merely `rlm.serve.dispatcher`) — there
         is no way to GET `/props` from inside this module, so re-running the
         handshake here the way `_rehandshake_leaf` does is not "not imported
         for tidiness", it is architecturally unreachable. Two things still
@@ -1264,13 +1264,13 @@ async def _b2_root_final(cfg: Config, *, ep: ArmEpisode, registry: PromptRegistr
     (:144-156) -- `/apply-template` then `/completion`, with
     `cfg.scaffold.sampling.root` (temperature/top_p/seed) carried verbatim,
     via the injected `root_client` at the root port (never constructed here --
-    `arms.py` may not import `rlm.dispatcher`, the dependency rule).
+    `arms.py` may not import `rlm.serve.dispatcher`, the dependency rule).
 
     The prompt is `render_baseline("b2_root_final") + "\\n\\n" + numbered
     summaries in order + "\\n\\n" + task.text` (pre-registered, §8). B2 parses
     the RAW completion text as the answer -- there is no REPL cell, the reply
     IS the answer -- with reasoning stripped by `_strip_reasoning` (D16's
-    belt-and-braces strip, duplicated from `rlm.rootclient` rather than
+    belt-and-braces strip, duplicated from `rlm.serve.rootclient` rather than
     imported; see that function's docstring).
 
     Logged as ONE `llm_call` step with `actor="root"` through
@@ -1293,7 +1293,7 @@ async def _b2_root_final(cfg: Config, *, ep: ArmEpisode, registry: PromptRegistr
     # the injected client), so an httpx error here used to propagate out of
     # `run_b2` uncaught -- past the `(BudgetBreach, DispatchError,
     # ServerRotationError)` handler, through `except BaseException` (which
-    # closes the row `arm_error` and RE-RAISES), and out of `rlm.bench._run_cell`,
+    # closes the row `arm_error` and RE-RAISES), and out of `rlm.measure.bench._run_cell`,
     # which contains only `ConfigError`. One root hiccup at hour 12 would end
     # the whole grid. Mapped to the same `DispatchError` a leaf failure raises,
     # it becomes this cell's `error/server_unreachable` and gets §8's rerun.
@@ -1352,11 +1352,11 @@ async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any
     the section docstring above for the slot/admission consequences of that),
     while the reduce step talks directly to the root server the way
     `milestones/s1/run_s1.py:control_attempt` does. Neither is constructed here --
-    `arms.py` may not import `rlm.dispatcher`/`rlm.rootclient` (the dependency
+    `arms.py` may not import `rlm.serve.dispatcher`/`rlm.serve.rootclient` (the dependency
     rule; `tests/test_import_rules.py` lints it).
 
     `process_manager` is a THIRD, optional injected dependency (the
-    `rlm.serverproc.ProcessManager` duck type: one method, `.restart()`), and
+    `rlm.serve.serverproc.ProcessManager` duck type: one method, `.restart()`), and
     it exists because B2's map is the one baseline arm that can actually drain
     the leaf's never-reuse slot pool: an aggregation corpus's ~300 windows
     against `--parallel 128` slots means `SlotPoolExhausted` partway through

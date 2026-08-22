@@ -22,7 +22,7 @@ disagree.
 
 Sampling: every /completion call carries `cfg.scaffold.sampling.root`
 (temperature, top_p, seed) verbatim -- real, non-defaulted config, not
-`rlm.dispatcher.ServerClient.completion`'s (deliberately absent) defaults.
+`rlm.serve.dispatcher.ServerClient.completion`'s (deliberately absent) defaults.
 
 D26 append-only: `append_user` only ever appends; nothing already sent is
 ever rewritten. `turn()` builds the assistant history message with
@@ -44,20 +44,20 @@ from dataclasses import dataclass
 from typing import Any
 
 from rlm.config import Config
-from rlm.dispatcher import CompletionResult, ServerClient
+from rlm.serve.dispatcher import CompletionResult, ServerClient
 
 # The pure text shaping -- assistant_prefix, split_reasoning,
 # history_message, turn_seed, strip_reasoning, extract_cell -- lives in
 # `rlm/roottext.py`. It is string and regex work with no transport, so it
 # sits under §5's dependency-rule lint; this module cannot, because
-# `RootConversation` holds a `ServerClient` and so `rlm.rootclient` is in the
+# `RootConversation` holds a `ServerClient` and so `rlm.serve.rootclient` is in the
 # rule's FORBIDDEN_RLM set. Splitting them is what lets the REPLAY path --
 # which needs `history_message` and `extract_cell` to re-derive an episode
 # from the trace store alone -- be lint-covered too.
 #
-# Re-exported here: every existing `from rlm.rootclient import ...` site
+# Re-exported here: every existing `from rlm.serve.rootclient import ...` site
 # keeps working, including tests and `rlm/cli.py`.
-from rlm.roottext import (  # noqa: F401
+from rlm.serve.roottext import (  # noqa: F401
     assistant_prefix, extract_cell, history_message, split_reasoning,
     strip_reasoning, turn_seed,
 )
@@ -68,7 +68,7 @@ class RootTurn:
     """One root turn: the model's raw reply, the extracted REPL cell (or
     None on an extraction miss), the request hash + rendered string (D14),
     and the completion's usage/timing info for the caller to log as a
-    step (rlm.dispatcher.CompletionResult already carries exactly the
+    step (rlm.serve.dispatcher.CompletionResult already carries exactly the
     fields steps.tokens_in/out/cached/slot_id/latency_* need)."""
 
     raw: str

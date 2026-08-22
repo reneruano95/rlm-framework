@@ -27,7 +27,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 from rlm.errors import ConfigError
-from rlm.truncate import MIN_MARKER_CAP
+from rlm.context.truncate import MIN_MARKER_CAP
 
 
 class _Strict(BaseModel):
@@ -562,7 +562,7 @@ class Config(_Strict):
         if s.truncation_cap_chars < MIN_MARKER_CAP:
             raise ValueError(
                 f"scaffold.truncation_cap_chars ({s.truncation_cap_chars}) must be "
-                f">= rlm.truncate.MIN_MARKER_CAP ({MIN_MARKER_CAP}); below that cap "
+                f">= rlm.context.truncate.MIN_MARKER_CAP ({MIN_MARKER_CAP}); below that cap "
                 "the truncator cannot emit its marker and silently degrades to "
                 "head-only output"
             )

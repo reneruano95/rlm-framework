@@ -218,7 +218,7 @@ def test_cell_extraction_defaults_match_prompt_promise(valid_cfg):
 # null for every prompt entry (files didn't exist until Task 14), so
 # pinned_prompt_hashes had to skip nulls -- exercised below against an
 # explicitly-unpinned entry now that Task 14 has pinned the real config.yaml.
-# Ruling 2: scaffold.truncation_cap_chars >= rlm.truncate.MIN_MARKER_CAP is a
+# Ruling 2: scaffold.truncation_cap_chars >= rlm.context.truncate.MIN_MARKER_CAP is a
 # cross-field validator (below that cap the truncator can't emit its marker).
 
 
@@ -249,7 +249,7 @@ def test_pinned_prompt_hashes_includes_only_pinned(tmp_path, minimal_cfg_dict):
 
 
 def test_truncation_cap_below_marker_floor_is_refused(minimal_cfg_dict):
-    from rlm.truncate import MIN_MARKER_CAP
+    from rlm.context.truncate import MIN_MARKER_CAP
 
     minimal_cfg_dict["scaffold"]["truncation_cap_chars"] = MIN_MARKER_CAP - 1
     with pytest.raises(ConfigError, match="truncation_cap_chars"):
@@ -554,7 +554,7 @@ def test_baseline_prompts_load_pin_and_render(valid_cfg):
 
 
 def test_bench_leaf_profile_validates_and_derives_argv(valid_cfg):
-    from rlm.serverproc import launch_argv
+    from rlm.serve.serverproc import launch_argv
     bl = valid_cfg.servers.bench_leaf
     assert bl is not None and bl.parallel == 2 and bl.ctx == 524288
     argv = launch_argv(bl)

@@ -19,7 +19,7 @@ import pytest
 import yaml
 from bench.manifest import BenchmarkManifest, TaskEntry
 
-from rlm.bench import (
+from rlm.measure.bench import (
     ARM_ORDER,
     BENCH_PROFILE,
     CONFIG_REFUSED,
@@ -864,7 +864,7 @@ def test_bench_imports_neither_c4_nor_the_benchmark_package():
     `tests/test_import_rules.py` lists bench.py as isolated). And `bench/` is
     not in the shipped wheel (`pyproject.toml` packages = ["rlm"]), so a
     runtime import of the manifest module would break the installed package."""
-    tree = ast.parse((REPO_ROOT / "src" / "rlm" / "bench.py").read_text(encoding="utf-8"))
+    tree = ast.parse((REPO_ROOT / "src" / "rlm" / "measure" / "bench.py").read_text(encoding="utf-8"))
     runtime: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.If) and getattr(node.test, "id", "") == "TYPE_CHECKING":
@@ -890,7 +890,7 @@ def test_default_outputs_are_not_inside_the_evidence_archive():
     and called it "pre-registered". It is not: ARCHITECTURE.md names neither
     path anywhere. It was a convention, and it pointed the product at the
     archive."""
-    from rlm.bench import LEDGER_PATH
+    from rlm.measure.bench import LEDGER_PATH
     from rlm.cli import DEFAULT_REPORT_PATH
 
     for name, path in (("LEDGER_PATH", LEDGER_PATH),
@@ -906,10 +906,10 @@ def test_default_outputs_are_not_inside_the_evidence_archive():
 # `ServerOrchestra` fills bench.py's `quiesce_fn`/`handshake_fn`/
 # `swap_servers_fn` hooks -- but the lint (`tests/test_import_rules.py`)
 # forces the CLASS ITSELF to live in `rlm/cli.py`, not a new module: it needs
-# `ServerClient` for the §4 handshake, and `FORBIDDEN_RLM` bans `rlm.dispatcher`
+# `ServerClient` for the §4 handshake, and `FORBIDDEN_RLM` bans `rlm.serve.dispatcher`
 # from any module that would have to join `ISOLATED` (see the module docstring
 # on `rlm.cli.ServerOrchestra`). These tests import it from there and exercise
-# it exactly as `rlm.bench` will: through fakes, no servers, no network.
+# it exactly as `rlm.measure.bench` will: through fakes, no servers, no network.
 # --------------------------------------------------------------------------- #
 
 from rlm.cli import (  # noqa: E402 -- grouped with the rest of this section
@@ -1470,7 +1470,7 @@ def test_bench_leaf_config_refuses_without_a_bench_leaf_profile(bench_cfg_dict):
 
 
 def test_bench_dispatcher_sees_the_true_two_slot_topology(bench_cfg_dict):
-    from rlm.dispatcher import LLMDispatcher
+    from rlm.serve.dispatcher import LLMDispatcher
 
     d = bench_dispatcher(bench_cfg_dict)
     assert isinstance(d, LLMDispatcher)
@@ -1478,7 +1478,7 @@ def test_bench_dispatcher_sees_the_true_two_slot_topology(bench_cfg_dict):
     assert d._targets["leaf"].slot_capacity_tokens == 262144
 
 
-# -- composed with rlm.bench.run_block: relaunch strictly between episodes --- #
+# -- composed with rlm.measure.bench.run_block: relaunch strictly between episodes --- #
 
 
 async def test_orchestra_wired_into_run_block_keeps_relaunch_out_of_wall_s(
