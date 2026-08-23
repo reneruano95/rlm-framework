@@ -1,9 +1,14 @@
 # Upstream bug reports (llama.cpp)
 
-Two defects found while building this project, both **re-verified on
-`b10488-9d77fa172`** (2026-08-18, current at time of writing) as well as on the
-project's pinned `b10375-ba360efe1`. Neither is fixed upstream; neither appears
-to be reported in this form.
+**Three** defects found while building this project. The first two were
+re-verified on `b10488-9d77fa172` (2026-08-18) as well as on the project's
+pinned `b10375-ba360efe1`; the third (2026-08-23) is measured on `b10375` only
+so far. None is fixed upstream; none appears to be reported in this form.
+
+**The second and third are almost certainly the same bug.** Both are HIP-only on
+this box with Vulkan clean at the same commit, both produce degenerate text
+rather than an error, and both survive every flag we tried. One is dialled by
+CONCURRENCY, the other by how far BACK in the prompt the needed content sits.
 
 Everything here is self-contained: standard library plus `httpx`, no imports
 from `rlm.*`, no repo checkout required beyond this directory.
@@ -15,6 +20,8 @@ from `rlm.*`, no repo checkout required beyond this directory.
 | `r13_repro.py` | reproducer for the slot leak |
 | `make_fixtures.py` | deterministic corpus generator the slot-leak repro needs |
 | `concurrent_decode_repro.py` | reproducer for the concurrent-decode collapse |
+| `ISSUE-prompt-length.md` | issue body — a value a few hundred tokens back cannot be repeated |
+| `prompt_length_repro.py` | reproducer for it; standard library only, no corpus, no model of ours |
 
 ## Slot leak
 
@@ -46,6 +53,24 @@ so slot reuse cannot contribute).
 Measured, both builds: **32/32 correct serial, 2/32 at two requests in flight**,
 with 30 of 32 outputs degenerate.
 
+## Prompt length / distance back
+
+```bash
+# HIP build. -np 4 so the largest cell fits one slot: at -np 8 the last cell is
+# 5,779 tokens against 4,096 per slot and BOTH backends return HTTP 400.
+llama-server -m Qwen2.5-7B-Instruct-Q8_0.gguf --host 127.0.0.1 --port 8081   -c 32768 -np 4 -ctk q8_0 -ctv q8_0 -fa on -ub 512 -b 2048
+python prompt_length_repro.py --base http://127.0.0.1:8081
+# then the Vulkan build of the SAME commit, same command line
+```
+
+Measured on `b10375`, `Qwen2.5-7B-Instruct-Q8_0`, marker distance from the
+question: HIP `ok / WRONG / HTTP 500 / WRONG / HTTP 500` at 80 / 584 / 1,200 /
+1,760 / 2,936 tokens; **Vulkan `ok` at all five**. Both pass the 80-token
+positive control.
+
+No corpus and no model of ours: the marker is generated from `--seed`, so it
+appears in no training set, and the task is to repeat it back.
+
 ## A note on scoring, for anyone re-running these
 
 Both reproducers ship a positive control, and both need one. While preparing
@@ -57,6 +82,12 @@ until a control caught them:
 * a first draft of the concurrency repro scored 0/32 *serially*, because it
   placed the answer ~1,076 tokens from the question, past this model's effective
   retrieval reach — nothing to do with concurrency;
+  **(2026-08-23: that explanation was wrong, and this line is the third defect
+  observed a month before it was identified. There is no "effective retrieval
+  reach"; the same prompt on the Vulkan build of the same commit is answered
+  correctly. See `ISSUE-prompt-length.md`. It is recorded here rather than
+  edited away because being confidently wrong about the cause, in writing, in
+  the file that warns about being confidently wrong, is the useful part.)**
 * the slot-leak harness's own coarse verdict field counts proper nouns and does
   not exclude the entity named in the question, so it reports 37/54 where a
   strict identifier-only rule reports 2/54.
