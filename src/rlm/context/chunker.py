@@ -10,10 +10,12 @@ The token counter is injected so this module never imports an LLM client
 WINDOW/STRIDE GEOMETRY (spec §7 #2) — why this is no longer a partition. The
 chunk sweep found that retrieval does NOT degrade with chunk size: it falls off
 a cliff at absolute DISTANCE from the needle to the question, 38/39 correct
-within ~1,000 tokens and 0/39 beyond it (Fisher p ≈ 1e-21), bracket measured at
-[967 pass, 1022 fail]. Size is ruled out by the data's own counterexamples — a
-32,768-token chunk with the needle 967 tokens from the end scored 6/6, a
-1,024-token chunk with it 1,022 from the end scored 0/3. So shipping a small
+within ~1,000 tokens and 0/39 beyond it (Fisher two-sided p = 2.9e-21). The
+bracket is [989 pass, 1003 fail] -- amended 2026-08-23, n=12 per side, Fisher
+p = 7.4e-07, superseding the [967, 1022] pair this module was written against
+(one n=3 cell per side). Size is ruled out by the data's own counterexamples --
+a 32,768-token chunk with the literal needle 967 tokens from the end scored 3/3,
+a 1,024-token chunk with it 1,022 from the end scored 0/3. So shipping a small
 `size_tokens` on a non-overlapping chunker fixes nothing: the HEAD of every
 chunk still sits outside the horizon. The lever is window/stride geometry.
 
@@ -21,8 +23,10 @@ chunk still sits outside the horizon. The lever is window/stride geometry.
 this module was written for.** ONE horizon governs two distances: the same
 ~1,000-token cliff that makes facts unfindable makes INSTRUCTIONS unobeyed, and
 instruction-to-generation distance is (window + question) — so a 1,024 window
-puts the system prefix ~47 tokens past the measured fail point (30/30 false
-positives at 1,024, 0/45 with 45/45 literal recall at 640).
+puts the system prefix past the measured fail point (30/30 false positives at
+1,024, 0/45 with 45/45 literal recall at 640). No window between 640 and 1,024
+has ever been sampled, so the geometry is justified by which SIDE of the
+boundary it lands on, never by a margin in tokens.
 
 **Window COUNT is not `ceil((T - size) / stride) + 1`.** That formula assumes
 every end lands exactly one stride after the last; `_snap_back` moves ends

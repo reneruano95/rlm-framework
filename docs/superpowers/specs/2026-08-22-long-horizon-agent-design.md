@@ -97,7 +97,7 @@ Longest episodes by root turn: 146 (`rlm-restricted`), 116 (`rlm`), 89 (`rlm-res
 
 29,491 usable tokens **[V]**, append-only by D26, with **no compaction, summarisation, or trimming anywhere in the codebase** **[R]**. Measured burn on document QA is ~354 tokens/turn **[R]**; one real episode ended `context_exhausted / root_window` **[V]**.
 
-One ARC observation is a 64×64 grid = 4,096 cells. The official harness renders it as one Python int list per row and estimates ~1 character per token, putting a single frame at **~4K tokens at the floor and ~12K as actually rendered** **[R]** — four to twelve times the independently measured fact-cliff bracket of **[967 tokens pass, 1,022 fail]** (30/30 vs 0/21, p = 8.7e-15, reproduced across two model families) **[R]**.
+One ARC observation is a 64×64 grid = 4,096 cells. The official harness renders it as one Python int list per row and estimates ~1 character per token, putting a single frame at **~4K tokens at the floor and ~12K as actually rendered** **[R]** — four to twelve times the LEAF's independently measured fact-cliff bracket of **[989 tokens pass, 1,003 fail]** (12/12 vs 0/12, Fisher p = 7.4e-07; amended 2026-08-23, superseding [967, 1,022]) **[R]**. The instruction-side companion — 30/30 false positives at a 1,024-token window against 0/21 at 640, p = 8.7e-15 — is a different quantity on the same leaf, and the second model family reproduces only the coarse 640-vs-1,024 refusal step (gemma-4, whose own SWA window is exactly 1,024). Applied to the ROOT here by same-family analogy, not by measurement **[R]**.
 
 Turns available, as a function of tokens per observation (assuming ~60 tokens of reply and scaffolding per turn):
 
@@ -174,7 +174,7 @@ Independent of every gate; do them first because they are hours, not days. These
 
 | id | measures | PASS | notes |
 |---|---|---|---|
-| **T-1** | tokens per observation | at least one serialisation ≤ **1,000 tokens/frame** | the threshold is not arbitrary — it is the measured fact-cliff bracket [967 / 1,022] **[R]** |
+| **T-1** | tokens per observation | at least one serialisation ≤ **1,000 tokens/frame** | the threshold is not arbitrary — it is the leaf's measured fact-cliff bracket **[989 / 1,003]** (12/12 vs 0/12, p = 7.4e-07), rounded down to 1,000 and transferred to the root by same-family analogy **[R]** |
 | **T-2** | checkpoint tax | some `-ctxcp` setting cuts median turn wall by ≥ **30%** without forcing full re-prefill | full re-prefill is declared when that setting's `tokens_cached/tokens_in` falls below **0.5** at turn 100, or when `timings.prompt_ms` scales with total history rather than with the appended segment |
 | **T-3** | process endurance | one process completes ≥ **2,000** sequential requests, no crash, RSS growth < 2× | directly tests upstream #23181 |
 | **T-4** | prefix cache under append-growth | `tokens_cached/tokens_in` ≥ **0.9** at turn 300 | if this fails, per-turn cost is prefill-dominated and every estimate here is ~10× optimistic |

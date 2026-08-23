@@ -81,11 +81,13 @@ def test_rejects_nonsense_config():
 #
 # Retrieval does not degrade with chunk SIZE; it falls off a cliff at absolute
 # DISTANCE from the needle to the question -- 38/39 correct within ~1,000
-# tokens, 0/39 beyond it (Fisher p ~ 1e-21), with the bracket measured at
-# [967 pass, 1022 fail]. A 32,768-token chunk whose needle sat 967 tokens from
-# the end scored 6/6 while a 1,024-token chunk whose needle sat 1,022 from the
-# end scored 0/3, so shipping `size_tokens: 1024` on a non-overlapping chunker
-# would still leave the HEAD of every chunk outside the horizon.
+# tokens, 0/39 beyond it (Fisher two-sided p = 2.9e-21). The bracket is
+# [989 pass, 1003 fail] (amended 2026-08-23; n=12 per side, p = 7.4e-07),
+# superseding [967, 1022], which was one n=3 cell per side. A 32,768-token
+# chunk whose literal needle sat 967 tokens from the end scored 3/3 while a
+# 1,024-token chunk whose needle sat 1,022 from the end scored 0/3, so shipping
+# `size_tokens: 1024` on a non-overlapping chunker would still leave the HEAD
+# of every chunk outside the horizon.
 #
 # The property that replaces the byte-exact round trip is therefore geometric,
 # and it has two clauses: every token appears in some window (coverage), AND

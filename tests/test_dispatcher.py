@@ -610,8 +610,8 @@ async def test_root_role_is_not_a_valid_dispatch_target_from_config(minimal_cfg_
 # The leaf returns content from documents previously held on the same slot:
 # shared slot 24/54 vs virgin slot 0/54 in one process with byte-identical
 # prompts (p = 4.4e-9, milestones/s2/R13.md §1). It survives a cold full re-prefill and
-# survives `action=erase`, and a full-attention control model leaked MORE than
-# the hybrid -- so it is neither the prompt cache nor recurrent state, and no
+# survives `action=erase`, and a NON-RECURRENT control model leaked MORE than
+# the hybrid (gemma-4-12B-it -- no `ssm.*` keys, but SWA-interleaved) -- so it is neither the prompt cache nor recurrent state, and no
 # configuration flag suppresses it. The only thing that works is never reusing
 # a slot, which makes slot allocation a scaffold contract and these tests the
 # only place it is enforced.

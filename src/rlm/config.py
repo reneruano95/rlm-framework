@@ -97,7 +97,8 @@ class LeafServerConfig(ServerConfig):
     (shared slot 24/54 vs virgin slot 0/54, p = 4.4e-9). Every cheaper option
     was measured and leaks -- `cache_prompt: false` 15/18, `--parallel 1`
     4/18 (it makes reuse mandatory), `action=erase` 33/54, and the
-    full-attention fallback leaf leaked MORE than the hybrid. There is
+    non-recurrent control leaf leaked MORE than the hybrid (gemma-4-12B-it:
+    no `ssm.*` keys, but SWA-interleaved -- not a full-attention model). There is
     nothing else to put here.
     """
 

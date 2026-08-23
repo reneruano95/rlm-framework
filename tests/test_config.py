@@ -48,11 +48,12 @@ def test_the_shipped_chunk_geometry_is_the_measured_one(valid_cfg):
     """§7 #2 (v0.3.0): window 640 / stride 480, superseding 1,024/768.
 
     ONE horizon governs both distances. Facts beyond ~1,000 tokens from the
-    question become unfindable (bracket [967 pass, 1022 fail]) and INSTRUCTIONS
-    decay over the same distance -- instruction-to-generation distance is
-    (window + question), so a 1,024 window puts the system prefix ~47 tokens
-    past the measured fail point: 30/30 false positives at 1,024, 0/45 with
-    45/45 literal recall at 640. The overhead is re-derived 1,536 -> 1,920 so
+    question become unfindable (bracket [989 pass, 1003 fail], amended
+    2026-08-23) and INSTRUCTIONS decay over the same distance --
+    instruction-to-generation distance is (window + question), so a 1,024
+    window puts the system prefix past the measured fail point: 30/30 false
+    positives at 1,024, 0/45 with 45/45 literal recall at 640. The margin in
+    tokens is not measured; no window between 640 and 1,024 has been sampled. The overhead is re-derived 1,536 -> 1,920 so
     window + overhead stays 2,560, R13's measured dense-slot budget, which
     keeps 128 * 2,560 == leaf.ctx exactly."""
     chunk = valid_cfg.scaffold.chunk

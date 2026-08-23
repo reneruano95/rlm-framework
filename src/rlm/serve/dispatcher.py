@@ -64,8 +64,9 @@ Measured under a paired control in ONE process with byte-identical prompts at
 the same moment: shared pinned slot 24/54 leaked, virgin slot 0/54 (Fisher
 p = 4.4e-9, `milestones/s2/R13.md` §1). It survives a cold full re-prefill
 (`timings.cache_n == 0`) and survives `action=erase` returning a truthful
-`n_erased`, and a verified full-attention control model leaked MORE than the
-hybrid -- so it is neither the prompt cache nor recurrent state, and no
+`n_erased`, and a verified NON-RECURRENT control model leaked MORE than the
+hybrid (gemma-4-12B-it: no `ssm.*` keys, though SWA-interleaved, not a
+full-attention model) -- so it is neither the prompt cache nor recurrent state, and no
 configuration flag suppresses it. `cache_prompt: false` (15/18) and
 `--parallel 1` (4/18, which makes reuse mandatory) both leak and are NOT
 mitigations. The only measured-clean configurations are one process per

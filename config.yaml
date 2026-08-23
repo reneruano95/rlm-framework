@@ -257,10 +257,13 @@ scaffold:
   # §7 #2 (v0.3.0, 2026-08-14): WINDOW 640 / STRIDE 480 (25% overlap).
   # 1,024/768 SUPERSEDED, on quality, and the reason is one measured horizon.
   # Retrieval falls off a cliff at absolute needle-to-question DISTANCE (38/39
-  # correct within ~1,000 tokens, 0/39 beyond; bracket [967 pass, 1022 fail]),
+  # correct within ~1,000 tokens, 0/39 beyond; bracket [989 pass, 1003 fail],
+  # amended 2026-08-23 from `milestones/s2/results/distance.jsonl` -- n=12 per
+  # side, Fisher p = 7.4e-07 -- superseding [967, 1022], one n=3 cell per side),
   # and INSTRUCTIONS decay over the same distance: instruction-to-generation
-  # distance is (window + question), so 1,024 puts the system prefix ~47 tokens
-  # PAST the measured fail point and the leaf stops obeying its own prefix --
+  # distance is (window + question), so 1,024 puts the system prefix PAST the
+  # measured fail point and the leaf stops obeying its own prefix (the margin
+  # is NOT measured: no window between 640 and 1,024 has ever been sampled) --
   # 30/30 false positives at 1,024 against 0/45 with 45/45 literal recall at
   # 640 (`milestones/s2/DISTANCE.md`; reproduced by accident in `milestones/s2/OCCUPANCY.md` §8,
   # 122/128 correct at 1,024 vs 128/128 twice at 640). The stride still puts
