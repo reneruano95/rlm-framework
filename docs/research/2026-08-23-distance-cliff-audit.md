@@ -1,11 +1,13 @@
 # The ~1,000-token distance cliff — audit, amendment, and the measurement that is actually owed
 
-**Date:** 2026-08-23 · **Status:** audit complete; no new leaf calls were made. Every number below is
-re-derived from records already in the archive commit `4e75b53` or read from file metadata offline.
+**Date:** 2026-08-23 · **Status:** audit complete (§§0–5, from records already on disk, no new calls);
+**E1 and E2 MEASURED** (§§7–8, 638 fresh leaf calls the same day).
 **Trigger:** an outside reading of `ARCHITECTURE.md` §7 #2 — *"the ~1,000-token cliff is more aggressive
 than the published literature, and it is your finding, not an established fact."*
-**Verdict:** the objection is correct, the repo's own source file said it first and louder than the spec
-ever did, and the audit found a **better bracket sitting unextracted in data taken eight days ago**.
+**Verdict:** the objection was correct, the repo's own source file said it first and louder than the spec
+ever did, the audit found a **better bracket sitting unextracted in data taken eight days ago** — and the
+sweep that could have removed the word "cliff" instead sharpened it, while falsifying a different sentence
+the spec had been leaning on.
 
 ---
 
@@ -184,6 +186,9 @@ harder, not to soften the language and move on.
 
 ## 5. The defensible claim
 
+*(Written before E1/E2 ran, and superseded by the sentence below it. Kept because the pre-registration
+is only worth something if what it committed to is still legible afterwards.)*
+
 > On this box, literal-identifier recall by the leaf `Qwen3.6-35B-A3B-UD-Q4_K_M`, served by llama.cpp
 > b10375 under ROCm with `q8_0` K/V and flash-attention on, is all-or-nothing in the needle's distance to
 > the question: **12/12 correct at 989 tokens and 0/12 at 1,003** (Fisher two-sided p = 7.4e-07, four
@@ -191,6 +196,20 @@ harder, not to soften the language and move on.
 > second, sliding-window model whose architectural window is itself 1,024. This is an on-box measurement
 > of one serving stack — not a property of the model, of hybrid attention, or of long-context LLMs in
 > general — and it has no published analogue at this scale.
+
+**AMENDED AFTER E1/E2 (§§7–8), and this is the sentence to use:**
+
+> On this box, the leaf `Qwen3.6-35B-A3B-UD-Q4_K_M` under llama.cpp b10375/ROCm has a **step boundary** in
+> the needle's distance to the question: over 13 distances at a 25-token grid with 24 independent facts
+> each, it scores **72/72 at 925–975 tokens and 0/144 at 1,025 and beyond** (Fisher two-sided
+> p = 6.2e-14), with a single transition bin at 1,000. The boundary is **unmoved by `f16` K/V or by
+> disabling flash attention**, and is **size-independent at the boundary** (0/12 at ~1,050 tokens at chunk
+> sizes 2,048, 4,096 and 8,192 alike). Below the boundary, accuracy is **neither monotone in distance nor
+> a function of distance alone** — the same fact at ~750 tokens scores 0/12 in a 2,048-token chunk and
+> 11/12 in a 4,096-token one — and a distinct failure mode, the key retrieved and then mis-emitted,
+> accounts for much of the sub-boundary loss. This remains an on-box measurement of one serving stack:
+> llama.cpp b10375 is the common factor in every arm, no uniform-attention control has been run, and there
+> is no published analogue at this scale.
 
 ---
 
@@ -282,11 +301,173 @@ before anything downstream is trusted.
 
 ---
 
-## 7. What this does not change
+## 7. E1 RESULT — the boundary is a step, and two things nobody expected
 
-`size_tokens: 640` still ships. Every geometry argument in §7 #2 turns on which **side** of the boundary
-the window lands on, and 685 is inside every bracket ever measured while 1,069 is outside every one of
-them. What changes is the precision of the claim — the "~47 tokens past the fail point" arithmetic is
-gone, because no window between 640 and 1,024 has ever been sampled — and the scope: this is the leaf's
-literal-identifier horizon on this stack, applied to the root by same-family analogy and to other question
-types not at all.
+**Ran 2026-08-23, after §6 was written and committed.** 470 leaf calls, greedy,
+one never-reused slot per cell, `id_slot` asserted on every call: **0 leaks, 0
+slot mismatches, 0 errors**. Harness in the session scratchpad (`e1_fixtures.py`,
+`e1_run.py`, `e1_analyse.py`), scored with `s2.run_sweep.classify` unchanged.
+
+**One design change was forced before any call, and it is worth recording.**
+`make_distance_fixtures.py` places the needle with `boundary_at_token_target`,
+which snaps to a paragraph boundary — five different targets (925, 950, 975,
+1000, 1025) all landed on the same achieved distance of 967. A generator
+quantised at ~70 tokens cannot answer a 25-token question. E1 therefore builds
+ONE base cell per (seed, size) and moves the distance by appending `k` tokens of
+neutral filler to the END and trimming `k` from the HEAD: distance-to-question
+rises by exactly `k`, total size is held, and every cell in a seed carries the
+same needle, question and bindings. The distance axis is paired within fact,
+which no grid in the archive was. Achieved distances land within ±2 of target.
+
+### 7.1 The step is real — and sharper than the pre-registration asked for
+
+24 independent facts per point, chunk size fixed at 2,048. Two curves: `strict`
+is `classify`'s CORRECT; `located` also counts an answer sharing a ≥12-character
+run with the true key (see §7.3 for why that column exists).
+
+| distance | strict | located |
+|---:|---:|---:|
+| 600 | 14/24 | 23/24 |
+| 750 | **0/24** | **8/24** |
+| 875 | 11/24 | 20/24 |
+| 925 | 24/24 | 24/24 |
+| 950 | 23/24 | 24/24 |
+| 975 | 24/24 | 24/24 |
+| 1000 | 5/24 | 6/24 |
+| 1025 | 0/24 | 0/24 |
+| 1050 – 1500 (6 bins) | 0/144 | **0/144** |
+
+**925–975 pooled: 72/72 located, 71/72 strict. 1,025 and above: 0/144.** The
+transition occupies a single bin — 1,000, at 6/24 — so the 10–90% width is under
+50 tokens. Fisher two-sided: 975 vs 1,025 **p = 6.2e-14**; 975 vs 1,000
+p = 3.7e-08.
+
+**The pre-registered falsification did not fire.** It required three or more
+consecutive bins strictly inside 0.15–0.85; the boundary has one. **The cliff
+survives the first measurement designed to break it,** and the location agrees
+with the [989, 1003] re-derivation of §1 to within one bin.
+
+### 7.2 The boundary is size-independent; everything BELOW it is not
+
+Same 12 facts, the same distances built at three chunk sizes:
+
+| distance | 2,048 | 4,096 | 8,192 |
+|---:|---:|---:|---:|
+| ~750 | **0/12** | 11/12 | 11/12 |
+| ~950 | 12/12 | 11/12 | 6/12 *(located 12/12)* |
+| ~1050 | **0/12** | **0/12** | **0/12** |
+
+**At the boundary, distance rules absolutely** — 0/12 at 1,050 at every size,
+0/144 above it in the main sweep. That is the claim §7 #2 has always made, now
+measured at three sizes instead of inferred from two counterexamples.
+
+**Below the boundary the claim is false as written.** The same fact, at the same
+distance of ~750 tokens, scores 0/12 in a 2,048-token chunk and 11/12 in a
+4,096-token one. E1's OTHER pre-registered falsification — accuracy at fixed
+distance differing by ≥0.30 across sizes — **fires at 750 (spread 0.92) and at
+950 (0.50), and does not fire at 1,050 (0.00)**. So:
+
+> Retrieval below the horizon is not a function of distance alone. The HORIZON
+> is; what happens inside it is not.
+
+**The 750 dip is not an artefact of the shift mechanism, and three controls say
+so.** Rebuilt off a lower base so the same distance carries a different tail
+pad: pad 0 → 0/12 strict, pad ~150 → 0/12, pad ~300 → 1/12. Distractor
+proximity is ruled out offline: the median token gap from the needle to the
+nearest `ENT-` header is **190 tokens at every distance**, including the ones
+that score 24/24. The dip tracks the (size, distance) pair, not the construction.
+**Its mechanism is unidentified.** It is recorded, not explained.
+
+### 7.3 A second failure mode: retrieved, then mangled
+
+28 of 312 main-sweep answers carry a long verbatim run of the TRUE key and are
+still wrong — a dropped prefix (`5692-4579-aa0e-de32ddc7e401` for
+`1ee38678-5692-4579-aa0e-de32ddc7e401`), a repeated interior segment
+(`…-980ab009d584-41cc-8328-980ab009d584-…`), a bare fragment. `classify` scores
+them CONFABULATION, which is right — they are wrong answers — but they say the
+key WAS reached and then mis-emitted, which is a different defect from "the
+needle is out of reach". They cluster **below** the boundary (9 at 600, 8 at 750,
+9 at 875, 1 at 950, 1 at 1000) and vanish above it, where nothing is retrieved
+at all.
+
+**This is R14's signature under strictly serial dispatch.** R14 is recorded as
+concurrency-dependent — "degenerate text, not wrong answers", at two or more
+calls in flight. E1 ran one call at a time, awaited, on a never-reused slot. The
+same shape appears anyway. That does not refute R14's concurrency finding; it
+adds a serial instance R14's account does not cover, and it means the
+false-positive and confabulation rates recorded across S2 pool two mechanisms.
+
+### 7.4 What E1 changes in the record
+
+- **The word "cliff" survives**, and for the first time on evidence that could
+  have removed it: 13 points, n=24, a 25-token grid through the transition.
+- **"Retrieval does not degrade with chunk size" is now too strong.** It holds
+  for the horizon and fails inside it. §7 #2 is amended to say which.
+- **The shipped geometry is unaffected.** 640/480 puts every needle inside the
+  horizon by a wide margin, and the sub-horizon dip is measured at 2,048 — a
+  chunk size the scaffold does not ship.
+- **Two new open items**: the 750-at-2,048 dip, and serial retrieved-then-mangled
+  emission. Neither existed before E1 and neither is explained by it.
+
+---
+
+## 8. E2 RESULT — the serving path is excluded, for the two knobs that could plausibly have done it
+
+D5 of §2 says the spec overreached in calling the horizon "a property of the
+prompt rather than the serving path": v0.3.5 excluded slot state and prefix
+reuse, and nothing had ever tested the two flags that sit directly on the only
+long-range channel this model has — `-ctk/-ctv q8_0` and `-fa on`, both pinned
+on the 10 of 40 layers that carry per-token KV. E2 tests them, over the same
+fixtures, same 12 facts, same greedy sampling, one never-reused slot per cell.
+
+`located` (CORRECT, or ≥12 verbatim characters of the true key), 12 facts per cell:
+
+| arm | 750 | 925 | 950 | 975 | 1000 | 1025 | 1050 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `q8_0` KV, `-fa on` — **shipped** | 4/12 | 12/12 | 12/12 | 12/12 | 4/12 | 0/12 | 0/12 |
+| `f16` KV, `-fa on` | 4/12 | 12/12 | 12/12 | 12/12 | 6/12 | 0/12 | 0/12 |
+| `f16` KV, `-fa off` | 4/12 | 12/12 | 12/12 | 12/12 | 5/12 | 0/12 | 0/12 |
+
+**The boundary does not move by a single bin.** The pre-registered falsification
+— a shift of more than one 25-token bin in any arm — **did not fire**. Perfect
+below, dead above, in all three configurations; the transition bin at 1,000
+wobbles 4/6/5 of 12, which is binomial noise at this n.
+
+Two knobs are therefore excluded: **KV quantization is not the cause** (f16 K/V
+doubles the cache and changes nothing) and **the flash-attention kernel is not
+the cause** (turning it off changes nothing). The spec pre-registered a bf16-KV
+fallback twice and never closed it; it is closed now, in the direction that says
+the fallback would buy nothing here.
+
+**And the 750 dip is identical in all three arms — 4/12 everywhere.** Whatever
+it is, it is not KV precision and not the attention kernel either.
+
+**What is NOT excluded**, and the honest statement of the residual: llama.cpp
+b10375 itself is the common factor in every arm. E4 (the Vulkan build, same
+weights, entirely different kernels, on disk, ~20 minutes) and E6 (a
+uniform-global-attention model, one download) remain owed and are now the only
+cheap ways left to separate "this model's weights" from "this runtime".
+
+---
+
+## 9. What this does not change
+
+`size_tokens: 640` still ships, and E1 leaves it better justified than it was. Every geometry argument in
+§7 #2 turns on which **side** of the boundary the window lands on: 685 is inside a boundary now measured
+at 24 facts per point, and 1,069 is outside it in every arm. The sub-boundary dip does not touch the
+shipped geometry either — it is measured at 2,048 tokens, a chunk size this scaffold does not ship, and at
+640 the needle is never more than ~640 tokens from the question.
+
+What changes is precision and scope. The "~47 tokens past the fail point" arithmetic is gone: no window
+between 640 and 1,024 has ever been sampled, so the geometry is justified by which side it lands on and
+never by a margin. And the claim is the LEAF's literal-identifier boundary on THIS stack — applied to the
+root by same-family analogy, and to other question types not at all (the paraphrase question fails inside
+the boundary).
+
+**Where the evidence lives.** The E1/E2 harness (`e1_fixtures.py`, `e1_run.py`, `e1_analyse.py`, the
+`s1`/`s2` modules recovered from `4e75b53` and an import shim for the C1–C6 regroup) and the 638 raw
+records are in the session scratchpad, not in this repository — the same disposition the Gate 0 soak used,
+and consistent with the 2026-08-22 decision to stop writing into an evidence archive. **They are therefore
+session-local and will not survive it.** Every number in §§7–8 is reproducible from the recipe in §6 plus
+the two design notes in §7 (the paragraph-snap defect and the append-and-trim fix); nothing here rests on
+a file only this session can see.
