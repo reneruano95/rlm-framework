@@ -6,6 +6,19 @@
 
 ---
 
+> **CORRECTION, 2026-08-23 — §3's "sharpest technical objection" dissolves.**
+> That section argues a ~1,000-token retrieval horizon makes ARC frames
+> unreadable. The horizon is a **ROCm backend defect, not a model property**:
+> byte-identical prompts on the same GGUF and the same llama.cpp commit give
+> ROCm a collapse past ~1,000 tokens and **Vulkan 84/84 correct at every
+> distance** (`docs/research/2026-08-23-distance-cliff-audit.md`). The leaf runs
+> ROCm; **the root runs Vulkan**, so the objection applied a leaf-side ROCm
+> number to the root by same-family analogy — and both halves of that were
+> wrong. The body below is left as written: it is a dated record of what was
+> believed on 2026-08-22, and the reasoning it contains is why the measurement
+> that refuted it got made.
+
+
 # GAP MAP: AVO → rlm-halo
 
 **Framing correction before anything else.** The thing that prompted this ("100.00 RHAE on ARC-AGI-3") is a press claim with no verifiable artifact: no scorecard URL, absent from both the verified and community leaderboards, no submission in `arcprize/ARC-AGI-Community-Leaderboard` (21 submission dirs, 47 PRs, zero AVO), self-reported on NVIDIA's own reimplementation of the task interface. The number is not a record — VISTA (Opus 5) and Tycho (Opus 5, GPT-5.6 Sol) already reported 100.00 on all 183 public levels, and the blog cites VISTA's action count while omitting that VISTA also hit 100.00 (https://vista-research.github.io/). RHAE is ceiling-capped at 1.15× human baseline per level and counts **only environment actions** — "tool calls, reasoning steps, or retries within the model itself, are not counted" (https://docs.arcprize.org/methodology) — so AVO's "12% fewer actions" is structurally blind to compute cost, which is the one thing a single gfx1151 constrains. NVIDIA itself disclaims the 30%→100% framing: "should not be interpreted as a direct measurement of the performance contribution of AVO." The blog was silently amended 8 hours after publication to fix the public/semi-private wording.
