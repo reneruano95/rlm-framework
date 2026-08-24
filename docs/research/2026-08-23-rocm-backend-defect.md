@@ -385,6 +385,117 @@ stands. If it does not and Vulkan does, S4's largest margin was measuring a back
 re-run (117 single-shot calls on the now-shipped Vulkan config, roughly six hours of box time) is
 the confirmatory step *after* that, not instead of it.
 
+### 4.6.2 B1's OWN CELL, MEASURED — and it goes against B1
+
+The reconciliation took four probes, three of which tested the wrong cell. Recorded in order,
+because the wrong ones are why the right one is trustworthy.
+
+**What B1's serving condition actually is**, established from the trace store by a peer session and
+from the code by me: **one call per episode, all 117 on slot 0, zero rotations**, and
+`cli.py:1128`'s `_bring_up_leaf` returns 0.0 when the profile already matches — so
+`swap_to(BENCH_PROFILE)` is a no-op and **all 117 episodes ran on one persistent process**. Worse
+for the instrument: those 117 calls are only **20 distinct documents, repeated up to 22×**.
+
+**The mechanism was in this repo ten days ago.** `upstream/ISSUE-slot-leak.md:156`: *"The restore
+path also runs only when `n_past > 0`, which would explain why this never reproduced on a
+high-entropy corpus: with no shared prefix `n_past` is 0 and no checkpoint is restored."* So the
+gate is **shared prefix**, not entropy — and B1, sending the same 130K document through the same
+slot up to 22 times, is the most extreme shared-prefix condition in the benchmark.
+
+The 2×2 that had to be filled, with the cell each probe actually tested:
+
+| | fresh process | persistent process + reuse |
+|---|---|---|
+| **repeated sentence** (no shared prefix at the marker) | ROCm **3/3** | ROCm **2/12** |
+| **real prose + maximal shared prefix** | — | **ROCm 0/4, Vulkan 4/4** ← B1's cell |
+
+**B1's cell: `agg-01.txt` prose, marker at 95% depth so four consecutive calls share ~95% of the
+prompt byte-for-byte, persistent process, 130K tokens.**
+
+| trial | ROCm | Vulkan |
+|---|---|---|
+| 0 | `'[ENT-100090] Rookenethergriff Tith…'` | **ok** |
+| 1 | `'[ENT-100090] Rookenethergriff Tith…'` | **ok** |
+| 2 | `'100000'` | **ok** |
+| 3 | `'//////////////////////////////////'` | **ok** |
+| | **0/4** | **4/4** |
+
+The within-cell control fails on ROCm: the marker sits a few hundred tokens from the question, so
+**this is not a reach limit** — it is corruption under shared-prefix reuse.
+
+**AND HERE IS WHY B1's DETECTOR SAW NOTHING.** `[ENT-100090] Rookenethergriff Tithe Barn` is
+**verbatim in `agg-01.txt`** — the document that was in the call's own input. A foreign-string check
+flags content absent from the call's own input; content drawn from the right document is not
+foreign and cannot be flagged. **The failure signature is invisible to the instrument by
+construction**, and B1's dominant case — the same document repeated up to 22× through one slot — is
+exactly where the blindness is total. The detector's power lived in ~20 first-sight calls, not 117,
+so the "2.6% by the rule of three over 117 calls" bound offered earlier is much weaker than stated
+and is withdrawn.
+
+**This reconciles the two facts that would not sit together.** B1's 117 outputs were coherent,
+correctly formatted and detector-clean *because* the corruption draws on the document already in
+the prompt. Coherent, clean, and wrong are not in tension — they are the same event.
+
+**What this licenses, and what it does not.** Measured: in B1's own serving condition, on B1's own
+corpus, the backend B1 ran on returns wrong answers drawn from the corpus, 0/4, where Vulkan is 4/4.
+**B1's recorded 0/30 is therefore plausibly a backend artifact, and RLM's +30 margin over B1 rests
+on it.** Not measured: whether B1's actual questions would be answered on Vulkan — the marker task
+is verbatim retrieval and B1's questions are not, and n=4 is four. **The confirmatory step is the
+B1 re-run** — 117 single-shot calls on the now-shipped Vulkan config, ~6 hours — and the evidence
+now points at it being worth the box time. Under §8's comparability rule that is the owner's call.
+
+### 4.6.3 `never_reuse` did not hold, and the exposure is inverted
+
+Established by a peer session from the trace store and **re-derived independently here** by joining
+`steps` against `4e75b53:milestones/s4/results/ledger*.jsonl` (my join covers two of the seven
+ledgers, so absolute counts differ from theirs; the shape does not).
+
+`config.yaml:172` states the policy: *"one never-reused slot per window, both questions about a
+window on that window's slot"* — so **two** calls per slot is by design and more than two is the
+mitigation failing.
+
+| arm | leaf calls | over-reused (>2/slot) | max on one slot | no `slot_id` recorded |
+|---|---:|---:|---:|---:|
+| `rlm` | 81 | **0.0%** | 1 | 4 (4.7%) |
+| `b2` | 17,595 | **13.2%** *(peer: 13.4%)* | 4 | 0.6% |
+| `rlm-restricted` | 3,157 | **81.9%** *(peer: 69.2%)* | 13 *(peer: 17)* | 24.8% *(peer: 34.5%)* |
+| `b1` / `b3` | 96 / 95 | 0.0% *within* an episode | 1 | 0.0% |
+
+**And the single-shot arms are the most exposed of all, on an axis the within-episode grouping
+hides.** B1 makes one call per episode, so per-episode reuse is 1 by construction. Across episodes:
+
+| arm | calls | distinct slots | distinct rotations | episodes |
+|---|---:|---:|---:|---:|
+| **b1** | 96 | **1** (slot 0) | **0** | 96 |
+| **b3** | 95 | **1** (slot 1) | **0** | 95 |
+
+**Every B1 call after the first sat on a slot that had already served up to 95 prior documents, on
+one persistent process, with zero rotations.** That is the most extreme shared-prefix reuse in the
+benchmark — more extreme than `rlm-restricted`'s worst within-episode slot — and it is precisely the
+cell measured at **0/4 on ROCm and 4/4 on Vulkan** in §4.6.2.
+
+**§8's predicted bias channel is inverted.** v0.2.6 recorded the risk as *"two-exposed (RLM, B2) vs
+two-spared (B1, B3)"* and corrected the B1/B3 relaunch to `--parallel 2` so the baselines would stop
+sharing slot 0. The measured exposure is the opposite: **`rlm` — the arm that won S4 — is the least
+exposed arm in the benchmark**, and B1/B3 are the most.
+
+**Stated at the strength the evidence supports, and no further.** `rlm`'s 0% is trivially achieved:
+it made 81 leaf calls in its entire history, so an arm that barely delegates cannot be contaminated
+through delegation. That is a fact about the arm's behaviour, not a clean bill of health. And this
+is **exposure, not outcome** — no `rlm-restricted` or B1 answer has been shown corrupted, and per
+§4.6.2 the detector cannot show it. What it establishes is that the S4 comparison ran a
+near-zero-exposure arm against arms carrying 13%, 82% and single-slot-for-96-episodes exposure, on a
+backend now measured to corrupt under exactly that condition.
+
+**A second hole, instrumentation rather than serving:** 24.8–34.5% of `rlm-restricted`'s calls carry
+**no `slot_id` at all**, and the detector's `None` verdicts are exactly those calls. For a third of
+that arm there is neither a slot record nor a leak verdict. `b2`'s equivalent hole is 0.6%.
+
+*Method note from the peer, kept because it is the same class of error this document is about: their
+first pass reported 87.4% and a max of 155 calls on one slot, an artifact of grouping without
+excluding `NULL slot_id` — the 4,268 slotless calls collapsed into one fake occupancy and the 155
+was `slot=None`. Corrected before it was sent.*
+
 **Not switched, each for its own reason:**
 
 - **`size_tokens: 640`** — the window is no longer capped by the backend, but moving it is a §8
