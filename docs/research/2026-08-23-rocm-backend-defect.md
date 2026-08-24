@@ -236,6 +236,60 @@ Per window of Q questions: ROCm `1.05 + (Q−1)×0.61` s against Vulkan-`ctxcp 0
 wins **1.1× at Q=1 and 1.8× at Q=10** — far less than the 4× a naive reading of the default-flag
 numbers suggests, and the gap is entirely the warm path.
 
+## 4.4 THE DECIDING MEASUREMENT — Vulkan wins the leaf, and by 2x
+
+§4.3 compared per-call latency and gave ROCm the warm re-query. That is the wrong unit. The question
+is not which backend is faster per call — it is **which backend covers a corpus faster at equal
+correctness** — because the backend constrains both dials throughput depends on: the window size
+(ROCm caps it at 640 to keep the needle inside its horizon) and the concurrency (R14 pins
+`dispatch_concurrency: 1` because HIP collapses at two calls in flight).
+
+Instrument: the project's own `upstream/concurrent_decode_repro.py`, unmodified. It generates its own
+corpus, applies the template through the server, **pins every call to a slot no other call has used**
+— which is R13's production policy, so no warm re-query for either backend — and scores by substring
+against a UUID verbatim in the document. 32 calls per cell. `-ctxcp 0` on the Vulkan arms and default
+on ROCm: each backend's best *safe* configuration, per §4.2.
+
+| arm | doc tokens | c=1 | c=2 | c=4 | c=8 |
+|---|---:|---|---|---|---|
+| **ROCm 640** — what ships | ~830 rendered | **32/32**, 0.669 correct/s | **2/32**, 30 degenerate | — | — |
+| **Vulkan 640** | ~830 | **32/32**, 0.756 | 32/32, 0.864 | 32/32, 0.961 | 32/32, **0.977** |
+| **Vulkan 1024** | ~1,129 | 32/32, 0.591 | 32/32, 0.656 | 32/32, 0.698 | 32/32, 0.732 |
+| **Vulkan 2048** | ~2,200 | 32/32, 0.380 | 32/32, 0.402 | 32/32, 0.416 | 32/32, 0.423 |
+| **ROCm 2048** | ~2,200 | **0/32** | — | — | — |
+
+**Vulkan is faster than ROCm at the shipped geometry even serially** — 0.756 against 0.669 correct
+answers per second, +13% — and 1.46x at concurrency 8, with 32/32 at every level. ROCm collapses to
+**2/32** with two calls in flight, re-confirming R14 on this build. At 2,048 tokens, where the needle
+sits ~2,000 back, ROCm scores **0/32**: the wall, in the instrument the project already trusted.
+
+Normalised to one 200,000-token corpus (window counts at 640/480 and 1024/768 are §7 #2's **measured**
+chunker output; 2048/1536 is arithmetic and marked):
+
+| configuration | windows | s/call | corpus wall | vs what ships | correct |
+|---|---:|---:|---:|---:|---|
+| ROCm 640/480 serial — **ships today** | 424 | 1.50 | **635 s** | — | 32/32 |
+| Vulkan 640/480, c=8 | 424 | 1.02 | 433 s | **1.46x** | 32/32 |
+| Vulkan 1024/768, c=8 | 268 | 1.37 | 366 s | **1.73x** | 32/32 |
+| **Vulkan 2048/1536, c=8** | 131 *(arithmetic)* | 2.36 | **309 s** | **2.05x** | 32/32 |
+| ROCm 2048/1536, c=1 | 131 | 3.13 | 410 s | n/a | **0/32** |
+
+**Vulkan at a 2,048-token window with eight calls in flight covers the corpus in 309 s against ROCm's
+635 s at 640/480 serial — 2.05x, at 100% correctness on both sides.** Sub-calls fall from 424 windows
+to 131, which also relieves `max_subcalls` (926 → ~290) and §8's corpus ceiling.
+
+**So §4.3's conclusion is superseded by its own successor.** ROCm's per-call advantage was real but it
+lived entirely in the intra-window warm re-query, and under R13's never-reuse policy the first call of
+every window is cold — which is what this measures. On the unit that decides the question, Vulkan wins
+outright and the margin grows with the window ROCm cannot use.
+
+**Limits, stated rather than buried.** The documents are the reproducer's, not the project's chunker
+output. One question per document — production re-queries within a window, which is the one place
+ROCm's warm path still helps, and it is unmeasured here. The 2048/1536 window count is arithmetic; the
+real chunker's snap-back raised the 640 count from 417 to 424, so expect a similar few percent. One
+run per cell, one box. And Vulkan's concurrency scaling is modest — 1.29x from c=1 to c=8 at 640, not
+linear — so most of the 2.05x comes from the larger window, not from fan-out.
+
 ## 5. What this reattributes
 
 | finding | recorded as | actually |
