@@ -614,25 +614,63 @@ def test_the_bench_leaf_profile_is_the_shipped_leaf_with_two_full_slots(valid_cf
     scaffold chose for it, and they stop sharing slot 0 (R13's smallest repro).
     `--cont-batching` is deliberately absent: this profile serves exactly two
     sequential single calls per block, and R14 measured continuous batching as
-    the mechanism behind concurrent-dispatch corruption."""
+    the mechanism behind concurrent-dispatch corruption.
+
+    v0.3.22: the backend assertion is now the load-bearing one. This profile
+    and the leaf must move together -- the leaf was switched to Vulkan on
+    measured correctness (R13 32/54 -> 0/54) and this profile was validated at
+    its OWN geometry before following, because 262,144-token slots are a
+    regime nothing else here exercises."""
     leaf, bench = valid_cfg.servers.leaf, valid_cfg.servers.bench_leaf
     assert bench.model == leaf.model and bench.backend_dir == leaf.backend_dir
     assert bench.backend == leaf.backend and bench.port == leaf.port
     assert bench.ctx // bench.parallel == 262_144
     assert bench.log_path != leaf.log_path, "start() truncates the log (D27)"
     assert "--cont-batching" not in bench.extra_flags
-    assert bench.env.get("ROCBLAS_USE_HIPBLASLT") == "1"
+    assert "-ctxcp 0" in bench.extra_flags, (
+        "validated WITH checkpoints off; running without the flag is a "
+        "configuration nobody measured at this slot size")
+    assert bench.env == {}, (
+        "ROCBLAS_USE_HIPBLASLT is a rocBLAS setting and does nothing on "
+        "Vulkan; config_snapshot must not record a BLAS the server never "
+        "loads")
     # A plain ServerConfig: slot discipline is the RLM leaf's, and a
     # `slot_policy` here would advertise a knob nothing reads.
     assert not hasattr(bench, "slot_policy")
 
 
-def test_the_leaf_carries_the_rocblas_env_the_launch_path_used_to_drop(valid_cfg):
-    """`milestones/s2/run_occupancy.py:455` sets ROCBLAS_USE_HIPBLASLT for every leaf
-    measurement recorded so far; the CLI's own launch path passed `env=None`,
-    so `--launch-leaf` would have run the S4 blocks against a differently
-    configured BLAS than every S2 number they are compared with."""
-    assert valid_cfg.servers.leaf.env == {"ROCBLAS_USE_HIPBLASLT": "1"}
+def test_the_launch_path_still_carries_whatever_env_the_config_declares(valid_cfg):
+    """The guard, kept after the thing it guarded went away.
+
+    This test used to assert `ROCBLAS_USE_HIPBLASLT: '1'` on the leaf, because
+    the CLI's launch path once passed `env=None` and silently dropped it --
+    which would have run S4's blocks against a differently configured BLAS than
+    every S2 number they are compared with. v0.3.22 moved the leaf to Vulkan
+    and deleted that variable: it is a rocBLAS setting that does nothing on
+    Vulkan, and `config_snapshot` must not record a library the server never
+    loads.
+
+    The variable is gone; the DEFECT it guarded is not. So this asserts the
+    mechanism instead of the value: whatever `env` the config declares is what
+    `LlamaServerProcess` will apply, and an empty declaration stays empty
+    rather than picking up a default from somewhere else."""
+    leaf = valid_cfg.servers.leaf
+    assert leaf.env == {}, "no BLAS env on a Vulkan backend"
+    assert "ROCBLAS" not in " ".join(leaf.env), "no rocBLAS setting survives"
+
+    from rlm.serve.serverproc import LlamaServerProcess
+
+    async def _health() -> bool:
+        return True
+
+    proc = LlamaServerProcess(leaf, health_probe=_health)
+    assert proc.env == dict(leaf.env), (
+        "the launch path must carry the config's env verbatim -- this is the "
+        "assertion that would have caught the original env=None bug")
+
+    spiked = leaf.model_copy(update={"env": {"SOME_RUNTIME_KNOB": "7"}})
+    assert LlamaServerProcess(spiked, health_probe=_health).env == {
+        "SOME_RUNTIME_KNOB": "7"}
 
 
 def test_the_benchmark_pin_is_the_frozen_manifests_own_hash(valid_cfg):

@@ -460,14 +460,31 @@ def test_launch_leaf_carries_the_config_env_to_the_child(valid_config_file):
     `env=None` here, which silently dropped ROCBLAS_USE_HIPBLASLT -- the
     variable every S2 leaf measurement was taken with (`milestones/s2/run_occupancy.py`
     :455) -- so a `--launch-leaf` S4 block would have been compared against
-    numbers from a differently configured BLAS."""
+    numbers from a differently configured BLAS.
+
+    v0.3.22 moved the leaf to Vulkan and deleted that variable: it is a rocBLAS
+    setting that does nothing on Vulkan, and `config_snapshot` records this
+    block, so a snapshot naming a library the server never loads is a false
+    record of what ran. The variable is gone; THE DEFECT IT GUARDED IS NOT, so
+    this now asserts the mechanism rather than the value -- an empty
+    declaration must arrive empty rather than picking up a default, and a
+    non-empty one must arrive intact."""
     from rlm.cli import leaf_process_manager
 
     cfg = load_config(valid_config_file)
     manager = leaf_process_manager(cfg, launch=True)
     assert manager is not None
     assert manager.env == dict(cfg.servers.leaf.env)
-    assert manager.env["ROCBLAS_USE_HIPBLASLT"] == "1"
+    assert "ROCBLAS_USE_HIPBLASLT" not in manager.env, (
+        "a rocBLAS setting on a Vulkan backend would be a false snapshot")
+
+    spiked = cfg.model_copy(deep=True)
+    object.__setattr__(spiked.servers.leaf, "env", {"SOME_RUNTIME_KNOB": "7"})
+    spiked_manager = leaf_process_manager(spiked, launch=True)
+    assert spiked_manager is not None
+    assert spiked_manager.env == {"SOME_RUNTIME_KNOB": "7"}, (
+        "this is the assertion that would have caught the original env=None "
+        "bug, and it survives the variable that first exposed it")
 
 
 def test_replay_survives_an_s4_era_snapshot_with_baseline_prompts(mock_episode_env):

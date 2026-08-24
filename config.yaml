@@ -147,10 +147,48 @@ servers:
                   "-md D:\\AI\\models\\z-lab\\Qwen3.8-27B-DFlash2-GGUF\\Qwen3.8-27B-DFlash2-Q4_K_M.gguf",
                   "--spec-type draft-dflash", "--spec-draft-n-max 4"]
   leaf:
+    # BACKEND SWITCHED ROCm -> VULKAN, 2026-08-23 (v0.3.22). S0 put the leaf on
+    # ROCm for +13.6% prefill at d=32K. That trade is withdrawn on three
+    # measurements, all in `docs/research/2026-08-23-rocm-backend-defect.md`,
+    # all taken on the SAME llama.cpp commit `b10375 ba360efe1` with
+    # byte-identical prompts -- the only difference is which directory
+    # `llama-server.exe` was launched from.
+    #
+    # (1) CORRECTNESS. ROCm cannot attend to content more than roughly a
+    #     thousand tokens behind the generation point: 0/144 against Vulkan's
+    #     240/240 over distances 600-1,500, and 0/32 against 32/32 at a
+    #     2,048-token document. Two uniform-global-attention control models
+    #     fail the same way on ROCm and are 48/48 on Vulkan, so it is not the
+    #     model and not hybrid attention.
+    # (2) R13, THE PRODUCT-BLOCKING ONE. The repo's own `upstream/r13_repro.py`,
+    #     108 calls per backend, same fixtures, same flags: ROCm leaks a
+    #     foreign document's identifier on **32/54** shared-slot calls and 3/54
+    #     virgin; Vulkan is **0/54 and 0/54**. Fisher two-sided p = 2.15e-12.
+    #     Zero is not zero -- 0/108 is a 95% upper bound of 2.8% by the rule of
+    #     three, so "leak-free" is still never written -- but the shared-slot
+    #     arm going 32/54 -> 0/54 is the defect `DIRECTION.md` calls a privacy
+    #     defect and product-blocking.
+    # (3) THROUGHPUT, on the unit that matters. Corpus wall clock at equal
+    #     correctness, one never-reused slot per call: Vulkan is 13% faster
+    #     than ROCm SERIALLY at this geometry and 2.05x faster over a
+    #     200,000-token corpus at a 2,048 window with eight calls in flight,
+    #     32/32 correct throughout, where ROCm is 2/32 at two in flight.
+    #     Long context is not a regression either: 443 t/s against ROCm's 464
+    #     at a 107,726-token prompt, and Vulkan answers correctly at 2K, 8K,
+    #     34K and 108K while ROCm does not.
+    #
+    # WHAT IS DELIBERATELY NOT CHANGED HERE, because each is its own decision
+    # with its own evidence still owed: `size_tokens` stays 640 (the window is
+    # no longer capped by the backend, but moving it is a §8 comparability
+    # event); `dispatch_concurrency` stays 1 (Vulkan is 32/32 at c=8, but that
+    # was measured with the reproducer's client, not `rlm.dispatcher`); and
+    # `slot_policy` stays `never_reuse` (Vulkan is 0/54 on the shared arm, so
+    # reuse may become legal and the whole rotation machinery may become
+    # unnecessary -- that is a larger change than a flag).
     model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
     port: 8081
-    backend: rocm
-    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
+    backend: vulkan
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
     log_path: traces/logs/leaf-server.log
     ctx: 327680
     # MEASURED AND PINNED 2026-08-13 (`milestones/s2/R13-slotcount.md`). `-np 128
@@ -197,13 +235,33 @@ servers:
     # never the thing being reused. Under R13's never-reuse policy a saved
     # entry can never be hit at all, so the 8.2 GiB it costs buys zero.
     # `--no-cache-idle-slots` is the equivalent alternative; both measured.
-    extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching", "--cache-ram 0"]
-    # Every leaf number in milestones/s2/ was measured with hipBLASLt on
-    # (`milestones/s2/run_occupancy.py:455` exports it before launching). It lives here so
-    # `config_snapshot` records it and so `rlm run --launch-leaf` cannot
-    # silently launch against a differently configured BLAS than the runs it is
-    # compared with. Merged over os.environ at launch, never substituted for it.
-    env: { ROCBLAS_USE_HIPBLASLT: '1' }
+    # `-ctxcp 0` ADDED with the backend switch, and it is load-bearing for the
+    # speed half of it. Gate 0 measured context checkpoints costing the ROOT
+    # 82% of its per-turn wall (`docs/research/2026-08-22-gate0-soak.md` §6).
+    # On the Vulkan leaf they cost the same shape: cold prefill 3,627 ms with
+    # them, **897 ms without** -- faster than ROCm's 1,020 ms. What they buy is
+    # the intra-window warm re-query, which goes with them (`cache_n` 484 ->
+    # 0), and there is no setting that keeps both: `-ctxcp 1` pays the full tax
+    # and buys no reuse, `-ctxcp 2` buys reuse and pays the tax. Losing the
+    # re-query is still net-positive by a wide margin -- two questions on a
+    # window cost 2 x 1.20 s against 3.63 + 3.21 s.
+    # TWO CONSEQUENCES, stated so neither is discovered later. (a) §7 #3's
+    # prefix-cache gates are denominated in `tokens_cached` and are no longer
+    # meaningful on this configuration; `predicted_reuse` is a pure function
+    # for the gate runner and is NOT asserted in the live dispatch path, so
+    # nothing breaks at runtime, but those gates must be re-derived before they
+    # are cited again. (b) DO NOT carry this flag to a ROCm server: it takes
+    # the shipped 640 geometry's absent-question refusals from 7/7 to 0/7
+    # (p = 0.00058 with `--cont-batching` held constant).
+    extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching", "--cache-ram 0",
+                  "-ctxcp 0"]
+    # `env` REMOVED with the backend switch (2026-08-23). It carried
+    # `ROCBLAS_USE_HIPBLASLT: '1'`, which is a rocBLAS setting and does nothing
+    # on Vulkan. It is deleted rather than left inert for the reason it was
+    # added: `config_snapshot` records this block, and a snapshot that names a
+    # BLAS library the server never loads is a false record of what ran. Every
+    # `milestones/s2/` leaf number was taken with it on, under ROCm, and those
+    # numbers now describe a backend this config no longer uses.
   bench_leaf:
     # §8:344 (v0.2.6 correction): the B1/B3 relaunch profile. Two slots so B1
     # and B3 stop sharing slot 0 (R13's smallest repro); 524288/2 = 262144
@@ -215,8 +273,18 @@ servers:
     # bench block stops the RLM-profile leaf before starting this one.
     model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
     port: 8081
-    backend: rocm
-    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-rocm'
+    # SWITCHED WITH THE LEAF, 2026-08-23, and not independently: `tests/
+    # test_config.py:619` asserts this profile shares the leaf's backend and
+    # model. It is measured, not assumed -- Vulkan answers correctly at this
+    # profile's own geometry (`-c 524288 -np 2`, 262,144 tokens per slot) at
+    # 2,168 / 8,635 / 34,482 / 107,726-token prompts, 4/4, with the positive
+    # control passing, at 443 t/s against ROCm's 464 on the largest.
+    # NOTE FOR §8: B1's recorded 0/30 was taken on ROCm through this profile,
+    # where a single-shot 256K prompt puts its answer far past the ROCm reach
+    # limit. That result is now suspect as a backend artifact rather than a
+    # baseline, and RLM's +30 margin over B1 rests on it.
+    backend: vulkan
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
     log_path: traces/logs/leaf-server-bench.log   # own path: start() truncates (D27)
     ctx: 524288
     parallel: 2
@@ -224,7 +292,7 @@ servers:
     flash_attn: "on"
     ub: 512
     b: 2048
-    env: { ROCBLAS_USE_HIPBLASLT: '1' }
+    # env removed with the backend switch: see the leaf block.
     # PRE-REGISTERED 2026-08-17, before any scored §8 run exists. The global
     # `scaffold.retries.per_call_timeout_s: 240` is sized for the RLM profile's
     # 2,560-token slots; this profile hands B1/B3 a 262,144-token slot and §8
@@ -249,7 +317,14 @@ servers:
     # buys nothing, and R14 (`milestones/s2/OCCUPANCY.md` §7) puts the concurrent-dispatch
     # decode corruption behind exactly that path. The rest is the shipped leaf
     # line minus the slot-pool-specific flags.
-    extra_flags: ['-lm none', '--no-kv-unified', '--cache-ram 0']
+    # `-ctxcp 0` here too, and for a stronger reason than on the leaf: this
+    # profile's slot is 262,144 tokens, so a context checkpoint is enormous,
+    # and it serves exactly two sequential single calls per block -- there is
+    # no intra-window re-query for the checkpoint to buy. It also matches how
+    # Vulkan was VALIDATED at this geometry (4/4 correct at 2,168 / 8,635 /
+    # 34,482 / 107,726 tokens); running without it would be a configuration
+    # nobody measured.
+    extra_flags: ['-lm none', '--no-kv-unified', '--cache-ram 0', '-ctxcp 0']
   fallback_leaf: null
 
 scaffold:

@@ -290,6 +290,116 @@ real chunker's snap-back raised the 640 count from 417 to 424, so expect a simil
 run per cell, one box. And Vulkan's concurrency scaling is modest — 1.29x from c=1 to c=8 at 640, not
 linear — so most of the 2.05x comes from the larger window, not from fan-out.
 
+## 4.5 R13 IS A ROCm DEFECT TOO — and this is the one with product weight
+
+R13 is the cross-request leak: a slot that has held one document injects its content into the answer
+to a later, unrelated one. `DIRECTION.md` calls it a **privacy defect** and **product-blocking**; the
+2.2% upper bound is a number a customer has to be shown; and the entire `never_reuse` slot policy,
+the 128-slot pool, the server rotations and `MAX_ROTATIONS_PER_CALL` exist to work around it.
+
+Run on both backends with the repo's own `upstream/r13_repro.py`, unmodified — same fixtures, same
+flags, same commit, 108 calls each, scored by the reproducer's own `FOREIGN` verdict:
+
+| backend | shared slot | virgin slot | total |
+|---|---:|---:|---:|
+| **ROCm** | **32/54** | 3/54 | 35/108 |
+| **Vulkan** | **0/54** | **0/54** | **0/108** |
+
+**Fisher two-sided p = 2.15e-12.** The shared-slot arm — R13's entire subject — goes from 32/54 to
+zero by changing which directory the server was launched from.
+
+**Zero is not zero.** 0/108 gives a 95% upper bound of **2.8%** by the rule of three, which is not
+better than ROCm's existing 2.2% virgin-slot bound in absolute terms; the contrast that matters is
+the *shared* arm, where ROCm is 32/54. "Leak-free" is not written here for Vulkan any more than it
+was for ROCm.
+
+**How this went unseen for ten days:** every R13 measurement in the project was taken on ROCm,
+including the control that "falsified the recurrent-state hypothesis" by showing a non-recurrent
+model leaking *more*. That control was right about what it tested and wrong about the frame — both
+arms were on the same defective backend, so it compared two models inside one fault instead of
+isolating the fault.
+
+**It also explains a smaller thing seen earlier today.** The long-context probe at `-np 2` had ROCm
+answering with the marker from **two requests earlier**, twice — which at two slots is the same slot.
+Not "degenerate output": R13, in the same probe that shows the reach limit. The two defects compose.
+
+## 4.6 THE SWITCH, AND WHAT WAS DELIBERATELY NOT SWITCHED
+
+`config.yaml` now serves both leaf profiles on Vulkan (v0.3.22). The decision was the owner's; the
+evidence is §§4.4–4.5 plus the long-context validation below.
+
+**`bench_leaf` could not be left behind** — `tests/test_config.py:619` asserts it shares the leaf's
+backend and model — and it serves B1/B3 through a **262,144-token slot**, a regime nothing else here
+exercises. Measured before following, marker planted near the top and asked for at the bottom:
+
+| prompt tokens | 2,168 | 8,635 | 34,482 | 107,726 |
+|---|---|---|---|---|
+| **Vulkan** | ok | ok | ok | ok — 443 t/s |
+| ROCm | WRONG | WRONG | WRONG | ok — 464 t/s |
+
+Vulkan is 4/4 with its positive control passing and no long-context throughput regression. ROCm's row
+is erratic and its own short-prompt control only passes below ~1,000 tokens; **the 100K cell passing
+on ROCm is unexplained and is recorded as an anomaly, not explained away.**
+
+**A consequence for §8 that follows directly, and is not this document's to settle:** B1's recorded
+**0/30** was taken on ROCm through this profile, where a single-shot 256K prompt puts its answer far
+past the ROCm reach limit. S4 described that 0/30 as *"consistent with the measured distance cliff"*.
+It is now suspect as a **backend artifact rather than a baseline**, and RLM's **+30 margin over B1**
+rests on it. Re-running the baselines on another backend is a §8 comparability event.
+
+### 4.6.1 B1: what its outputs do and do not say
+
+A peer session read all **117** of B1's archived outputs from the trace blobs, at prompts of
+27,382–129,555 tokens. The distribution:
+
+- **46× `NONE`** — an honest refusal in the format the `b1` prompt demands
+- bare values: 6× `'14'`, 4× `'6'`/`'1'`/`'3'`/`'2'`, 3× `'15'`/`'5'`/`'9'`
+- 6× `'=== FILE: rlm/bridge.py ==='`, 3× `'=== FILE: rlm/leak_verdict.py ==='`
+- longest: *"The organisation's full name is the Glinfallowwardine Chancery Annexe."*
+
+**B1's output is not degenerate.** No repetition, no runaway, no malformed text, nothing resembling
+`"The end of the end of the end of"`. So the *degenerate-decode* half of the ROCm defect did not
+happen on that arm.
+
+**And that does not settle it, for a reason worth stating precisely.** A reach limit on RETRIEVAL
+does not produce gibberish — it produces exactly this: coherent, correctly formatted answers that
+are wrong, plus honest refusals when the model cannot see content that is in fact present. §3's own
+ROCm cell shows the same shape: 12/48 literal, **wrong rather than malformed**. A model genuinely
+unable to do single-shot retrieval at 100K produces an identical distribution. **39% `NONE` is
+consistent with both readings and discriminates neither.**
+
+*A false positive the peer chased and discarded before reporting, recorded because it is the shape
+of error this whole document is about:* three answers were the identical entity
+`'Xanthlammertofts Tithe Barn'`, which looks like the wrong-entity misattribution signature. All
+three have `tokens_in` of exactly 27,395 — one benchmark item repeated across three episodes,
+answered deterministically under greedy. Checked before claiming, not after.
+
+**Evidence pointing the other way, from §4.6's own table:** ROCm answered the **107,726-token** cell
+correctly. If ROCm could retrieve at 100K in that probe, B1's prompts are not automatically past its
+reach. That cell is the anomaly noted above, and it cuts against the backend explanation for B1.
+
+**So the question is open in both directions and is cheap to close.** The discriminating measurement
+is not a re-run of S4: it is the marker probe at B1's actual prompt sizes — 27K, 80K, 130K, several
+trials each, both backends. If ROCm retrieves reliably there, B1's 0/30 is the model and RLM's +30
+stands. If it does not and Vulkan does, S4's largest margin was measuring a backend. The full B1
+re-run (117 single-shot calls on the now-shipped Vulkan config, roughly six hours of box time) is
+the confirmatory step *after* that, not instead of it.
+
+**Not switched, each for its own reason:**
+
+- **`size_tokens: 640`** — the window is no longer capped by the backend, but moving it is a §8
+  comparability event and the 2.05× above is measured, not the geometry's own re-derivation.
+- **`dispatch_concurrency: 1`** — Vulkan is 32/32 at c=8, but that was the reproducer's client, not
+  `rlm.dispatcher`. The pin comes off after the scaffold's own dispatch path is measured.
+- **`slot_policy: never_reuse`** — Vulkan is 0/54 on the shared arm, so reuse may become legal and
+  the rotation machinery may become unnecessary. That is a larger change than a flag: it is a typed
+  `Literal`, it removes the mitigation for a defect whose upper bound is still 2.8%, and it would
+  retire the machinery that 15 of 30 `rlm-restricted` episodes died in.
+
+**Live smoke on the shipped config**, launched through the project's own `launch_argv`: 7 seeds ×
+{literal, paraphrase, absent} = **21/21 correct**, 1.07 s median wall, 0 leaks, 0 slot mismatches,
+0 errors.
+
 ## 5. What this reattributes
 
 | finding | recorded as | actually |
