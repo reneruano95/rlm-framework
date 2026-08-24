@@ -184,6 +184,58 @@ correctness one, and it is still the owner's: see §7.
 
 ---
 
+## 4.2 A live trap: `-ctxcp 0` is a Vulkan-only lever
+
+Gate 0 measured that disabling llama.cpp's context checkpoints cuts the ROOT's median turn from
+13.88 s to 2.48 s — **−82%**, with the cached fraction identical to four decimals
+(`docs/research/2026-08-22-gate0-soak.md` §6). The root is on Vulkan. **Do not carry that flag to the
+leaf while the leaf is on ROCm.**
+
+Shipped 640 geometry, ABSENT question on a cold virgin slot, 7 seeds, greedy. Correct = refuse:
+
+| `-ctxcp` | `--cont-batching` | refused |
+|---|---|---:|
+| default | yes — **what ships** | **7/7** |
+| **0** | yes | **0/7** |
+| default | no | **7/7** |
+| 0 | no | **0/7** |
+
+Fisher two-sided with `--cont-batching` held constant: **p = 0.00058**. With `-ctxcp` held constant:
+**p = 1.0**. So it is the checkpoint flag, not continuous batching. The seven failures are confident
+wrong-entity UUIDs, byte-identical across two independent runs — intra-chunk misattribution on the
+first call of a fresh slot, not a cross-call leak.
+
+**On Vulkan the same flag is harmless**: `-ctxcp 0` scores 14/14, and it is also the configuration
+that makes Vulkan fast (below).
+
+*Two things this run also settles, both incidental and both worth having.* `servers.bench_leaf`
+ships **without** `--cont-batching` (`config.yaml:252`) and served B1 and B3 in S4 — the p = 1.0 row
+says that is harmless. And the first version of this 2×2 was invalid: the harness's
+`--extra-flags` override replaces the flag list wholesale, so the first ROCm arm silently dropped
+`--cont-batching` and varied two things at once. The isolating cell was run only after a review
+caught it.
+
+## 4.3 What the backends actually cost at the shipped geometry
+
+Same fixtures, ~995-token prompts, 7 seeds. The checkpoint flag dominates everything:
+
+| config | cold prefill | warm prefill | reuse | correct |
+|---|---:|---:|---:|---|
+| **ROCm** default — what ships | 1,020 ms | **581 ms** | 484 tok | 7/7, 7/7 |
+| ROCm `-ctxcp 0` | 979 ms | — | 0 | **0/7** |
+| Vulkan default | 3,627 ms | 3,163 ms | 484 tok | 7/7 |
+| **Vulkan `-ctxcp 0`** | **897 ms** | — | 0 | 14/14 |
+
+**Vulkan's apparent 5× slowness is the checkpoint tax, not compute.** With `-ctxcp 0` its cold
+prefill (897 ms) is *faster* than ROCm's (1,020 ms). But the checkpoints are also what buy the leaf
+its intra-window warm re-query — `-ctxcp 1` still pays the full tax and buys no reuse (3,620 ms,
+cached 0); `-ctxcp 2` buys reuse and pays the tax (3,195 ms, cached 478). **There is no Vulkan
+configuration that gets both.**
+
+Per window of Q questions: ROCm `1.05 + (Q−1)×0.61` s against Vulkan-`ctxcp 0` `Q × 1.20` s. ROCm
+wins **1.1× at Q=1 and 1.8× at Q=10** — far less than the 4× a naive reading of the default-flag
+numbers suggests, and the gap is entirely the warm path.
+
 ## 5. What this reattributes
 
 | finding | recorded as | actually |
