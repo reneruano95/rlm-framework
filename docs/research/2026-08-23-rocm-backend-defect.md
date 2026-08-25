@@ -454,12 +454,48 @@ ledgers, so absolute counts differ from theirs; the shape does not).
 window on that window's slot"* — so **two** calls per slot is by design and more than two is the
 mitigation failing.
 
-| arm | leaf calls | over-reused (>2/slot) | max on one slot | no `slot_id` recorded |
+**The figures of record are the peer session's**, taken over the full ledger set. Mine are an
+independent check on **two of the seven ledgers**, so they carry smaller denominators and are shown
+only to say the shape reproduces — not as competing measurements.
+
+| arm | over-reused (>2/slot), full set | max on one slot | no `slot_id` recorded | my subset check |
 |---|---:|---:|---:|---:|
-| `rlm` | 81 | **0.0%** | 1 | 4 (4.7%) |
-| `b2` | 17,595 | **13.2%** *(peer: 13.4%)* | 4 | 0.6% |
-| `rlm-restricted` | 3,157 | **81.9%** *(peer: 69.2%)* | 13 *(peer: 17)* | 24.8% *(peer: 34.5%)* |
-| `b1` / `b3` | 96 / 95 | 0.0% *within* an episode | 1 | 0.0% |
+| `rlm` | **0.0%** (81 calls) | 1 | 4.7% | — |
+| `b2` | **13.4%** | 4 | 0.6% | 13.2% on 17,595 calls |
+| `rlm-restricted` | **69.2%** | 17 | 34.5% | 81.9% on 3,157 calls |
+| `b1` / `b3` | 0.0% *within* an episode | 1 | 0.0% | same |
+
+*Both derivations exclude `NULL slot_id` and use `>2` as the threshold, per `config.yaml:172`'s "both
+questions about a window on that window's slot". An earlier peer pass reported 87.4% with a max of
+155; that one grouped the slotless calls into a single fake occupancy and was retracted in the
+message that carried it. Neither number in this table shares that lineage.*
+
+> **RETRACTED 2026-08-24, same day, before anything was built on it.** The paragraph below reads
+> `b1`/`b3`'s one-slot-per-arm pattern as extreme cross-episode reuse. **It is the opposite: it is the
+> signature of a VIRGIN pool of two, handed out fresh before every block.** `_virgin_resident_pool`'s
+> own docstring says the mechanism — *"`rotate_pool` was only ever called on a profile SWAP. That was
+> sufficient while the only heavy delegator was B2, which is separated from the next block's B2 by the
+> B1/B3 swap"* — and each block swaps to the bench profile, relaunching the server, for exactly one
+> B1 call and one B3 call. Two calls, two slots: `parallel: 2` is the right number, not an oversight.
+>
+> **The proof is an absence.** Running `--arm b1` alone removes the swap, so the pool persists and
+> drains on the third episode — which is exactly what happened when the re-run was attempted, twice.
+> S4 ran **180 bench episodes (90 b1 + 90 b3) with ZERO `slot_pool_exhausted`**. A persistent pool
+> cannot do that. Therefore the pool was reset before every block, and **every B1 call ran on a
+> freshly started server with a virgin slot** — the "fresh process" cell, where ROCm measures 3/3
+> clean.
+>
+> **So §4.6.2's shared-prefix mechanism does not reach B1**, and the claim that B1 was the most
+> exposed arm is withdrawn. What survives untouched: ROCm's corruption under shared-prefix reuse
+> (§4.6.2), R13 as a ROCm defect (§4.5), and `b2`'s 13.2% and `rlm-restricted`'s 81.9% over-reuse —
+> those are WITHIN-episode, on the resident profile, where the pool genuinely does persist.
+>
+> **How the error was made, since it is the day's own subject:** "all 117 on slot 0, zero rotations"
+> was read as reuse by two independent readers. It is equally the signature of a fresh pool. Neither
+> reading was checked against the one fact that separates them — whether the pool ever exhausted —
+> until the re-run hit that exhaustion first-hand.
+
+*Superseded text follows.*
 
 **And the single-shot arms are the most exposed of all, on an axis the within-episode grouping
 hides.** B1 makes one call per episode, so per-episode reuse is 1 by construction. Across episodes:
@@ -510,6 +546,66 @@ was `slot=None`. Corrected before it was sent.*
 **Live smoke on the shipped config**, launched through the project's own `launch_argv`: 7 seeds ×
 {literal, paraphrase, absent} = **21/21 correct**, 1.07 s median wall, 0 leaks, 0 slot mismatches,
 0 errors.
+
+## 4.7 THE B1 RE-RUN: 0/30 becomes 16/30, and S4's largest margin drops from +30 to +14
+
+**Ran 2026-08-24 on the now-shipped Vulkan config. 89 of 90 cells scored** (one `codeqa-01` seed-2
+cell lost to an unplanned power-off; code QA is 0/20 elsewhere, so it cannot change the outcome).
+Same frozen manifest, same tasks, same seeds, same `bench_leaf` profile — **the backend is the only
+difference.**
+
+| category | B1 on **Vulkan** | B1 in S4 (**ROCm**) |
+|---|---:|---:|
+| needle | **24/24 cells** | 0 |
+| synthesis | **24/24 cells** | 0 |
+| aggregation | 0/21 | 0 |
+| code QA | 0/20 | 0 |
+| **tasks won (majority of seeds)** | **16/30** | **0/30** |
+
+**48 successes in 89 cells where S4 recorded none in 90.**
+
+**The pattern is what makes it credible.** A backend change that "fixed everything" indiscriminately
+would have lifted aggregation and code QA too. It lifts neither — 41 cells, zero successes, on both
+backends. What it lifts is exactly the two categories that are *retrieval*, which is exactly what
+§§4.4–4.6 measure ROCm destroying. A single-shot baseline genuinely cannot compute over a 130K
+corpus; it can quote from one, and on ROCm it could not.
+
+### 4.7.1 What this does to S4
+
+S4 reported **RLM 30/30** against **B1 0/30**, a margin of **+30**. On this measurement the same
+comparison is **30/30 against 16/30 — a margin of +14**, less than half of what was published.
+
+**Stated precisely, because two different things are being claimed and only one is measured here:**
+
+- **Measured:** B1 scores 16/30 on Vulkan and 0/30 on ROCm, on the same frozen tasks and seeds.
+- **Inferred:** that RLM's 30/30 is unaffected and the corrected margin is therefore +14. The RLM arm
+  made **81 leaf calls in its entire history** and solved its tasks by writing Python on the ROOT,
+  which has been on Vulkan throughout — so the leaf-side defect had almost no surface to touch it.
+  That is an argument, not a re-run.
+- **Not measured at all:** B2 (+13) and B3 (+29). B2's 21,098 leaf calls ran at the 640-token
+  geometry, which §4 measures **clean on ROCm**, so its margin has no reason to move. B3 is
+  single-shot like B1 and shares its profile — **B3's +29 is the one most likely to move next, and
+  nobody has run it.**
+
+**Under §8's comparability rule this is a different measurement, not a correction to the S4 ledger.**
+It ran on a config that did not exist when the grid was frozen. Whether S4's verdict is re-scored,
+re-run, or annotated is the owner's call; this section is the evidence, not the decision.
+
+### 4.7.2 What the re-run cost to get, which is its own record
+
+Four attempts failed before one worked, and **every failure was the driver's, not the harness's**:
+`taskkill` from Git Bash reports success and kills nothing, so four servers accumulated holding
+~24 GB; `pkill` killed the driver and left its Python child holding an exclusive lock on
+`traces/rlm.duckdb`, which is what the "server exited with code 1" and "did not report health in
+120 s" errors were downstream of; and the driver plowed through all 45 batches while every one of
+them failed, which is worse than not running — it manufactures a null result that looks like a
+measurement. Three wrong diagnoses preceded the right one: VRAM release time, free memory, and
+concurrent server start. None survived contact — a cold `bench_leaf` start is 16 s, both servers fit
+with 34.8 GB spare, and `start_resident` is strictly sequential. **On a clean box the first batch
+passed.** The rewritten driver cleans with PowerShell before *and* after every batch, kills the
+bench process as well as its servers, and aborts after three empty batches instead of 45. An
+unplanned power-off mid-run then cost nothing, because each batch writes its own ledger and the
+driver skips what is already done.
 
 ## 5. What this reattributes
 
