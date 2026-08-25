@@ -2,7 +2,29 @@
 
 **Decided:** 2026-08-16
 **Status:** Standing decision. Re-litigate only with new facts (same rule as ARCHITECTURE.md §11 decision records).
-**Relationship to the spec:** This document governs *where the project is going*; `ARCHITECTURE.md` governs *what is being built and how it is judged*. Nothing here amends an invariant, a gate, or a sizing. The spec's §1 exclusions ("not an agent framework, a chat product, or a general orchestrator") still hold for the runtime the spec governs — the appliance below is a *deployment* of that runtime, not a new scope for it.
+**Relationship to the spec:** This document governs *where the project is going*; `ARCHITECTURE.md` governs *what is being built and how it is judged*.
+**AMENDED 2026-08-25 — read §0 below before anything else in this file.** The sentence that stood here said *"Nothing here amends an invariant, a gate, or a sizing,"* and that the spec's §1 exclusions still held. **Amendment 0 does amend a gate**: S6 moves from unscheduled to scheduled, and two of §1's exclusions are withdrawn or narrowed. No invariant changes. Everything in §§1–6 below was written under the 2026-08-16 decision and is kept verbatim; where §0 supersedes it, §0 says so explicitly.
+
+---
+
+## 0. Amendment — the destination is a self-improving RLM agent on local models
+
+**Decided:** 2026-08-25, by the owner, in response to the direct question of what the project is for.
+**Status:** Standing decision, superseding §1 where they conflict. Same re-litigation rule.
+**Spec consequence:** `ARCHITECTURE.md` v0.4.0 — §1 rewritten, **S6 scheduled with a pre-registered gate**, R16 opened. No invariant changed.
+
+**The decision.** The project builds **a local RLM agent that improves itself from its own trajectories**. That is the purpose; everything else in this file is means.
+
+**What this reverses, stated plainly rather than buried.** The 2026-08-16 decision described the product as an orchestration layer and an appliance, and the spec forbade learning outright — *"A training project. Learning loops are S6, explicitly unscheduled."* The owner reframed the goal on **2026-08-20**, and for five days the documents said the opposite of what he wanted while the work went into measurement. This amendment closes that gap; it does not pretend it was not open.
+
+**What survives from 2026-08-16, and is strengthened rather than tolerated.**
+- **The on-prem appliance for private organizations remains the delivery shape**, and it now has a reason it lacked. A hosted service cannot deliver this product: the improvement is *made of the customer's data*, so the artifacts the agent learns can never leave the building. "Private, flat-cost, long-context engine" becomes "a private engine that gets better at your corpus, and cannot get better at anyone else's."
+- **The trust stack (§5) is unchanged and rises in value.** Replayable traces (I4), hard budgets (I1) and a published measurement record are ordinary hygiene for a static tool; for a system that rewrites its own prompts they are the only reason anyone should run it. Auditability is no longer a sales asset, it is a safety property.
+- **D1–D6 stand as written.**
+
+**What is now in question, and is NOT decided here — the owner's call.** §1 sequences the **library first** (D4: publish the C4/C5 layer once it survives S3). S3 passed on 2026-08-16, so the library is publishable today, and extraction is weeks of packaging that move the agent forward by nothing. The three live options: publish the library first as planned; defer it until the agent has a result worth publishing alongside; or drop it to opportunistic. **No work is being done on extraction under this amendment until that is answered.**
+
+**What the amendment costs, measured the same day rather than assumed.** S6's preconditions are unchanged and two of three are unmet — `ARCHITECTURE.md` §9 S6 carries the numbers and `§10 R16` the risk. The short form: **the trace store holds 237 successful RLM episodes, of which 6 delegate substantively.** Training on that corpus would teach the root to work alone, which is the opposite of the thesis. So the first work under this direction is **not** the learning loop. It is **benchmark v2** — tasks that cannot be answered without delegating, with a train/held-out split — plus the delegation path's rotation fault. Invariant **I5** makes that ordering mandatory, not advisory: no optimization merges without the benchmark showing success unchanged or better, and the frozen v1 benchmark cannot see delegation at all.
 
 ---
 
