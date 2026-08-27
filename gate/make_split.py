@@ -26,10 +26,10 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 # Fixed here, before any run. Spec §6.
-TRAIN = ["codeqa-01", "codeqa-02", "codeqa-03", "codeqa-04",
+TRAIN = ["codeqa-01", "codeqa-02", "codeqa-03", "codeqa-06",
          "needle-01", "needle-02", "needle-03", "needle-04",
          "agg-04", "agg-05"]
-HELD_OUT = ["codeqa-05", "codeqa-06", "codeqa-07",
+HELD_OUT = ["codeqa-04", "codeqa-05", "codeqa-07",
             "needle-05", "needle-06", "needle-07", "needle-08",
             "agg-06", "agg-07"]
 EXCLUDED = {
@@ -110,6 +110,25 @@ def main() -> int:
                   file=sys.stderr)
         return 2
 
+    # ANSWER DISJOINTNESS. Found the hard way 2026-08-27, on the screens' first run:
+    # the original draw put codeqa-06 (`rlm/dispatcher.py`) and codeqa-07
+    # (`rlm/budget.py`) on the held-out side while codeqa-01/03 and codeqa-04 -- which
+    # have the SAME answers -- sat in train. A model that memorised a train answer
+    # would then score the held-out task without reading anything, which is the exact
+    # contamination the gate exists to prevent. Answers must partition: every task
+    # sharing an answer belongs to one side.
+    by_answer: dict[str, set[str]] = {}
+    for tid in TRAIN + HELD_OUT:
+        ans = json.loads((REPO / "bench" / "tasks" / f"{tid}.json").read_text(encoding="utf-8"))["answer"]
+        by_answer.setdefault(ans, set()).add(tid)
+    crossing = {a: sorted(ids) for a, ids in by_answer.items()
+                if (ids & set(TRAIN)) and (ids & set(HELD_OUT))}
+    if crossing:
+        print("ERROR: an answer appears on both sides of the split:", file=sys.stderr)
+        for a, ids in sorted(crossing.items()):
+            print(f"  {a!r}: {ids}", file=sys.stderr)
+        return 2
+
     # For a singleton category the same-shape claim is the shared corpus where there
     # is one. Assert it rather than assume it.
     for cat in ("code_qa",):
@@ -149,6 +168,10 @@ def main() -> int:
             "No adversarial task is on the held-out side: needle-01 (adversarial) is in train and "
             "agg-01 (the only other) is excluded. Recorded, not an oversight.",
             "Aggregation contributes 2 train / 2 held-out, the smallest per-category support here.",
+            "codeqa-04 and codeqa-07 share the answer `rlm/budget.py` and are BOTH held-out. "
+            "That is safe for contamination -- neither side leaks to the other -- but the two "
+            "tasks are not fully independent, so held-out code QA has 3 tasks and 2 distinct "
+            "answers. Forced by the answer-disjointness rule on a 7-task category.",
         ],
         "train": train,
         "held_out": held,

@@ -21,7 +21,8 @@
   },
   "known_limitations": [
     "No adversarial task is on the held-out side: needle-01 (adversarial) is in train and agg-01 (the only other) is excluded. Recorded, not an oversight.",
-    "Aggregation contributes 2 train / 2 held-out, the smallest per-category support here."
+    "Aggregation contributes 2 train / 2 held-out, the smallest per-category support here.",
+    "codeqa-04 and codeqa-07 share the answer `rlm/budget.py` and are BOTH held-out. That is safe for contamination -- neither side leaks to the other -- but the two tasks are not fully independent, so held-out code QA has 3 tasks and 2 distinct answers. Forced by the answer-disjointness rule on a 7-task category."
   ],
   "train": [
     {
@@ -52,10 +53,10 @@
       "adversarial": false
     },
     {
-      "task_id": "codeqa-04",
+      "task_id": "codeqa-06",
       "category": "code_qa",
       "checker": "name_exact",
-      "question_sha256": "f10765fec3f43311f1a406cd4d4b453e7f9e54525961f1c0452562b528540984",
+      "question_sha256": "2fd6444c9d9fcb8f09eb4fc29bef5af7117b3d3fa700ca72ae4d6b9e97e0dd4f",
       "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
       "corpus_tokens": 103861,
       "adversarial": false
@@ -117,19 +118,19 @@
   ],
   "held_out": [
     {
-      "task_id": "codeqa-05",
+      "task_id": "codeqa-04",
       "category": "code_qa",
       "checker": "name_exact",
-      "question_sha256": "2afbfe4b88f1f861ceb593d98e507526b3ebb623d328b625a70dac819b5767bc",
+      "question_sha256": "f10765fec3f43311f1a406cd4d4b453e7f9e54525961f1c0452562b528540984",
       "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
       "corpus_tokens": 103861,
       "adversarial": false
     },
     {
-      "task_id": "codeqa-06",
+      "task_id": "codeqa-05",
       "category": "code_qa",
       "checker": "name_exact",
-      "question_sha256": "2fd6444c9d9fcb8f09eb4fc29bef5af7117b3d3fa700ca72ae4d6b9e97e0dd4f",
+      "question_sha256": "2afbfe4b88f1f861ceb593d98e507526b3ebb623d328b625a70dac819b5767bc",
       "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
       "corpus_tokens": 103861,
       "adversarial": false
