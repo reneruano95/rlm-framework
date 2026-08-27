@@ -107,6 +107,20 @@ Otherwise the set is **rejected**. Rejection is a result, not a failure: the run
 
 **Wall-clock is recorded but does not gate**, because the box's thermal drift (R9; +9.9% measured across C1b) is of the same order as the effect being sought. Tokens are the gated quantity; wall and energy travel as annotations, per §8's rule that *"any win claim states the cost multiple next to the margin"*.
 
+### 4.2a PROPOSED AMENDMENT — a quality-improvement path (raised 2026-08-27, NOT ADOPTED)
+
+**Recorded before the positive control's verdict was known, and deliberately so.** Within the first ON/OFF pair of decision `pc-01` the artifact behaved exactly as designed — it reached the model (`in_window=1,0`), the answer was right, and the episode cost 116.0 s against the OFF arm's 58.6 s, because the artifact *asks for more work*: two independently written methods, reconciled.
+
+That exposes a structural gap in §4.2 as written. **Q is non-inferiority, not improvement, and K requires cost to fall. So the rule can only ever accept an artifact that makes the agent cheaper** — an artifact that makes it *more reliable* is invisible to Q and penalised by K. The rule therefore cannot accept the very behaviour E3 identifies as the valuable one.
+
+The spike's own reading did not have this gap. Its B2 was *"pass where Phase A failed, **or** median wall ≤0.8× and still passing"* — two paths. v0 kept only the cost path, and that was an error in drafting rather than a decision.
+
+There is real quality headroom to gate on, despite v1 being nearly saturated: in step 2's verification `agg-07` scored **2/3 with an empty harness**, so a held-out task can fail without any artifact present.
+
+**Proposed rule.** Accept iff **(Q ∧ K)** — no task lost and cost falls — **or** **(Q⁺ ∧ K⁰)** — some held-out task that fails OFF passes ON, no other task is lost, and cost does not worsen beyond a pre-registered multiple.
+
+**Status: proposed, not adopted.** `pc-01` runs and is reported under §4.2 exactly as pre-registered; the threshold is not moved to make a control pass (plan step 4's stop rule). Adopting this is the owner's call, and if adopted the multiple in K⁰ must be fixed before any decision is re-scored under it.
+
 ### 4.3 Why cost, when §8 says there is no cost gate
 
 `ARCHITECTURE.md:384` says: *"Deliberately no hard cost gate — the decision rule stays single."* That sentence governs the **S4 decision** — RLM against its baselines, where the question is whether the architecture wins on tasks. This gate answers a different question about a saturated instrument, and the repo's own primary metric is already the one used here: **`ARCHITECTURE.md:345` — "Primary metric: wall-clock per task at fixed quality."** Condition Q is "at fixed quality"; condition K is the cost half, moved from annotation to gate because on a benchmark where the agent already scores 8/8 there is no quality headroom to gate on. The deviation is deliberate, is scoped to this gate, and does not touch §8's S4 rule. §7 records it as a decision.
@@ -164,6 +178,7 @@ Otherwise the set is **rejected**. Rejection is a result, not a failure: the run
 | **R4** | **The alphabetical prompt window silently truncates.** More than 6 accepted entries of a kind and the gate's verdict is about a set the model never fully saw | Verified: no ranking, `slice(0, 6)`, 180-char content cap (`refinement.ts:466-481`) | `path` is assigned deterministically (§3.3) and every gate report states, per arm, how many entries were in-window and how many characters of each reached the prompt. More than 6 accepted entries of one kind triggers a pre-registered consolidation round rather than a silent drop |
 | **R5** | **Vendored prime-agent moves.** v0.8.1 shipped the day the spike ran; the extension API is not a stability contract | Release cadence measured: 13 releases in 5 weeks | The version is pinned in the plan and the extension is one file. Each of the three seams has a startup assertion; a missing hook fails loudly at launch rather than silently degrading to "the model refines itself again" |
 | **R6** | **Thermal drift contaminates the cost measurement.** +9.9% wall drift measured across C1b, R9's plateau on record | Measured [V] | The blocked `(task, seed)` design puts ON and OFF adjacent in time (§4.1), tokens rather than wall are gated (§4.2), and the report carries the per-block temperature deltas the trace already records |
+| **R7** | **Everything derived from the split goes stale when the split changes, silently.** Added 2026-08-27 after it happened three times in one afternoon | Measured, all three during plan steps 2–4: (a) the first draw let two held-out code-QA answers duplicate train answers, so a memorised train answer would have scored a held-out task — caught by the screens on their first run against real material; (b) the screens' own fixture suite asserted a task was held-out after the redraw moved it to train; (c) a `heldout.txt` staged before the redraw still named `codeqa-06`, and a decision **started** on it — it would have evaluated on a training task with nothing to say so | **The split file is the only source of truth; everything else is a cache of it.** Three mechanisms, all now in code: `gate/make_split.py` refuses to write a split whose answers are not disjoint across sides or that straddles a question-shape cluster; the fixture suite reads task ids from the split rather than naming them; and `gate/run_decision.sh` refuses to run when its task list does not equal the split's held-out side, printing both. A fourth is owed and is not built: the split's sha256 is recorded per decision but no episode asserts it, so a split edited mid-decision would still be caught only after the fact |
 
 ## 9. What this does not do
 

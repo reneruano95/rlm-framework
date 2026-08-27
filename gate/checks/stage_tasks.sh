@@ -41,6 +41,7 @@ for side, name in (("train", "train.txt"), ("held_out", "heldout.txt")):
     print(f"  {name}: {len(d[side])} tasks")
 PY
 
+cp "$SPLIT" /home/spike/gate/split.json
 chown -R spike:spike /home/spike/tasks /home/spike/prompts /home/spike/gate
 echo "corpora staged: $(ls /home/spike/tasks | wc -l) task dirs"
 echo "missing corpora: $(while read -r T; do [ -s "/home/spike/tasks/$T/corpus.txt" ] || echo "$T"; done < /tmp/split_tasks.txt | tr '\n' ' ')"

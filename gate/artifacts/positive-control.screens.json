@@ -1,0 +1,29 @@
+[
+  {
+    "candidate_id": "rlmh-prompt-crosscheck",
+    "passed": true,
+    "failed": [],
+    "results": [
+      {
+        "name": "S-kind",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "name": "S-I1",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "name": "S-answer",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "name": "S-corpus",
+        "passed": true,
+        "detail": ""
+      }
+    ]
+  }
+]

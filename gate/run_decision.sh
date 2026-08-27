@@ -19,6 +19,27 @@ rm -rf "$ROOT"; mkdir -p "$ROOT"
 cp "$ACCEPTED" "$ROOT/candidate.json" 2>/dev/null || echo "(no candidate file: OFF-only run)"
 sha256sum "$ACCEPTED" 2>/dev/null | cut -d' ' -f1 > "$ROOT/candidate.sha256" || true
 
+# The task list must match the CURRENT split. Found the hard way 2026-08-27: a list
+# staged before the split was redrawn still named codeqa-06, which the redraw moved to
+# train -- so a decision would have evaluated on a training task and nothing would have
+# said so. The split file is the source of truth; the list is a cache of it.
+SPLIT=/home/spike/gate/split.json
+if [ -f "$SPLIT" ]; then
+  EXPECT=$("$PRIME_AGENT_KERNEL_VENV/bin/python" -c "
+import json,sys
+d=json.load(open('$SPLIT'))
+print(' '.join(r['task_id'] for r in d['held_out']))
+")
+  GOT=$(tr '
+' ' ' < "$LIST" | sed 's/ *$//')
+  if [ "$EXPECT" != "$GOT" ]; then
+    echo "REFUSING: task list does not match the split's held_out side." >&2
+    echo "  split: $EXPECT" >&2
+    echo "  list : $GOT" >&2
+    exit 2
+  fi
+fi
+
 LOG="$ROOT/decision.log"
 echo "=== decision $DEC start $(date -Is)" | tee -a "$LOG"
 echo "    candidate: $ACCEPTED  sha=$(cat "$ROOT/candidate.sha256" 2>/dev/null | cut -c1-16)" | tee -a "$LOG"
