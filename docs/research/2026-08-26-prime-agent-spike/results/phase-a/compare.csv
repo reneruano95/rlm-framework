@@ -1,0 +1,9 @@
+task,arm,n_runs,pass_count,task_pass,wall_n,tokens_n,median_wall_s,s4_wall_s,dflash2_wall_s,ratio_vs_s4_wall,ratio_vs_dflash2_wall,median_tokens,tokens_source,s4_tokens,dflash2_tokens,ratio_vs_s4_tokens,ratio_vs_dflash2_tokens,median_turns,s4_turns,dflash2_turns,runs_missing_usage,runs_missing_score,arm_mismatch
+agg-03,P1,3,3,True,3,3,49.30,50.7,37.1,0.972,1.329,5720,metrics,7306,7601,0.783,0.753,5.0,4,4,0,0,0
+agg-04,P1,3,2,True,3,3,80.84,97.0,76.8,0.833,1.053,6600,metrics,17918,19394,0.368,0.340,6.0,6,7,0,0,0
+agg-07,P1,3,3,True,3,3,105.26,84.8,95.5,1.241,1.102,8262,metrics,14405,21802,0.574,0.379,8.0,6,7,0,0,0
+codeqa-01,P1,3,3,True,3,3,49.04,69.3,66.7,0.708,0.735,5265,metrics,8856,11405,0.595,0.462,4.0,5,6,0,0,0
+codeqa-03,P1,3,3,True,3,3,46.37,72.2,108.0,0.642,0.429,5301,metrics,8788,24567,0.603,0.216,4.0,5,10,0,0,0
+codeqa-05,P1,3,3,True,3,3,47.06,87.5,98.4,0.538,0.478,5294,metrics,13816,17149,0.383,0.309,5.0,7,7,0,0,0
+needle-02,P1,3,3,True,3,3,69.06,78.8,43.3,0.876,1.595,6449,metrics,13077,8872,0.493,0.727,5.0,6,5,0,0,0
+synth-02,P1,3,3,True,3,3,58.19,95.4,142.9,0.610,0.407,6207,metrics,15733,36555,0.395,0.170,6.0,6,8,0,0,0

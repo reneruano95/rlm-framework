@@ -1,0 +1,82 @@
+{
+  "schema": 1,
+  "entries": {
+    "prompt": {},
+    "memory": {
+      "resolved_sealed_count_in_corpus_txt": {
+        "id": "resolved_sealed_count_in_corpus_txt",
+        "kind": "memory",
+        "title": "Resolved: SEALED count in corpus.txt",
+        "content": "The file ./corpus.txt (474,218 chars) contains exactly 514 records where the Status line is 'SEALED'. Verified via regex: re.findall(r'^Status: SEALED\\s*$', text, flags=re.M). Status values in this corpus are limited to ['OPEN', 'SEALED']. Answer written to ./answer.txt as 'FINAL: 514'.",
+        "path": "session/tasks",
+        "scope": "local",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "local"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:04:39.382Z",
+        "updated_at": "2026-08-27T14:04:39.382Z",
+        "version": 1
+      },
+      "withheld_count_in_corpus_txt": {
+        "id": "withheld_count_in_corpus_txt",
+        "kind": "memory",
+        "title": "WITHHELD/RELEASED counts in corpus.txt (custody predicates) — file regenerates between questions",
+        "content": "Local corpus ./corpus.txt is regenerated between questions (same path, different bytes). Latest verified state: 473,758 chars, 1,320 records starting with [ENT-\\d+]. WITHHELD (custody passed TO the header org) = 600; RELEASED (FROM header org) = 720; neither = 0; no record has both (mutually exclusive in this corpus). Proven parse: blocks = text.split('\\n\\n'); recs = [b for b in blocks if b.startswith('[ENT-')]; pat = re.compile(r'\\[ENT-\\d+\\] (.+)\\nStatus: \\S+\\nDisposition: custody passed from the (.+) to the (.+);', re.M); compare header vs from/to with exact string equality. Status vocabulary observed: ['OPEN','SEALED']. Prior observations in this session: 474,218 chars (SEALED=514), 473,807 chars (1,323 recs, WITHHELD=594/RELEASED=729). Always re-read and re-parse before answering; do not reuse a cached count from a prior turn.",
+        "path": "local/session/tasks/corpus_txt",
+        "scope": "local",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "local",
+          "as_of": "2026-08-27T14:07Z",
+          "file_chars": 473758,
+          "records": 1320,
+          "withheld": 600,
+          "released": 720,
+          "volatile": true
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:06:28.320Z",
+        "updated_at": "2026-08-27T14:08:19.112Z",
+        "version": 2
+      }
+    },
+    "skill": {},
+    "subagent": {}
+  },
+  "refinements": [
+    {
+      "id": "refine_20260827140413715",
+      "trigger": "Record a local memory note that the SEALED-count task on corpus.txt was resolved to 514.",
+      "changes": [
+        "create memory:resolved_sealed_count_in_corpus_txt"
+      ],
+      "evidence": "The task was completed successfully using the ipython tool with a precise regex (^Status: SEALED\\s*$). Capturing the outcome and the method used is a durable local fact that avoids re-computation if the user asks again in this session and documents the reliable approach for this specific corpus format.",
+      "outcome": "Future requests in this session about SEALED records or similar corpus tasks can reference this verified count and the regex pattern used to derive it, improving consistency and speed.",
+      "created_at": "2026-08-27T14:04:39.382Z"
+    },
+    {
+      "id": "refine_20260827140548531",
+      "trigger": "Record the resolved WITHHELD count and the parsing pattern for the custody-transfer corpus.",
+      "changes": [
+        "create memory:withheld_count_in_corpus_txt"
+      ],
+      "evidence": "The session successfully computed a second, structurally different metric (WITHHELD = 594) from corpus.txt by parsing each record's header org, 'from', and 'to' organizations and testing identity. Capturing the verified count, the exact regex/parsing pattern, and the mutual-exclusivity check (withheld + released = total, no overlap) creates a durable session fact that prevents re-derivation and guards against common pitfalls (substring vs exact match, multi-word org names) in follow-up queries on this same corpus.",
+      "outcome": "Future requests in this session about WITHHELD/RELEASED records or other custody-transfer predicates on corpus.txt can reference the verified counts and reuse the proven parse pattern, improving consistency and avoiding re-parsing errors.",
+      "created_at": "2026-08-27T14:06:28.321Z"
+    },
+    {
+      "id": "refine_20260827140730100",
+      "trigger": "Update the WITHHELD count memory to reflect the latest corpus.txt state (473,758 chars, 1,320 records, 600 WITHHELD) and note that the corpus file is regenerated between questions.",
+      "changes": [
+        "update memory:withheld_count_in_corpus_txt"
+      ],
+      "evidence": "The trajectory shows the same ./corpus.txt path changing size and record count across consecutive questions (474,218 -> 473,807 -> 473,758 chars; 1,323 -> 1,320 records; WITHHELD 594 -> 600). The existing memory entry withheld_count_in_corpus_txt is now stale and would mislead a future lookup. Updating it with the latest verified values and an explicit note that the corpus is regenerated per-question prevents the agent from trusting an outdated count or skipping a re-parse.",
+      "outcome": "Future questions about corpus.txt in this session will re-parse rather than trust a cached number, and the memory entry will carry the most recent verified figures (600 WITHHELD / 720 RELEASED / 1,320 records) plus the proven regex pattern, improving accuracy and consistency.",
+      "created_at": "2026-08-27T14:08:19.112Z"
+    }
+  ]
+}

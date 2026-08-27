@@ -1,0 +1,66 @@
+endurance: 2000 sequential requests -> http://127.0.0.1:8080/v1/chat/completions
+           model=qwen3.8-27b  max_tokens=64  temperature=0.0  words/msg=128  thinking=off (chat_template_kwargs)
+           rows -> D:\spike\out\endurance.csv   metrics -> D:\spike\out\endurance.csv.metrics.csv (every 50)
+  ... 50/2000 done  ok=50  fail=0  elapsed=208.2s
+  ... 100/2000 done  ok=100  fail=0  elapsed=421.5s
+  ... 150/2000 done  ok=150  fail=0  elapsed=634.9s
+  ... 200/2000 done  ok=200  fail=0  elapsed=846.6s
+  ... 250/2000 done  ok=250  fail=0  elapsed=1059.9s
+  ... 300/2000 done  ok=300  fail=0  elapsed=1273.0s
+  ... 350/2000 done  ok=350  fail=0  elapsed=1486.2s
+  ... 400/2000 done  ok=400  fail=0  elapsed=1699.5s
+  ... 450/2000 done  ok=450  fail=0  elapsed=1912.7s
+  ... 500/2000 done  ok=500  fail=0  elapsed=2127.2s
+  ... 550/2000 done  ok=550  fail=0  elapsed=2360.6s
+  ... 600/2000 done  ok=600  fail=0  elapsed=2581.8s
+  ... 650/2000 done  ok=650  fail=0  elapsed=2817.5s
+  ... 700/2000 done  ok=700  fail=0  elapsed=3053.1s
+  ... 750/2000 done  ok=750  fail=0  elapsed=3288.2s
+  ... 800/2000 done  ok=800  fail=0  elapsed=3523.4s
+  ... 850/2000 done  ok=850  fail=0  elapsed=3759.3s
+  ... 900/2000 done  ok=900  fail=0  elapsed=3995.2s
+  ... 950/2000 done  ok=950  fail=0  elapsed=4225.8s
+  ... 1000/2000 done  ok=1000  fail=0  elapsed=4461.9s
+  ... 1050/2000 done  ok=1050  fail=0  elapsed=4698.4s
+  ... 1100/2000 done  ok=1100  fail=0  elapsed=4929.3s
+  ... 1150/2000 done  ok=1150  fail=0  elapsed=5164.8s
+  ... 1200/2000 done  ok=1200  fail=0  elapsed=5402.4s
+  ... 1250/2000 done  ok=1250  fail=0  elapsed=5637.1s
+  ... 1300/2000 done  ok=1300  fail=0  elapsed=5874.3s
+  ... 1350/2000 done  ok=1350  fail=0  elapsed=6108.9s
+  ... 1400/2000 done  ok=1400  fail=0  elapsed=6334.5s
+  ... 1450/2000 done  ok=1450  fail=0  elapsed=6575.6s
+  ... 1500/2000 done  ok=1500  fail=0  elapsed=6816.4s
+  ... 1550/2000 done  ok=1550  fail=0  elapsed=7056.1s
+  ... 1600/2000 done  ok=1600  fail=0  elapsed=7298.0s
+  ... 1650/2000 done  ok=1650  fail=0  elapsed=7536.9s
+  ... 1700/2000 done  ok=1700  fail=0  elapsed=7772.6s
+  ... 1750/2000 done  ok=1750  fail=0  elapsed=8010.0s
+  ... 1800/2000 done  ok=1800  fail=0  elapsed=8247.2s
+  ... 1850/2000 done  ok=1850  fail=0  elapsed=8482.1s
+  ... 1900/2000 done  ok=1900  fail=0  elapsed=8712.1s
+  ... 1950/2000 done  ok=1950  fail=0  elapsed=8944.5s
+  ... 2000/2000 done  ok=2000  fail=0  elapsed=9177.3s
+
+======================================================================
+C1b endurance summary
+======================================================================
+  endpoint              : http://127.0.0.1:8080/v1/chat/completions
+  model                 : qwen3.8-27b
+  requests attempted    : 2000 (of 2000 requested)
+  2xx responses         : 2000
+  non-2xx responses     : 0
+  exceptions (no reply) : 0
+  malformed 2xx bodies  : 0
+  total failures        : 0
+  total wall            : 9177.3 s (152.96 min)
+  wall_ms median (ok)   : 4616.6
+  wall_ms p95    (ok)   : 4808.1
+  wall_ms min/max (ok)  : 3818.0 / 9047.5
+  first failing index   : none
+  outcome               : completed
+  /health after run     : {"status":"ok"}
+  row CSV               : D:\spike\out\endurance.csv
+  metrics CSV           : D:\spike\out\endurance.csv.metrics.csv
+  C1b verdict           : PASS (server alive, zero failures in 2000 requests)
+======================================================================

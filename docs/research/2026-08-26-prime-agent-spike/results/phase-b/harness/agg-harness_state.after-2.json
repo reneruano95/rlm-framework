@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "entries": {
+    "prompt": {},
+    "memory": {
+      "resolved_sealed_count_in_corpus_txt": {
+        "id": "resolved_sealed_count_in_corpus_txt",
+        "kind": "memory",
+        "title": "Resolved: SEALED count in corpus.txt",
+        "content": "The file ./corpus.txt (474,218 chars) contains exactly 514 records where the Status line is 'SEALED'. Verified via regex: re.findall(r'^Status: SEALED\\s*$', text, flags=re.M). Status values in this corpus are limited to ['OPEN', 'SEALED']. Answer written to ./answer.txt as 'FINAL: 514'.",
+        "path": "session/tasks",
+        "scope": "local",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "local"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:04:39.382Z",
+        "updated_at": "2026-08-27T14:04:39.382Z",
+        "version": 1
+      },
+      "withheld_count_in_corpus_txt": {
+        "id": "withheld_count_in_corpus_txt",
+        "kind": "memory",
+        "title": "Resolved: WITHHELD count in corpus.txt (custody passed TO header org)",
+        "content": "Corpus ./corpus.txt (473,807 chars, 1,323 records starting with [ENT-\\d+]) — WITHHELD records (custody passed TO the organisation named in the record's own header) = 594; RELEASED (FROM header org) = 729; neither = 0; no record has both (mutually exclusive). Parse pattern: re.compile(r'\\[ENT-\\d+\\] (.+)\\nStatus: \\S+\\nDisposition: custody passed from the (.+) to the (.+);').split('\\n\\n') blocks; exact string equality on org names (verified no substring edge cases). Verified via: withheld=sum(1 for h,f,t in parsed if t==h). Status values in this corpus: ['OPEN','SEALED'].",
+        "path": "general",
+        "scope": "local",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "local"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:06:28.320Z",
+        "updated_at": "2026-08-27T14:06:28.320Z",
+        "version": 1
+      }
+    },
+    "skill": {},
+    "subagent": {}
+  },
+  "refinements": [
+    {
+      "id": "refine_20260827140413715",
+      "trigger": "Record a local memory note that the SEALED-count task on corpus.txt was resolved to 514.",
+      "changes": [
+        "create memory:resolved_sealed_count_in_corpus_txt"
+      ],
+      "evidence": "The task was completed successfully using the ipython tool with a precise regex (^Status: SEALED\\s*$). Capturing the outcome and the method used is a durable local fact that avoids re-computation if the user asks again in this session and documents the reliable approach for this specific corpus format.",
+      "outcome": "Future requests in this session about SEALED records or similar corpus tasks can reference this verified count and the regex pattern used to derive it, improving consistency and speed.",
+      "created_at": "2026-08-27T14:04:39.382Z"
+    },
+    {
+      "id": "refine_20260827140548531",
+      "trigger": "Record the resolved WITHHELD count and the parsing pattern for the custody-transfer corpus.",
+      "changes": [
+        "create memory:withheld_count_in_corpus_txt"
+      ],
+      "evidence": "The session successfully computed a second, structurally different metric (WITHHELD = 594) from corpus.txt by parsing each record's header org, 'from', and 'to' organizations and testing identity. Capturing the verified count, the exact regex/parsing pattern, and the mutual-exclusivity check (withheld + released = total, no overlap) creates a durable session fact that prevents re-derivation and guards against common pitfalls (substring vs exact match, multi-word org names) in follow-up queries on this same corpus.",
+      "outcome": "Future requests in this session about WITHHELD/RELEASED records or other custody-transfer predicates on corpus.txt can reference the verified counts and reuse the proven parse pattern, improving consistency and avoiding re-parsing errors.",
+      "created_at": "2026-08-27T14:06:28.321Z"
+    }
+  ]
+}

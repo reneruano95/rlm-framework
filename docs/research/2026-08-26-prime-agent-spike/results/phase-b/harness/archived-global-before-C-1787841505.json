@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "entries": {
+    "prompt": {},
+    "memory": {
+      "corpus_txt_in_flight_search_completed": {
+        "id": "corpus_txt_in_flight_search_completed",
+        "kind": "memory",
+        "title": "corpus.txt in_flight search completed",
+        "content": "Task: find the single file in ./corpus.txt (Python repo, files delimited by '=== FILE: <path> ===') that defines function `in_flight`. Result: exactly one `def in_flight` at corpus offset 167524, in file `rlm/dispatcher.py`. Final answer written to ./answer.txt as `FINAL: rlm/dispatcher.py`. Method: read file once, regex for FILE headers and `def in_flight\\b`, take last header before the definition offset. Completed successfully.",
+        "path": "session/tasks",
+        "scope": "global",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "global",
+          "status": "done",
+          "answer": "rlm/dispatcher.py",
+          "evidence": "21 FILE headers, 1 def in_flight occurrence"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:27:55.394Z",
+        "updated_at": "2026-08-27T14:27:55.394Z",
+        "version": 1
+      },
+      "corpus_txt_leak_verdict_search_completed": {
+        "id": "corpus_txt_leak_verdict_search_completed",
+        "kind": "memory",
+        "title": "corpus.txt leak_verdict search completed",
+        "content": "Task: find the single file in ./corpus.txt (Python repo, files delimited by '=== FILE: <path> ===') that defines function `leak_verdict`. Result: exactly one `def leak_verdict` at corpus offset 171909, in file `rlm/dispatcher.py`. Final answer written to ./answer.txt as 'FINAL: rlm/dispatcher.py'.",
+        "path": "session/tasks",
+        "scope": "global",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "global",
+          "answer": "rlm/dispatcher.py",
+          "offset": 171909
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:29:03.865Z",
+        "updated_at": "2026-08-27T14:29:03.865Z",
+        "version": 1
+      },
+      "corpus_txt_launch_argv_search_completed": {
+        "id": "corpus_txt_launch_argv_search_completed",
+        "kind": "memory",
+        "title": "corpus.txt launch_argv search completed",
+        "content": "Task: find the single file in ./corpus.txt (Python repo, files delimited by '=== FILE: <path> ===') that defines function `launch_argv`. Result: exactly one `def launch_argv` at corpus offset 391363, in file `rlm/serverproc.py`. Final answer written to ./answer.txt as `FINAL: rlm/serverproc.py`.",
+        "path": "session/tasks",
+        "scope": "global",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "global",
+          "status": "completed",
+          "answer": "rlm/serverproc.py"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:30:21.345Z",
+        "updated_at": "2026-08-27T14:30:21.345Z",
+        "version": 1
+      },
+      "corpus_txt_subcalls_used_search_completed": {
+        "id": "corpus_txt_subcalls_used_search_completed",
+        "kind": "memory",
+        "title": "corpus.txt subcalls_used search completed (session/tasks, v1)",
+        "content": "Task: find the single file in ./corpus.txt (Python repo, files delimited by '=== FILE: <path> ===') that defines function `subcalls_used`. Result: exactly one `def subcalls_used` at corpus offset 19010, in file `rlm/budget.py`. Final answer written to ./answer.txt as 'FINAL: rlm/budget.py'.",
+        "path": "session/tasks",
+        "scope": "global",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "global",
+          "corpus": "./corpus.txt",
+          "function": "subcalls_used",
+          "answer": "rlm/budget.py"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:31:42.958Z",
+        "updated_at": "2026-08-27T14:31:42.958Z",
+        "version": 1
+      }
+    },
+    "skill": {},
+    "subagent": {}
+  },
+  "refinements": [
+    {
+      "id": "refine_20260827142726503",
+      "trigger": "Record the completed corpus search task and its answer as local session state.",
+      "changes": [
+        "create memory:corpus_txt_in_flight_search_completed"
+      ],
+      "evidence": "The trajectory shows a successful one-off task: locating `def in_flight` in ./corpus.txt (rlm/dispatcher.py) and writing FINAL: rlm/dispatcher.py to ./answer.txt. This is session-specific completion state that other sessions do not need; a durable cross-session lesson is not justified because the corpus and question are specific to this run. No skill/subagent/prompt policy is warranted from a single completed search.",
+      "outcome": "Future turns in this session can recall that the corpus task is finished with answer rlm/dispatcher.py, avoiding redundant re-computation. Validated by the existing ./answer.txt content and the assistant's FINAL line.",
+      "created_at": "2026-08-27T14:27:55.394Z"
+    },
+    {
+      "id": "refine_20260827142836836",
+      "trigger": "Record the completed leak_verdict corpus search and its answer as local session state.",
+      "changes": [
+        "create memory:corpus_txt_leak_verdict_search_completed"
+      ],
+      "evidence": "The assistant successfully computed that leak_verdict is defined exactly once in rlm/dispatcher.py (offset 171909) and wrote FINAL: rlm/dispatcher.py to ./answer.txt. Persisting this mirrors the existing in_flight memory entry, so future turns can recall the finished result without re-running the regex search.",
+      "outcome": "Future turns in this session can recall that the leak_verdict task is finished with answer rlm/dispatcher.py, avoiding redundant re-computation. Validated by the existing ./answer.txt content and the assistant's FINAL line.",
+      "created_at": "2026-08-27T14:29:03.866Z"
+    },
+    {
+      "id": "refine_20260827142950620",
+      "trigger": "Record the completed launch_argv corpus search and its answer as local session state.",
+      "changes": [
+        "create memory:corpus_txt_launch_argv_search_completed"
+      ],
+      "evidence": "The trajectory shows the assistant computed that exactly one `def launch_argv` exists at corpus offset 391363 in file `rlm/serverproc.py`, wrote `FINAL: rlm/serverproc.py` to ./answer.txt, and replied with that line. This is a completed, verifiable task outcome in the current session that should not require re-computation in a later turn. Following the established local-memory pattern used for in_flight and leak_verdict, a local memory entry preserves the answer and its provenance.",
+      "outcome": "Future turns in this session can recall that the launch_argv task is finished with answer rlm/serverproc.py, avoiding redundant re-computation. Validated by the existing ./answer.txt content and the assistant's FINAL line.",
+      "created_at": "2026-08-27T14:30:21.345Z"
+    },
+    {
+      "id": "refine_20260827143109327",
+      "trigger": "Record the completed subcalls_used corpus search and its answer as local session state.",
+      "changes": [
+        "create memory:corpus_txt_subcalls_used_search_completed"
+      ],
+      "evidence": "The trajectory shows a fourth repeated corpus function-location task was completed: `subcalls_used` defined once at offset 19010 in `rlm/budget.py`, written to ./answer.txt. The prior refinements established a consistent local-memory pattern for each completed corpus search to avoid redundant recomputation in later turns of this session.",
+      "outcome": "Future turns in this session can recall that the subcalls_used task is finished with answer rlm/budget.py, avoiding redundant re-computation. Validated by the existing ./answer.txt content and the assistant's FINAL line.",
+      "created_at": "2026-08-27T14:31:42.958Z"
+    }
+  ]
+}

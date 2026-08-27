@@ -1,0 +1,60 @@
+=== Phase B start 2026-08-27T10:03:29-04:00
+########## [agg] step 0 — archive + clear the GLOBAL harness store
+  global store already absent
+
+########## [agg] step 1-2 — train session, /refine after each task
+  train1 agg-03: exit=0 wall=43.737223586s answer=[FINAL: 514]
+  refine1: Refined continual harness state: 1 edit applied.
+    state sha=156de10dbb5ba96443fd43a64a8b1bba80dfbb68bc6431c7436c7165d491d4ea  entries={'prompt': 0, 'memory': 1, 'skill': 0, 'subagent': 0} refinements= 1
+  train2 agg-04: exit=0 wall=68.428117670s answer=[FINAL: 594]
+  refine2: Refined continual harness state: 1 edit applied.
+    state sha=675de45aa17097293854db9aa0e63dbdbcb59b14289d13ad4736fb4ad8734286  entries={'prompt': 0, 'memory': 2, 'skill': 0, 'subagent': 0} refinements= 2
+  train3 agg-05: exit=0 wall=61.027411204s answer=[FINAL: 600]
+  refine3: Refined continual harness state: 1 edit applied.
+    state sha=4475376f868ce8382457d9a25466211c64c87525d6d25f5682de0139b696709e  entries={'prompt': 0, 'memory': 2, 'skill': 0, 'subagent': 0} refinements= 3
+  train4 agg-06: exit=0 wall=103.395752568s answer=[FINAL: 589]
+  refine4: Refined continual harness state: 2 edits applied.
+    state sha=37b2e9d425bb6d103c90fa0621e9759e95a854fd167b3ca5a2c9d3e7692aabbc  entries={'prompt': 0, 'memory': 2, 'skill': 0, 'subagent': 0} refinements= 4
+
+########## [agg] step 3 — promote the final LOCAL state to GLOBAL by file copy
+  re-scoped 2 entries to global
+  promoted sha=427f73e12429746675f536a9b5719bafc61ac30bfe67e9aad2b08409fe20b8ff
+
+########## [agg] step 4 — held-out + re-test, FRESH sessions, Phase A invocation
+  [heldout agg-07 run1] exit=0 wall=135.739458531s answer=[FINAL: 576]
+  [heldout agg-07 run2] exit=0 wall=368.680005131s answer=[FINAL: 0]
+  [heldout agg-07 run3] exit=0 wall=233.265017075s answer=[FINAL: 576]
+  [heldout agg-03 run1] exit=0 wall=90.277323411s answer=[FINAL: 514]
+  [heldout agg-03 run2] exit=0 wall=56.021935958s answer=[FINAL: 514]
+  [heldout agg-03 run3] exit=0 wall=47.203285471s answer=[FINAL: 514]
+########## [agg] done 2026-08-27T10:26:37-04:00
+########## [codeqa] step 0 — archive + clear the GLOBAL harness store
+  archived; global store now: ls: cannot access '/home/spike/prime-spike/harness': No such file or directory
+
+########## [codeqa] step 1-2 — train session, /refine after each task
+  train1 codeqa-01: exit=0 wall=47.991998066s answer=[FINAL: rlm/dispatcher.py]
+  refine1: Refined continual harness state: 1 edit applied.
+    state sha=a4e31792cd41f6c8c40bec7ea60d6148b947b9f8f28c9dae7337e3ab56f7de01  entries={'prompt': 0, 'memory': 1, 'skill': 0, 'subagent': 0} refinements= 1
+  train2 codeqa-03: exit=0 wall=40.675589897s answer=[FINAL: rlm/dispatcher.py]
+  refine2: Refined continual harness state: 1 edit applied.
+    state sha=16b0766a7da8c69d5fbe81b09b40e8507d24cfad4225381989ee1331a3b15566  entries={'prompt': 0, 'memory': 2, 'skill': 0, 'subagent': 0} refinements= 2
+  train3 codeqa-02: exit=0 wall=45.933316221s answer=[FINAL: rlm/serverproc.py]
+  refine3: Refined continual harness state: 1 edit applied.
+    state sha=40735772d53bbd976efcdbd990cce3c995a1cc87a317ee08f4f3813333b54ccc  entries={'prompt': 0, 'memory': 3, 'skill': 0, 'subagent': 0} refinements= 3
+  train4 codeqa-04: exit=0 wall=47.206803353s answer=[FINAL: rlm/budget.py]
+  refine4: Refined continual harness state: 1 edit applied.
+    state sha=6b05600e61cac9dc1f1c7f5536a5c10b3a4ddf5cee4742024eb2521aea299f36  entries={'prompt': 0, 'memory': 4, 'skill': 0, 'subagent': 0} refinements= 4
+
+########## [codeqa] step 3 — promote the final LOCAL state to GLOBAL by file copy
+  re-scoped 4 entries to global
+  promoted sha=b5fc8738cbcae02b5b81cdfd32e8c358637c0ffd1a7e2946e4fdc38e1bea3d4e
+
+########## [codeqa] step 4 — held-out + re-test, FRESH sessions, Phase A invocation
+  [heldout codeqa-05 run1] exit=0 wall=77.966185250s answer=[rlm/trace.py]
+  [heldout codeqa-05 run2] exit=0 wall=55.065698545s answer=[FINAL: rlm/trace.py]
+  [heldout codeqa-05 run3] exit=0 wall=51.597818327s answer=[FINAL: rlm/trace.py]
+  [heldout codeqa-01 run1] exit=0 wall=46.709333897s answer=[FINAL: rlm/dispatcher.py]
+  [heldout codeqa-01 run2] exit=0 wall=48.387958043s answer=[FINAL: rlm/dispatcher.py]
+  [heldout codeqa-01 run3] exit=0 wall=44.622126781s answer=[FINAL: rlm/dispatcher.py]
+########## [codeqa] done 2026-08-27T10:37:07-04:00
+=== Phase B done 2026-08-27T10:37:07-04:00

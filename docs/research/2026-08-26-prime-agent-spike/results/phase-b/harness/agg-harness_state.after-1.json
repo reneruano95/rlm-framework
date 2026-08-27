@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "entries": {
+    "prompt": {},
+    "memory": {
+      "resolved_sealed_count_in_corpus_txt": {
+        "id": "resolved_sealed_count_in_corpus_txt",
+        "kind": "memory",
+        "title": "Resolved: SEALED count in corpus.txt",
+        "content": "The file ./corpus.txt (474,218 chars) contains exactly 514 records where the Status line is 'SEALED'. Verified via regex: re.findall(r'^Status: SEALED\\s*$', text, flags=re.M). Status values in this corpus are limited to ['OPEN', 'SEALED']. Answer written to ./answer.txt as 'FINAL: 514'.",
+        "path": "session/tasks",
+        "scope": "local",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "local"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:04:39.382Z",
+        "updated_at": "2026-08-27T14:04:39.382Z",
+        "version": 1
+      }
+    },
+    "skill": {},
+    "subagent": {}
+  },
+  "refinements": [
+    {
+      "id": "refine_20260827140413715",
+      "trigger": "Record a local memory note that the SEALED-count task on corpus.txt was resolved to 514.",
+      "changes": [
+        "create memory:resolved_sealed_count_in_corpus_txt"
+      ],
+      "evidence": "The task was completed successfully using the ipython tool with a precise regex (^Status: SEALED\\s*$). Capturing the outcome and the method used is a durable local fact that avoids re-computation if the user asks again in this session and documents the reliable approach for this specific corpus format.",
+      "outcome": "Future requests in this session about SEALED records or similar corpus tasks can reference this verified count and the regex pattern used to derive it, improving consistency and speed.",
+      "created_at": "2026-08-27T14:04:39.382Z"
+    }
+  ]
+}

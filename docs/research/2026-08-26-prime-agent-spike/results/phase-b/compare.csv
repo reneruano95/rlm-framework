@@ -1,0 +1,5 @@
+task,arm,n_runs,pass_count,task_pass,wall_n,tokens_n,median_wall_s,s4_wall_s,dflash2_wall_s,ratio_vs_s4_wall,ratio_vs_dflash2_wall,median_tokens,tokens_source,s4_tokens,dflash2_tokens,ratio_vs_s4_tokens,ratio_vs_dflash2_tokens,median_turns,s4_turns,dflash2_turns,runs_missing_usage,runs_missing_score,arm_mismatch
+agg-03,B-agg,3,3,True,3,3,56.02,50.7,37.1,1.105,1.510,6034,metrics,7306,7601,0.826,0.794,5.0,4,4,0,0,3
+agg-07,B-agg,3,2,True,3,3,233.26,84.8,95.5,2.751,2.443,21169,metrics,14405,21802,1.470,0.971,9.0,6,7,0,0,3
+codeqa-01,B-codeqa,3,3,True,3,3,46.71,69.3,66.7,0.674,0.700,5881,metrics,8856,11405,0.664,0.516,4.0,5,6,0,0,3
+codeqa-05,B-codeqa,3,3,True,3,3,55.07,87.5,98.4,0.629,0.560,5957,metrics,13816,17149,0.431,0.347,4.0,7,7,0,0,3

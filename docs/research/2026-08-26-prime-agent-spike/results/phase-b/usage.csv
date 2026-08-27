@@ -1,0 +1,13 @@
+task,run,arm,pass,wall_s,turns,tool_calls,tokens_in_harness,tokens_out_harness,cache_read_harness,prompt_tokens_metrics,predicted_tokens_metrics,cached_tokens_metrics,max_identical_streak,refine_calls,continuations,errors,stop_reason,subagents,exit_code
+agg-03,1,B-AGG,pass,90.277,11,9,5887,723,54531,5887,723,54531,1,0,0,0,stop,0,0
+agg-03,2,B-AGG,pass,56.022,5,3,5702,332,17547,5702,332,17550,1,0,0,0,stop,0,0
+agg-03,3,B-AGG,pass,47.203,4,2,5652,235,11575,5652,235,11570,1,0,0,0,stop,0,0
+agg-07,1,B-AGG,pass,135.739,8,6,14320,873,36384,14320,873,36384,1,0,0,0,stop,0,0
+agg-07,2,B-AGG,fail,368.68,13,11,26269,3098,243677,26269,3098,243677,1,0,0,0,stop,0,0
+agg-07,3,B-AGG,pass,233.265,9,7,15440,1216,42284,19355,1814,42284,1,3,0,0,stop,0,0
+codeqa-01,1,B-CODEQA,pass,46.709,4,2,5659,224,11616,5659,224,11620,1,0,0,0,stop,0,0
+codeqa-01,2,B-CODEQA,pass,48.388,4,2,5660,221,11604,5660,221,11600,1,0,0,0,stop,0,0
+codeqa-01,3,B-CODEQA,pass,44.622,4,2,5662,204,11582,5662,204,11580,1,0,0,0,stop,0,0
+codeqa-05,1,B-CODEQA,pass,77.966,5,3,5747,605,18194,5747,605,18190,1,0,0,0,stop,0,0
+codeqa-05,2,B-CODEQA,pass,55.066,4,2,5689,257,11717,5689,257,11720,1,0,0,0,stop,0,0
+codeqa-05,3,B-CODEQA,pass,51.598,4,2,5665,292,11673,5665,292,11670,1,0,0,0,stop,0,0

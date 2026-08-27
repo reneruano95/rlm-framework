@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "entries": {
+    "prompt": {},
+    "memory": {
+      "corpus_txt_in_flight_search_completed": {
+        "id": "corpus_txt_in_flight_search_completed",
+        "kind": "memory",
+        "title": "corpus.txt in_flight search completed",
+        "content": "Task: find the single file in ./corpus.txt (Python repo, files delimited by '=== FILE: <path> ===') that defines function `in_flight`. Result: exactly one `def in_flight` at corpus offset 167524, in file `rlm/dispatcher.py`. Final answer written to ./answer.txt as `FINAL: rlm/dispatcher.py`. Method: read file once, regex for FILE headers and `def in_flight\\b`, take last header before the definition offset. Completed successfully.",
+        "path": "session/tasks",
+        "scope": "local",
+        "reference": {},
+        "arguments": {},
+        "metadata": {
+          "scope": "local",
+          "status": "done",
+          "answer": "rlm/dispatcher.py",
+          "evidence": "21 FILE headers, 1 def in_flight occurrence"
+        },
+        "source": "refine",
+        "created_at": "2026-08-27T14:27:55.394Z",
+        "updated_at": "2026-08-27T14:27:55.394Z",
+        "version": 1
+      }
+    },
+    "skill": {},
+    "subagent": {}
+  },
+  "refinements": [
+    {
+      "id": "refine_20260827142726503",
+      "trigger": "Record the completed corpus search task and its answer as local session state.",
+      "changes": [
+        "create memory:corpus_txt_in_flight_search_completed"
+      ],
+      "evidence": "The trajectory shows a successful one-off task: locating `def in_flight` in ./corpus.txt (rlm/dispatcher.py) and writing FINAL: rlm/dispatcher.py to ./answer.txt. This is session-specific completion state that other sessions do not need; a durable cross-session lesson is not justified because the corpus and question are specific to this run. No skill/subagent/prompt policy is warranted from a single completed search.",
+      "outcome": "Future turns in this session can recall that the corpus task is finished with answer rlm/dispatcher.py, avoiding redundant re-computation. Validated by the existing ./answer.txt content and the assistant's FINAL line.",
+      "created_at": "2026-08-27T14:27:55.394Z"
+    }
+  ]
+}
