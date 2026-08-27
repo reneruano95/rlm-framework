@@ -1,0 +1,247 @@
+{
+  "split_id": "s6lite-v0",
+  "created": "2026-08-27",
+  "spec": "docs/superpowers/specs/2026-08-27-s6-lite-v0-artifact-gate.md",
+  "benchmark_version": "v1",
+  "manifest_sha256": "571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "rule": "Drawn WITHIN question shapes. `question_sha256` separates shapes only where several tasks share one: aggregation clusters 4+3 and synthesis 3+3+2, so for those the hash IS the shape; code QA (7) and needle (8) are all singletons because the hash carries the target symbol or organisation, not the shape. gate/make_split.py refuses to write a split that straddles clusters within a category, and separately asserts that all code-QA tasks still share one corpus_sha256 -- which is what the same-shape claim rests on there.",
+  "shape_evidence": {
+    "aggregation": "question_sha256 cluster 67c4d0898a (agg-04..07); the 4+3 split of v1 makes the hash load-bearing, and agg-01/02/03 are excluded for that reason",
+    "code_qa": "one identical corpus (code-bundle.txt) across all 7, one template, differing only in the target symbol name -- the strongest same-distribution evidence in v1",
+    "needle": "one template across all 8, differing only in the target organisation; distinct corpora drawn the same way (~63.5K tokens each). A template claim, not a hash claim"
+  },
+  "decision_budget": {
+    "max_decisions": 5,
+    "reason": "spec D-S6 / C-3 -- repeated evaluation of successive artifact versions against one held-out set is multiple comparisons"
+  },
+  "known_limitations": [
+    "No adversarial task is on the held-out side: needle-01 (adversarial) is in train and agg-01 (the only other) is excluded. Recorded, not an oversight.",
+    "Aggregation contributes 2 train / 2 held-out, the smallest per-category support here."
+  ],
+  "train": [
+    {
+      "task_id": "codeqa-01",
+      "category": "code_qa",
+      "checker": "name_exact",
+      "question_sha256": "4c536778dc6ce76ab814a73a964e95c4120013ba07d35781f0ae89820da9895f",
+      "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
+      "corpus_tokens": 103861,
+      "adversarial": false
+    },
+    {
+      "task_id": "codeqa-02",
+      "category": "code_qa",
+      "checker": "name_exact",
+      "question_sha256": "8436de101b5fecf18079e501b7dbe70aa7c8d0b54233fdb12b17b1dba97ca229",
+      "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
+      "corpus_tokens": 103861,
+      "adversarial": false
+    },
+    {
+      "task_id": "codeqa-03",
+      "category": "code_qa",
+      "checker": "name_exact",
+      "question_sha256": "ace9522ffb4e429a794a67cee4a73e5fd696d347bebd981a3ce230f7c1a1ffa4",
+      "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
+      "corpus_tokens": 103861,
+      "adversarial": false
+    },
+    {
+      "task_id": "codeqa-04",
+      "category": "code_qa",
+      "checker": "name_exact",
+      "question_sha256": "f10765fec3f43311f1a406cd4d4b453e7f9e54525961f1c0452562b528540984",
+      "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
+      "corpus_tokens": 103861,
+      "adversarial": false
+    },
+    {
+      "task_id": "needle-01",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "c4b8fddf4803ae949f11ed46329e181070bfca410e9dc9c7192846d6d3124577",
+      "corpus_sha256": "faa1f0c583485b73d732f93f8e7c01ba3801e88061eb9c7a361509e7113b8ce1",
+      "corpus_tokens": 63510,
+      "adversarial": true
+    },
+    {
+      "task_id": "needle-02",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "6c8a462e184398bebf9b8ca043d9f50bce3198e635590c4077a7cd322158a9dc",
+      "corpus_sha256": "045191f136535f5f79bb0770b9b6dee3ca69635a3c38233872d6c588958ca882",
+      "corpus_tokens": 63497,
+      "adversarial": false
+    },
+    {
+      "task_id": "needle-03",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "5dc70c31f08b7290839d55d060daa799f5fe91497704e72af730d207101d841e",
+      "corpus_sha256": "4052b5d5a8fdfc3f5bfb0bc90103af10b3e90762098db8b71a460fb9ee6eeece",
+      "corpus_tokens": 63479,
+      "adversarial": false
+    },
+    {
+      "task_id": "needle-04",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "6ea45a11259eb01642257511f510b63c80a1c6dab8c6f9026f60157e0e480a5e",
+      "corpus_sha256": "90d080870b41727c8f6a5353f6407212dacc1a9aa078462cef8270c08736eec1",
+      "corpus_tokens": 63484,
+      "adversarial": false
+    },
+    {
+      "task_id": "agg-04",
+      "category": "aggregation",
+      "checker": "int_exact",
+      "question_sha256": "67c4d0898ae1b7dbf321a625a38a0d11872a589c98c51500e28465d7a0e614e9",
+      "corpus_sha256": "cb910390901fb4167e3b2666a927772db9bef19539ab150ad6b42d3102555903",
+      "corpus_tokens": 129130,
+      "adversarial": false
+    },
+    {
+      "task_id": "agg-05",
+      "category": "aggregation",
+      "checker": "int_exact",
+      "question_sha256": "67c4d0898ae1b7dbf321a625a38a0d11872a589c98c51500e28465d7a0e614e9",
+      "corpus_sha256": "730f4268c98d1773873ee092ee1f5430e732755a4f2a6bd02401d282bf7e60d6",
+      "corpus_tokens": 129095,
+      "adversarial": false
+    }
+  ],
+  "held_out": [
+    {
+      "task_id": "codeqa-05",
+      "category": "code_qa",
+      "checker": "name_exact",
+      "question_sha256": "2afbfe4b88f1f861ceb593d98e507526b3ebb623d328b625a70dac819b5767bc",
+      "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
+      "corpus_tokens": 103861,
+      "adversarial": false
+    },
+    {
+      "task_id": "codeqa-06",
+      "category": "code_qa",
+      "checker": "name_exact",
+      "question_sha256": "2fd6444c9d9fcb8f09eb4fc29bef5af7117b3d3fa700ca72ae4d6b9e97e0dd4f",
+      "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
+      "corpus_tokens": 103861,
+      "adversarial": false
+    },
+    {
+      "task_id": "codeqa-07",
+      "category": "code_qa",
+      "checker": "name_exact",
+      "question_sha256": "7517d301b0edd91df9f6facea488d11d122feee078c5d08172afffab83b10675",
+      "corpus_sha256": "74ce1e6c40463f8364e38cf68c80d51ae5b1273b0b73721ec191b842c6177ad7",
+      "corpus_tokens": 103861,
+      "adversarial": false
+    },
+    {
+      "task_id": "needle-05",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "327d50a3e9b63176cb87ee2db44c206b2b23d334408365ea491a1b737ee69870",
+      "corpus_sha256": "6b504fa971b49ac302b6030939cbb5f3e0e4276da722b504abe5934c18264dec",
+      "corpus_tokens": 63508,
+      "adversarial": false
+    },
+    {
+      "task_id": "needle-06",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "707b913c51ff807c7f9471837fdf48cf16e89ebea5da3c04c50aab209cbd72ad",
+      "corpus_sha256": "e2313092252312e0c027b8d1b68a0e5efb91aea2e021347e560743d11146ae84",
+      "corpus_tokens": 63494,
+      "adversarial": false
+    },
+    {
+      "task_id": "needle-07",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "f41033327c8efbc46bf618ebb80871363dd96a285d85f063c00139bfcdacd5ed",
+      "corpus_sha256": "9ab5d9baab05560397403ff7bccd0feca37c3ae763a85b1ca7317aa51cf53ae9",
+      "corpus_tokens": 63483,
+      "adversarial": false
+    },
+    {
+      "task_id": "needle-08",
+      "category": "needle",
+      "checker": "uuid_exact",
+      "question_sha256": "bd154829e5eafc3ba6937e1c35f7fe504203ac91175079adeb1ef607375205bd",
+      "corpus_sha256": "dbd0dbc477160df5ca4f73fc0c8d503d499c035fe8bcda3feba2923e4a869543",
+      "corpus_tokens": 63506,
+      "adversarial": false
+    },
+    {
+      "task_id": "agg-06",
+      "category": "aggregation",
+      "checker": "int_exact",
+      "question_sha256": "67c4d0898ae1b7dbf321a625a38a0d11872a589c98c51500e28465d7a0e614e9",
+      "corpus_sha256": "8ee756533021c87a7621365ca8eda85f2685037bdffb94e10faa9ea204f8fd9e",
+      "corpus_tokens": 129114,
+      "adversarial": false
+    },
+    {
+      "task_id": "agg-07",
+      "category": "aggregation",
+      "checker": "int_exact",
+      "question_sha256": "67c4d0898ae1b7dbf321a625a38a0d11872a589c98c51500e28465d7a0e614e9",
+      "corpus_sha256": "4e03bdcb5b3e5094961c96f0b0041c7e08b7e8a86aea18744f1e2bf933bd1540",
+      "corpus_tokens": 129127,
+      "adversarial": false
+    }
+  ],
+  "excluded": [
+    {
+      "task_id": "agg-01",
+      "reason": "different question shape from agg-04..07 (regex_solvable group); also 1 of only 2 adversarial tasks"
+    },
+    {
+      "task_id": "agg-02",
+      "reason": "different question shape from agg-04..07 (regex_solvable group)"
+    },
+    {
+      "task_id": "agg-03",
+      "reason": "different question shape from agg-04..07 (regex_solvable group)"
+    },
+    {
+      "task_id": "synth-01",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    },
+    {
+      "task_id": "synth-02",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    },
+    {
+      "task_id": "synth-03",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    },
+    {
+      "task_id": "synth-04",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    },
+    {
+      "task_id": "synth-05",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    },
+    {
+      "task_id": "synth-06",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    },
+    {
+      "task_id": "synth-07",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    },
+    {
+      "task_id": "synth-08",
+      "reason": "synthesis held for a later round so v0's held-out is not the whole benchmark"
+    }
+  ]
+}
