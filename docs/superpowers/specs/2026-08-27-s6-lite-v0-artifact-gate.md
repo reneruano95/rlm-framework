@@ -107,6 +107,29 @@ Otherwise the set is **rejected**. Rejection is a result, not a failure: the run
 
 **Wall-clock is recorded but does not gate**, because the box's thermal drift (R9; +9.9% measured across C1b) is of the same order as the effect being sought. Tokens are the gated quantity; wall and energy travel as annotations, per §8's rule that *"any win claim states the cost multiple next to the margin"*.
 
+### 4.2b PROPOSED — a reliability design, because v1 has almost no dynamic range (raised 2026-08-27, NOT ADOPTED)
+
+Measured across decisions pc-01 and pc-02: **seven of the nine held-out tasks pass 3/3 in both arms, every time.** codeqa-04/05/07 and needle-05/06/07/08 have never produced a discordant cell. They contribute no quality signal at all, and on the cost statistic they contribute per-task ratios clustered at 1.0 that pull the median toward "no effect" regardless of what an artifact does elsewhere.
+
+The only dynamic range in v1 is **agg-06 and agg-07**, which fail intermittently in both arms — the `749` and `0` answers, a mis-specified custody predicate — at roughly 15–20% of episodes. That is where an artifact could show an effect, and it is exactly where the design has the least support: 2 tasks × 3 reps.
+
+**The design error is using one shape of experiment for two different questions.** A *cost* gate wants breadth: many tasks, few reps, median over tasks. A *reliability* gate wants depth: the tasks that actually fail, many reps, a failure-rate comparison. §4.1's blocked A/B is right for both; the sampling is not.
+
+**Proposed.** For a reliability question, run a declared subset of the held-out side at high rep count — e.g. agg-06 and agg-07 at 10 reps per arm, 40 episodes, comparable in cost to a 9-task decision — and score it on discordant-episode counts (an exact McNemar test over ON/OFF pairs, matching §8's own inference layer) rather than on the ≥2/3 task rule, which cannot resolve a change from 20% to 5%.
+
+`gate/run_decision.sh` now permits a held-out **subset** only when the caller sets `RLMH_SUBSET_REASON`, and records that reason with the decision. A subset with no declared design is still refused, as is any list that is not a subset. The 9-task split remains the set for cost decisions and is unchanged.
+
+**Status: proposed, not adopted as a replacement for §4.2.** It changes what a decision measures. Under the owner's 2026-08-27 instruction to keep going and act on design ideas, it is run as a **declared, separately-scored sub-experiment** alongside §4.2 rather than instead of it; adopting it as the gate's rule remains the owner's call.
+
+**The reliability reading, fixed here before decision pc-03 runs and not restated after:**
+
+- **Unit is the episode, not the task.** 2 tasks × 10 reps × 2 arms = 40 episodes, blocked as `(task, rep)` with ON and OFF adjacent, arm order alternating by rep, exactly as §4.1.
+- **Statistic: discordant `(task, rep)` pairs.** For each block, the ON/OFF outcome pair. `b` = pairs where OFF passed and ON failed; `c` = pairs where ON passed and OFF failed. Exact one-sided binomial test on `b + c` (McNemar), matching §8's own inference layer (`ARCHITECTURE.md:378`).
+- **ACCEPT-reliability iff `c > b` and the exact one-sided p ≤ 0.05.** Cost is recorded beside it and does **not** gate this reading.
+- **A tie or `b > c` is a REJECT**, and so is `c > b` at p > 0.05 — a direction without evidence is not a result.
+
+**Stated power limitation, before the run rather than after.** At the ~15–20% per-episode failure rate measured on agg-06/agg-07, 20 pairs yields roughly 3–4 discordant pairs under a real effect. Reaching p ≤ 0.05 needs something like 5–0 or 6–1. **This design can confirm a large effect and cannot rule out a moderate one**; a REJECT here means "not demonstrated at this n", never "no effect". Raising n is the only fix and costs ~150 s per episode on these two tasks.
+
 ### 4.2a PROPOSED AMENDMENT — a quality-improvement path (raised 2026-08-27, NOT ADOPTED)
 
 **Recorded before the positive control's verdict was known, and deliberately so.** Within the first ON/OFF pair of decision `pc-01` the artifact behaved exactly as designed — it reached the model (`in_window=1,0`), the answer was right, and the episode cost 116.0 s against the OFF arm's 58.6 s, because the artifact *asks for more work*: two independently written methods, reconciled.

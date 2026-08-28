@@ -1,0 +1,250 @@
+{
+  "decision_id": "pc-01",
+  "verdict": "REJECT",
+  "candidate_sha256": "bd3c1958a3718576db9628a9f5f5498f3073095bbda8c471d83aa2894f153856",
+  "split_sha256": "78cc7985afd307ad9bd7f6cb4665516d664c57686fc4082b19e41f224d6680e5",
+  "episodes": 54,
+  "note": "positive control, plan step 4.3",
+  "screens": [
+    {
+      "candidate_id": "rlmh-prompt-crosscheck",
+      "passed": true,
+      "failed": [],
+      "results": [
+        {
+          "name": "S-kind",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "S-I1",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "S-answer",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "S-corpus",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    }
+  ],
+  "Q": {
+    "passed": true,
+    "lost_tasks": [],
+    "rule": "no held-out task that passes OFF may fail ON (>=2/3 reps)"
+  },
+  "K": {
+    "passed": false,
+    "median_ratio": 1.0150646798755527,
+    "ci95": [
+      0.9322638146167558,
+      1.0596880623875224
+    ],
+    "thresholds": {
+      "median_max": 0.9,
+      "ci_upper_max": 1.0
+    },
+    "n_tasks": 9,
+    "rule": "median per-task ON/OFF token ratio, task-level paired bootstrap"
+  },
+  "voids": [
+    "off/codeqa-05/rep1"
+  ],
+  "in_window_entries": {
+    "on": [
+      1
+    ],
+    "off": [
+      0,
+      1
+    ]
+  },
+  "grid": [
+    {
+      "task": "agg-06",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        false
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 8457,
+      "off_tokens": 14175,
+      "token_ratio": 0.5966137566137566,
+      "on_wall": 154.8,
+      "off_wall": 132.4
+    },
+    {
+      "task": "agg-07",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        false,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 6908,
+      "off_tokens": 6964,
+      "token_ratio": 0.9919586444572085,
+      "on_wall": 110.0,
+      "off_wall": 99.3
+    },
+    {
+      "task": "codeqa-04",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 5559,
+      "off_tokens": 5446,
+      "token_ratio": 1.020749173705472,
+      "on_wall": 58.2,
+      "off_wall": 58.6
+    },
+    {
+      "task": "codeqa-05",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 5705,
+      "off_tokens": 5269,
+      "token_ratio": 1.082748149553995,
+      "on_wall": 74.2,
+      "off_wall": 47.4
+    },
+    {
+      "task": "codeqa-07",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 5610,
+      "off_tokens": 5417,
+      "token_ratio": 1.035628576702972,
+      "on_wall": 64.9,
+      "off_wall": 57.2
+    },
+    {
+      "task": "needle-05",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 7066,
+      "off_tokens": 6668,
+      "token_ratio": 1.0596880623875224,
+      "on_wall": 68.2,
+      "off_wall": 58.9
+    },
+    {
+      "task": "needle-06",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 6363,
+      "off_tokens": 6596,
+      "token_ratio": 0.9646755609460279,
+      "on_wall": 56.8,
+      "off_wall": 58.8
+    },
+    {
+      "task": "needle-07",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 6199,
+      "off_tokens": 6107,
+      "token_ratio": 1.0150646798755527,
+      "on_wall": 65.6,
+      "off_wall": 53.6
+    },
+    {
+      "task": "needle-08",
+      "on_pass": true,
+      "off_pass": true,
+      "on_reps": [
+        true,
+        true,
+        true
+      ],
+      "off_reps": [
+        true,
+        true,
+        true
+      ],
+      "on_tokens": 6276,
+      "off_tokens": 6732,
+      "token_ratio": 0.9322638146167558,
+      "on_wall": 64.1,
+      "off_wall": 61.5
+    }
+  ]
+}

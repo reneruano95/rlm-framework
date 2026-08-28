@@ -58,6 +58,33 @@ printf '%s\n' "$RC" > "$W/exit.txt"
 echo "$(date +%s.%N) - $S" | bc > "$W/wall.txt"
 curl -s http://127.0.0.1:8080/metrics > "$W/metrics.post"
 
+# --- let the daemon finish before the next episode installs its harness ---------
+# `prime-agent -p` returns when the printed answer is done, NOT when the session is
+# finished: the daemon keeps the session resident (idleEvictionMinutes is off) and
+# goes on writing session files and harness state. Measured 2026-08-27 in decision
+# pc-01: off/codeqa-05/rep1 began with the empty harness and ended holding the ON
+# arm's, because the NEXT episode installed while this one was still closing. That
+# is a VOID by the rule, and it is the runner's fault, not the model's.
+#
+# So wait for the daemon to report no active session before returning. Bounded: a
+# daemon that never settles must not hang the decision, so give up after ~30 s and
+# record that the wait timed out rather than pretending it succeeded.
+#
+# Match the IDLE string, not a busy one. The first version grepped for
+# `running|executing|active` and every wait timed out, because prime-agent's idle
+# output is the sentence "No active agents." -- which contains "active". A poll whose
+# predicate is always true is a fixed sleep wearing a costume; this one cost 42 s an
+# episode, 38 minutes across a decision, while proving nothing.
+SETTLE_START=$(date +%s)
+SETTLED=timeout
+for _ in $(seq 1 60); do
+  if prime-agent list 2>/dev/null | grep -qF 'No active agents'; then
+    SETTLED=ok; break
+  fi
+  sleep 0.5
+done
+echo "$SETTLED $(( $(date +%s) - SETTLE_START ))s" > "$W/daemon_settle.txt"
+
 # --- the void check: did the episode run under the harness the arm intended? ---
 HSHA_AFTER=$(sha256sum "$STORE" | cut -d' ' -f1)
 if [ "$HSHA" != "$HSHA_AFTER" ]; then

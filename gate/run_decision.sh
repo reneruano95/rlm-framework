@@ -33,10 +33,25 @@ print(' '.join(r['task_id'] for r in d['held_out']))
   GOT=$(tr '
 ' ' ' < "$LIST" | sed 's/ *$//')
   if [ "$EXPECT" != "$GOT" ]; then
-    echo "REFUSING: task list does not match the split's held_out side." >&2
-    echo "  split: $EXPECT" >&2
-    echo "  list : $GOT" >&2
-    exit 2
+    # A SUBSET is allowed only when the caller names the design in
+    # RLMH_SUBSET_REASON, and the reason is recorded with the decision. A focused
+    # sub-experiment is legitimate -- 7 of the 9 held-out tasks pass 3/3 in both arms
+    # every time, so on a reliability question they contribute noise and no signal --
+    # but it must be a declared design, never a quiet swap. Anything that is not a
+    # subset, or a subset with no stated reason, is still refused.
+    SUBSET_OK=1
+    for T in $GOT; do
+      case " $EXPECT " in *" $T "*) ;; *) SUBSET_OK=0 ;; esac
+    done
+    if [ "$SUBSET_OK" = "1" ] && [ -n "${RLMH_SUBSET_REASON:-}" ]; then
+      echo "SUBSET of the held-out side, declared: $RLMH_SUBSET_REASON" | tee -a "$ROOT/subset.txt"
+    else
+      echo "REFUSING: task list does not match the split's held_out side." >&2
+      echo "  split: $EXPECT" >&2
+      echo "  list : $GOT" >&2
+      [ "$SUBSET_OK" = "1" ] && echo "  (it IS a subset -- set RLMH_SUBSET_REASON to declare the design)" >&2
+      exit 2
+    fi
   fi
 fi
 

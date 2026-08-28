@@ -117,6 +117,37 @@ const clean = PROMPT.split("\n").filter((l) => !l.includes("bad-") && !l.include
 const again = await handlers.before_agent_start({ systemPrompt: clean });
 check("a clean prompt is returned unmodified", again?.systemPrompt === undefined || again.systemPrompt === clean);
 
+// ---- the directive delivery block --------------------------------------------
+// Decision pc-01 proved that leaving an accepted artifact inside prime-agent's own
+// harness block delivers it and changes nothing: in_window=1 on all 27 ON episodes,
+// median ON/OFF token ratio 1.015 with a CI straddling 1.0. The harness tells the
+// model those entries are "routing/context hints" and truncates them to 180 chars.
+// So the gate re-emits accepted `prompt` artifacts IN FULL under a directive heading.
+function setAccepted(rules) {
+	fs.writeFileSync(accepted, JSON.stringify({
+		schema: 1,
+		entries: { prompt: rules, memory: {}, skill: {}, subagent: {} },
+		refinements: [],
+	}));
+}
+
+const LONG = "RULE-ALPHA: always reconcile a count against the population it came from, and "
+	+ "compute it a second, independently written way before answering. " + "x".repeat(400);
+setAccepted({ "ok-entry": { id: "ok-entry", kind: "prompt", title: "T", content: LONG } });
+const delivered = await handlers.before_agent_start({ systemPrompt: PROMPT });
+const dtext = delivered?.systemPrompt ?? PROMPT;
+check("emits the gate's directive heading", dtext.includes("# Operating rules (scaffold-enforced"));
+check("emits the rule IN FULL, past prime-agent's 180-char cap", dtext.includes(LONG),
+	`rule is ${LONG.length} chars`);
+check("directive block follows the harness block",
+	dtext.indexOf("# Operating rules") > dtext.indexOf("# Continual Harness State"));
+
+setAccepted({});
+const none = await handlers.before_agent_start({ systemPrompt: PROMPT });
+check("an empty accepted set emits NO directive block",
+	!((none?.systemPrompt ?? "").includes("# Operating rules")),
+	"OFF-arm fidelity: no artifacts means no added text");
+
 const events = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
 check("ledger recorded the block", events.some((e) => e.event === "identical_turn_blocked"));
 check("ledger recorded the strip", events.some((e) => e.event === "stripped_entries"));

@@ -82,6 +82,28 @@ const ENTRY_LINE = /^- \[[^:\]]*:([^\]]+)\]/;
  * arm differ from stock prime-agent, which the A/B design requires it not to.
  */
 const COUNT_LINE = /^(prompt|memory|skill|subagent): (\d+)/;
+/**
+ * The heading the gate writes its own accepted artifacts under.
+ *
+ * WHY THIS EXISTS, measured. Decision pc-01 delivered a hand-authored `prompt`
+ * artifact to the model in all 27 ON episodes (`in_window=1` on every one) and it
+ * changed nothing: median ON/OFF token ratio 1.015, 95% CI [0.932, 1.060] -- a
+ * result indistinguishable from no artifact at all. The artifact was not ignored by
+ * accident. prime-agent renders harness entries under a preamble that tells the
+ * model they are "compact summaries, not full descriptions. Use them as
+ * routing/context hints", and truncates each one's content to 180 characters
+ * (refinement.ts:28, :445-463). The same instruction, delivered as the task's own
+ * goal in the spike's Phase C, produced two independent counters cross-checked
+ * across seven files on the first try.
+ *
+ * So the gate delivers what it accepts, rather than leaving it in a block the
+ * harness has told the model to treat as a hint: accepted `prompt` artifacts are
+ * re-emitted IN FULL under a directive heading. This is the scaffold owning prompt
+ * assembly, which is what rlm-halo's own root prompt does with its strategy blocks.
+ * It is not a new writable surface: only artifacts the gate has ACCEPTED are
+ * emitted, and the model still cannot write one.
+ */
+const GATE_BLOCK_HEADING = "# Operating rules (scaffold-enforced, non-negotiable)";
 const OVERFLOW_LINE = /^- \+\d+ more (prompt|memory|skill|subagent) entries/;
 
 function sha8(text: string): string {
@@ -106,21 +128,41 @@ function log(event: string, detail: Json): void {
 	}
 }
 
-/** Ids the gate has accepted. An unreadable or absent file means: none. */
-function acceptedIds(): { ids: Set<string>; source: string } {
-	if (!ACCEPTED_PATH) return { ids: new Set(), source: "unset" };
+interface AcceptedEntry { id: string; kind: string; title?: string; content?: string }
+
+/** What the gate has accepted. An unreadable or absent file means: nothing. */
+function accepted(): { ids: Set<string>; entries: AcceptedEntry[]; source: string } {
+	if (!ACCEPTED_PATH) return { ids: new Set(), entries: [], source: "unset" };
 	try {
 		const raw = fs.readFileSync(ACCEPTED_PATH, "utf8");
-		const state = JSON.parse(raw) as { entries?: Record<string, Record<string, unknown>> };
+		const state = JSON.parse(raw) as { entries?: Record<string, Record<string, AcceptedEntry>> };
 		const ids = new Set<string>();
-		for (const byKind of Object.values(state.entries ?? {})) {
-			for (const id of Object.keys(byKind ?? {})) ids.add(id);
+		const entries: AcceptedEntry[] = [];
+		for (const [kind, byKind] of Object.entries(state.entries ?? {})) {
+			for (const [id, entry] of Object.entries(byKind ?? {})) {
+				ids.add(id);
+				entries.push({ ...entry, id, kind });
+			}
 		}
-		return { ids, source: ACCEPTED_PATH };
+		return { ids, entries, source: ACCEPTED_PATH };
 	} catch (err) {
 		log("accepted_unreadable", { path: ACCEPTED_PATH, error: String(err) });
-		return { ids: new Set(), source: "unreadable" };
+		return { ids: new Set(), entries: [], source: "unreadable" };
 	}
+}
+
+/** Accepted `prompt` artifacts, rendered in full under a directive heading. */
+function gateBlock(entries: AcceptedEntry[]): string {
+	const rules = entries.filter((e) => e.kind === "prompt" && (e.content ?? "").trim());
+	if (!rules.length) return "";
+	const body = rules
+		.map((e, i) => `${i + 1}. ${(e.content ?? "").trim()}`)
+		.join("\n\n");
+	const preamble =
+		"These rules were accepted by the scaffold's gate on held-out evidence. They are " +
+		"not hints and not summaries: follow them on every task, including when the harness " +
+		"state block above lists them more briefly.";
+	return `\n\n${GATE_BLOCK_HEADING}\n${preamble}\n\n${body}`;
 }
 
 /**
@@ -206,13 +248,19 @@ export default function rlmhGate(pi: any): void {
 	// ---- FILTER -----------------------------------------------------------
 	pi.on("before_agent_start", (event: any) => {
 		const prompt: string = event?.systemPrompt ?? "";
-		const { ids, source } = acceptedIds();
+		const { ids, entries, source } = accepted();
 		const { out, kept, stripped } = filterHarnessBlock(prompt, ids);
+		const block = gateBlock(entries);
+		const final = out + block;
 		if (stripped.length > 0) {
 			log("stripped_entries", { stripped, kept, accepted: ids.size, source });
 		}
-		log("prompt_filtered", { kept, stripped: stripped.length, accepted: ids.size, chars: out.length });
-		return out === prompt ? {} : { systemPrompt: out };
+		log("prompt_filtered", {
+			kept, stripped: stripped.length, accepted: ids.size,
+			chars: final.length, gate_block_chars: block.length,
+			gate_rules: entries.filter((e) => e.kind === "prompt" && (e.content ?? "").trim()).length,
+		});
+		return final === prompt ? {} : { systemPrompt: final };
 	});
 	registered.push("before_agent_start");
 

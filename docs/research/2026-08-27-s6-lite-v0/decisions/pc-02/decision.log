@@ -1,0 +1,60 @@
+=== decision pc-02 start 2026-08-27T22:14:17-04:00
+    candidate: /home/spike/gate/artifacts/positive-control.json  sha=bd3c1958a3718576
+    tasks:     codeqa-04 codeqa-05 codeqa-07 needle-05 needle-06 needle-07 needle-08 agg-06 agg-07 
+    reps:      3
+[codeqa-04 off rep1] exit=0 wall=41.795254183s answer=[FINAL: rlm/budget.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-04 on rep1] exit=0 wall=79.960906694s answer=[FINAL: rlm/budget.py] harness=bd3c1958a371 in_window=1,0 
+[codeqa-05 off rep1] exit=0 wall=46.414936832s answer=[FINAL: rlm/trace.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-05 on rep1] exit=0 wall=70.432937147s answer=[FINAL: rlm/trace.py] harness=bd3c1958a371 in_window=1,0 
+[codeqa-07 off rep1] exit=0 wall=47.718636169s answer=[FINAL: rlm/budget.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-07 on rep1] exit=0 wall=62.628437864s answer=[FINAL: rlm/budget.py] harness=bd3c1958a371 in_window=1,0 
+[needle-05 off rep1] exit=0 wall=52.298459282s answer=[FINAL: 09ab1cec-9600-a244-35dc-82c63476ef40] harness=87691f4ea51d in_window=0,0 
+[needle-05 on rep1] exit=0 wall=112.402726614s answer=[FINAL: 09ab1cec-9600-a244-35dc-82c63476ef40] harness=bd3c1958a371 in_window=1,0 
+[needle-06 off rep1] exit=0 wall=55.290404296s answer=[FINAL: fa6358e8-c3f5-f3a6-4c72-d77bc05a0df0] harness=87691f4ea51d in_window=0,0 
+[needle-06 on rep1] exit=0 wall=80.928383633s answer=[FINAL: fa6358e8-c3f5-f3a6-4c72-d77bc05a0df0] harness=bd3c1958a371 in_window=1,0 
+[needle-07 off rep1] exit=0 wall=70.375455584s answer=[FINAL: 9ce5efc2-0616-da2d-beb7-c374918b8b57] harness=87691f4ea51d in_window=0,0 
+[needle-07 on rep1] exit=0 wall=61.729753329s answer=[FINAL: 9ce5efc2-0616-da2d-beb7-c374918b8b57] harness=bd3c1958a371 in_window=1,0 
+[needle-08 off rep1] exit=0 wall=56.144596772s answer=[FINAL: 3756c418-b12e-e05e-8154-a62650b4b885] harness=87691f4ea51d in_window=0,0 
+[needle-08 on rep1] exit=0 wall=68.061224044s answer=[FINAL: 3756c418-b12e-e05e-8154-a62650b4b885] harness=bd3c1958a371 in_window=1,0 
+[agg-06 off rep1] exit=0 wall=85.330128166s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep1] exit=0 wall=146.217490921s answer=[FINAL: 589] harness=bd3c1958a371 in_window=1,0 
+[agg-07 off rep1] exit=0 wall=77.078267351s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep1] exit=0 wall=257.645159209s answer=[FINAL: 0] harness=bd3c1958a371 in_window=1,0 
+[codeqa-04 on rep2] exit=0 wall=89.909675497s answer=[FINAL: rlm/budget.py] harness=bd3c1958a371 in_window=1,0 
+[codeqa-04 off rep2] exit=0 wall=48.116933012s answer=[FINAL: rlm/budget.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-05 on rep2] exit=0 wall=70.241194733s answer=[FINAL: rlm/trace.py] harness=bd3c1958a371 in_window=1,0 
+[codeqa-05 off rep2] exit=0 wall=43.945204635s answer=[FINAL: rlm/trace.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-07 on rep2] exit=0 wall=64.630800274s answer=[FINAL: rlm/budget.py] harness=bd3c1958a371 in_window=1,0 
+[codeqa-07 off rep2] exit=0 wall=61.005853671s answer=[FINAL: rlm/budget.py] harness=87691f4ea51d in_window=0,0 
+[needle-05 on rep2] exit=0 wall=90.426633700s answer=[FINAL: 09ab1cec-9600-a244-35dc-82c63476ef40] harness=bd3c1958a371 in_window=1,0 
+[needle-05 off rep2] exit=0 wall=150.941098777s answer=[FINAL: 09ab1cec-9600-a244-35dc-82c63476ef40] harness=87691f4ea51d in_window=0,0 
+[needle-06 on rep2] exit=0 wall=83.577866566s answer=[FINAL: fa6358e8-c3f5-f3a6-4c72-d77bc05a0df0] harness=bd3c1958a371 in_window=1,0 
+[needle-06 off rep2] exit=0 wall=48.436004086s answer=[FINAL: fa6358e8-c3f5-f3a6-4c72-d77bc05a0df0] harness=87691f4ea51d in_window=0,0 
+[needle-07 on rep2] exit=0 wall=55.942001381s answer=[FINAL: 9ce5efc2-0616-da2d-beb7-c374918b8b57] harness=bd3c1958a371 in_window=1,0 
+[needle-07 off rep2] exit=0 wall=57.365412142s answer=[FINAL: 9ce5efc2-0616-da2d-beb7-c374918b8b57] harness=87691f4ea51d in_window=0,0 
+[needle-08 on rep2] exit=0 wall=78.963004387s answer=[FINAL: 3756c418-b12e-e05e-8154-a62650b4b885] harness=bd3c1958a371 in_window=1,0 
+[needle-08 off rep2] exit=0 wall=60.103210441s answer=[FINAL: 3756c418-b12e-e05e-8154-a62650b4b885] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep2] exit=0 wall=248.190662485s answer=[FINAL: 589] harness=bd3c1958a371 in_window=1,0 
+[agg-06 off rep2] exit=0 wall=214.130619018s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep2] exit=0 wall=182.536264774s answer=[FINAL: 576] harness=bd3c1958a371 in_window=1,0 
+[agg-07 off rep2] exit=0 wall=90.544091381s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[codeqa-04 off rep3] exit=0 wall=58.202286287s answer=[FINAL: rlm/budget.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-04 on rep3] exit=0 wall=61.943474294s answer=[FINAL: rlm/budget.py] harness=bd3c1958a371 in_window=1,0 
+[codeqa-05 off rep3] exit=0 wall=49.674229547s answer=[FINAL: rlm/trace.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-05 on rep3] exit=0 wall=70.577824027s answer=[FINAL: rlm/trace.py] harness=bd3c1958a371 in_window=1,0 
+[codeqa-07 off rep3] exit=0 wall=45.506511164s answer=[FINAL: rlm/budget.py] harness=87691f4ea51d in_window=0,0 
+[codeqa-07 on rep3] exit=0 wall=66.241607635s answer=[FINAL: rlm/budget.py] harness=bd3c1958a371 in_window=1,0 
+[needle-05 off rep3] exit=0 wall=59.104121741s answer=[FINAL: 09ab1cec-9600-a244-35dc-82c63476ef40] harness=87691f4ea51d in_window=0,0 
+[needle-05 on rep3] exit=0 wall=77.015997419s answer=[FINAL: 09ab1cec-9600-a244-35dc-82c63476ef40] harness=bd3c1958a371 in_window=1,0 
+[needle-06 off rep3] exit=0 wall=52.748864363s answer=[FINAL: fa6358e8-c3f5-f3a6-4c72-d77bc05a0df0] harness=87691f4ea51d in_window=0,0 
+[needle-06 on rep3] exit=0 wall=114.577088913s answer=[FINAL: fa6358e8-c3f5-f3a6-4c72-d77bc05a0df0] harness=bd3c1958a371 in_window=1,0 
+[needle-07 off rep3] exit=0 wall=80.748988765s answer=[FINAL: 9ce5efc2-0616-da2d-beb7-c374918b8b57] harness=87691f4ea51d in_window=0,0 
+[needle-07 on rep3] exit=0 wall=93.354148276s answer=[FINAL: 9ce5efc2-0616-da2d-beb7-c374918b8b57] harness=bd3c1958a371 in_window=1,0 
+[needle-08 off rep3] exit=0 wall=52.620603565s answer=[FINAL: 3756c418-b12e-e05e-8154-a62650b4b885] harness=87691f4ea51d in_window=0,0 
+[needle-08 on rep3] exit=0 wall=131.742726051s answer=[FINAL: 3756c418-b12e-e05e-8154-a62650b4b885] harness=bd3c1958a371 in_window=1,0 
+[agg-06 off rep3] exit=0 wall=195.743826183s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep3] exit=0 wall=288.855665888s answer=[FINAL: 589] harness=bd3c1958a371 in_window=1,0 
+[agg-07 off rep3] exit=0 wall=62.773759949s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep3] exit=0 wall=508.890665517s answer=[FINAL: 576] harness=bd3c1958a371 in_window=1,0 
+=== decision pc-02 done 2026-08-27T23:42:40-04:00
+    episodes: 54   void: 0

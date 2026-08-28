@@ -134,7 +134,10 @@ def collect(root: pathlib.Path, repo: pathlib.Path) -> list[Cell]:
 
     cells: list[Cell] = []
     for arm_dir in sorted(p for p in root.iterdir() if p.is_dir() and p.name in ("on", "off")):
-        for task_dir in sorted(p for p in arm_dir.iterdir() if p.is_dir() and p.name != "sessions"):
+        # Only directories that are actually tasks. prime-agent drops `sessions/` and
+        # `session-artifacts/` beside them, and a stray dir must not be read as a task.
+        for task_dir in sorted(p for p in arm_dir.iterdir()
+                               if p.is_dir() and (repo / "bench" / "tasks" / f"{p.name}.json").exists()):
             task = task_dir.name
             spec = json.loads((repo / "bench" / "tasks" / f"{task}.json").read_text(encoding="utf-8"))
             for rep_dir in sorted(p for p in task_dir.iterdir() if p.is_dir()):
