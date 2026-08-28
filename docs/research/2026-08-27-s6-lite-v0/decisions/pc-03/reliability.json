@@ -1,0 +1,179 @@
+{
+  "decision_id": "pc-03",
+  "reading": "reliability",
+  "spec": "\u00a74.2b",
+  "verdict": "REJECT",
+  "pairs": 20,
+  "b": 2,
+  "c": 1,
+  "p_one_sided": 0.875,
+  "alpha": 0.05,
+  "failures": {
+    "off": 1,
+    "on": 2
+  },
+  "voids": [],
+  "note": "artifact v2, derived from pc-02's agg-07 trace; declared held-out subset per spec 4.2b; resumed after the server died at 22/40",
+  "blocks": [
+    {
+      "task": "agg-06",
+      "rep": 1,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 2,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 3,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 4,
+      "off_pass": true,
+      "on_pass": false,
+      "off_answer": "589",
+      "on_answer": "1"
+    },
+    {
+      "task": "agg-06",
+      "rep": 5,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 6,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 7,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 8,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 9,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-06",
+      "rep": 10,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "589",
+      "on_answer": "589"
+    },
+    {
+      "task": "agg-07",
+      "rep": 1,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 2,
+      "off_pass": true,
+      "on_pass": false,
+      "off_answer": "576",
+      "on_answer": "0"
+    },
+    {
+      "task": "agg-07",
+      "rep": 3,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 4,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 5,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 6,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 7,
+      "off_pass": false,
+      "on_pass": true,
+      "off_answer": "577",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 8,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 9,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    },
+    {
+      "task": "agg-07",
+      "rep": 10,
+      "off_pass": true,
+      "on_pass": true,
+      "off_answer": "576",
+      "on_answer": "576"
+    }
+  ]
+}

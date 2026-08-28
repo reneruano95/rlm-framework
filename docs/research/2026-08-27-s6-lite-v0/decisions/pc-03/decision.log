@@ -1,0 +1,72 @@
+=== decision pc-03 start 2026-08-27T23:43:12-04:00
+    candidate: /home/spike/gate/artifacts/control-v2.json  sha=1afadf528374329d
+    tasks:     agg-06 agg-07 
+    reps:      10
+[agg-06 off rep1] exit=0 wall=96.374234005s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep1] exit=0 wall=131.947314423s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep1] exit=0 wall=64.571485002s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep1] exit=0 wall=333.635200924s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-06 on rep2] exit=0 wall=121.682300679s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-06 off rep2] exit=0 wall=79.638917627s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep2] exit=0 wall=180.971492184s answer=[FINAL: 0] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep2] exit=0 wall=164.659596021s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-06 off rep3] exit=0 wall=70.867429049s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep3] exit=0 wall=137.165962149s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep3] exit=0 wall=151.814076730s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep3] exit=0 wall=109.329114684s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-06 on rep4] exit=0 wall=274.259421640s answer=[FINAL: 1] harness=1afadf528374 in_window=1,0 
+[agg-06 off rep4] exit=0 wall=147.817651727s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep4] exit=0 wall=156.908917530s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep4] exit=0 wall=84.245607842s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-06 off rep5] exit=0 wall=95.015423250s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep5] exit=0 wall=140.421691933s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep5] exit=0 wall=229.752738087s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep5] exit=0 wall=118.497652632s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-06 on rep6] exit=0 wall=100.115966018s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-06 off rep6] exit=0 wall=110.029845642s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+=== decision pc-03 start 2026-08-28T06:12:10-04:00
+    candidate: /home/spike/gate/artifacts/control-v2.json  sha=1afadf528374329d
+    tasks:     agg-06 agg-07 
+    reps:      10
+[agg-06 off rep1] SKIP (done: FINAL: 589)
+[agg-06 on rep1] SKIP (done: FINAL: 589)
+[agg-07 off rep1] SKIP (done: FINAL: 576)
+[agg-07 on rep1] SKIP (done: FINAL: 576)
+[agg-06 on rep2] SKIP (done: FINAL: 589)
+[agg-06 off rep2] SKIP (done: FINAL: 589)
+[agg-07 on rep2] SKIP (done: FINAL: 0)
+[agg-07 off rep2] SKIP (done: FINAL: 576)
+[agg-06 off rep3] SKIP (done: FINAL: 589)
+[agg-06 on rep3] SKIP (done: FINAL: 589)
+[agg-07 off rep3] SKIP (done: FINAL: 576)
+[agg-07 on rep3] SKIP (done: FINAL: 576)
+[agg-06 on rep4] SKIP (done: FINAL: 1)
+[agg-06 off rep4] SKIP (done: FINAL: 589)
+[agg-07 on rep4] SKIP (done: FINAL: 576)
+[agg-07 off rep4] SKIP (done: FINAL: 576)
+[agg-06 off rep5] SKIP (done: FINAL: 589)
+[agg-06 on rep5] SKIP (done: FINAL: 589)
+[agg-07 off rep5] SKIP (done: FINAL: 576)
+[agg-07 on rep5] SKIP (done: FINAL: 576)
+[agg-06 on rep6] SKIP (done: FINAL: 589)
+[agg-06 off rep6] SKIP (done: FINAL: 589)
+[agg-07 on rep6] exit=0 wall=442.874696585s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep6] exit=0 wall=81.886653072s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-06 off rep7] exit=0 wall=67.727304017s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep7] exit=0 wall=182.518986632s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep7] exit=0 wall=124.051860017s answer=[FINAL: 577] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep7] exit=0 wall=241.763442491s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-06 on rep8] exit=0 wall=110.418479560s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-06 off rep8] exit=0 wall=69.215827058s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep8] exit=0 wall=131.200668620s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep8] exit=0 wall=125.000637051s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-06 off rep9] exit=0 wall=69.849692859s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-06 on rep9] exit=0 wall=129.182886819s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep9] exit=0 wall=123.416753495s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep9] exit=0 wall=147.736861296s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-06 on rep10] exit=0 wall=109.836196508s answer=[FINAL: 589] harness=1afadf528374 in_window=1,0 
+[agg-06 off rep10] exit=0 wall=105.075535161s answer=[FINAL: 589] harness=87691f4ea51d in_window=0,0 
+[agg-07 on rep10] exit=0 wall=123.550758606s answer=[FINAL: 576] harness=1afadf528374 in_window=1,0 
+[agg-07 off rep10] exit=0 wall=196.949634866s answer=[FINAL: 576] harness=87691f4ea51d in_window=0,0 
+=== decision pc-03 done 2026-08-28T06:55:17-04:00
+    episodes: 40   void: 0

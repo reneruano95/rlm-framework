@@ -15,7 +15,18 @@ DEC="$1"; ACCEPTED="$2"
 LIST="${3:-$HOME/gate/heldout.txt}"
 REPS="${4:-3}"
 ROOT="$HOME/runs/gate/$DEC"
-rm -rf "$ROOT"; mkdir -p "$ROOT"
+# RESUME. Set RLMH_RESUME=1 to keep completed episodes and run only what is missing.
+# Needed the hard way 2026-08-28: the llama-server died mid-decision (pc-03 at 22/40,
+# every WSL process gone with it, no crash line in the server log -- consistent with
+# the host sleeping rather than with upstream #23181) and a plain re-run would have
+# discarded 22 good episodes. An episode counts as done when it has BOTH wall.txt and
+# a non-empty answer file or a recorded exit -- a half-written directory is redone.
+if [ "${RLMH_RESUME:-0}" = "1" ] && [ -d "$ROOT" ]; then
+  echo "RESUMING $DEC: $(find "$ROOT" -name wall.txt | wc -l) episodes already on disk"
+else
+  rm -rf "$ROOT"
+fi
+mkdir -p "$ROOT"
 cp "$ACCEPTED" "$ROOT/candidate.json" 2>/dev/null || echo "(no candidate file: OFF-only run)"
 sha256sum "$ACCEPTED" 2>/dev/null | cut -d' ' -f1 > "$ROOT/candidate.sha256" || true
 
@@ -67,6 +78,11 @@ for REP in $(seq 1 "$REPS"); do
     # alternate which arm leads, by rep
     if [ $((REP % 2)) -eq 1 ]; then ORDER="off on"; else ORDER="on off"; fi
     for ARM in $ORDER; do
+      W="$ROOT/$ARM/$T/rep$REP"
+      if [ "${RLMH_RESUME:-0}" = "1" ] && [ -s "$W/wall.txt" ] && [ -s "$W/exit.txt" ]; then
+        echo "[$T $ARM rep$REP] SKIP (done: $(head -1 "$W/answer.txt" 2>/dev/null || echo '<no answer>'))" | tee -a "$LOG"
+        continue
+      fi
       # `< /dev/null` matters: without it the episode inherits the while-loop's stdin
       # and swallows the rest of the task list, so a decision silently runs only its
       # first task. Measured 2026-08-27 while verifying step 2.
