@@ -27,8 +27,8 @@ tells you whether you may touch it.
 |---|---|---|
 | `src/rlm/` | **live code** | The runtime, and the only thing in the wheel. Moved here from `rlm/` on 2026-08-22. |
 | `bench/` | **live code + frozen artifact** | The benchmark builder *and* frozen v1 (`manifest.json`, `tasks/`, `corpora/`). The frozen half is pinned by `benchmark.manifest_sha256`. |
-| `tests/` | **live code** | 853 tests. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant. |
-| `prompts/` | **frozen artifact** | 18 sha-pinned prompt files. See "before you move anything". |
+| `tests/` | **live code** | Repo-level tests: the benchmark, the gate, citations, the dependency lint. The package carries its own contract suite at `src/rlm/_tests/`, which ships inside the copy unit. 869 tests across the two. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant, and resolves the package by `find_spec` so it cannot pass vacuously on a copy. |
+| `src/rlm/_data/` | **frozen artifact, inside the package** | The 18 sha-pinned prompts and `config.default.yaml`. Moved here from a root-level `prompts/` on 2026-09-01 so a copied `rlm/` needs no repo. See "before you move anything". |
 | `upstream/` | **active work, not evidence** | llama.cpp defect reports (R13 slot leak, R14 continuous batching). Both still open upstream. It belongs to no gate and `ARCHITECTURE.md` cites it zero times — it was briefly filed under `milestones/` on 2026-08-22 and moved back out the same day, because "a bug report about someone else's project" is not a milestone. |
 | `docs/` | **live documents** | Research, specs, plans. Conventions in [`docs/README.md`](docs/README.md). |
 | `traces/` | **gitignored, and irreplaceable** | The trace store: DuckDB + 67,136 blobs. Under I4 this is the *sole* episode truth. Not in git. Not reconstructible. Kept at the top level deliberately — it is the project's most valuable artifact, not a build output. |
@@ -60,11 +60,13 @@ Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
 ## Commands
 
 ```bash
-uv run pytest -q                              # 853 tests, ~10 min
+uv run pytest -q                              # 869 tests, ~10 min (repo + the package's own)
+uv run pytest --pyargs rlm -q                 # just the package's contract suite, ~7 s
+uv run python tests/verify_distribution.py    # copy it out, build a wheel, prove both run
 uv run rlm validate --no-server-probe         # config + prompt pins + sandbox confinement
 uv run rlm replay <episode-id>                # re-derive an episode from the store alone (I4)
 uv run rlm bench --smoke                      # the only path that launches the root server
-python -c "from pathlib import Path; from rlm.config import load_config; load_config(Path('config.yaml'))"
+python -c "from rlm.config import load_config; load_config()"   # ./config.yaml, else the shipped one
 ```
 
 Always run from the repository root: nothing resolves paths against the config
@@ -77,18 +79,30 @@ and `rlm replay` is the gate that proves episode state is re-derivable from the
 trace store alone. Several things are therefore frozen, and two of them fail
 **silently**.
 
-- **`prompts/**` — all 18 files, including versions that look superseded.** 614
-  episode snapshots store the path, and the registry is rebuilt from the
-  *snapshot's* path, not the live config. Hashes cover content only, so moving a
-  byte-identical file still breaks it. `cp` is safe; `mv` is not. An edit — even to
-  a changelog comment the loader strips — trips `PromptDrift`.
+- **`src/rlm/_data/prompts/**` — all 18 files, including versions that look
+  superseded.** 614 episode snapshots store the path as it was DECLARED
+  (`prompts/root.v3.md`), and the registry is rebuilt from the *snapshot's* path.
+  Hashes cover content only, so a byte-identical file in a new place used to break
+  replay. **This is why the 2026-09-01 move was survivable and a plain `mv` would
+  not have been:** `rlm.config.resolve_prompt_path` tries the recorded path first and
+  the package copy second, and it runs inside `PromptRegistry._load_one`, the single
+  point where a prompt is opened. An edit — even to a changelog comment the loader
+  strips — still trips `PromptDrift`, and that is the safety net for the fallback.
 - **`bench/manifest.json` with `bench/tasks/` and `bench/corpora/`.** The
   repo-relative path strings live *inside* the JSON whose sha256 is pinned. There
   is no move that is both correct and pin-preserving.
-- **`src/rlm/` at exactly two levels below the root.** `src/rlm/measure/bench.py` and
-  `src/rlm/cli.py` define `REPO_ROOT = parents[2]`.
-- **`src/rlm/schema.sql` beside `src/rlm/trace/store.py`** — a `with_name()` sibling
-  lookup, not declared package data.
+- ~~**`src/rlm/` at exactly two levels below the root.**~~ **No longer true, and it
+  was a real defect.** Both files computed `REPO_ROOT` by counting parents, which in
+  an INSTALLED package resolves to the venv's `Lib` directory — and `LEDGER_PATH` and
+  `DEFAULT_REPORT_PATH` are built from it, so `rlm bench` would have written into a
+  consumer's site-packages and reported success. Both now call
+  `rlm.config.find_repo_root()`, which walks up for `bench/` + `pyproject.toml` and
+  returns a `NO_REPO` sentinel that names the reason in its own path. Depth is free.
+- **`src/rlm/trace/schema.sql` beside `src/rlm/trace/store.py`** — a `with_name()`
+  sibling lookup. Still not *declared* package data, and verified 2026-09-01 that it
+  does not need to be: hatchling includes it because it sits inside the package, and
+  a built wheel carries all 22 non-`.py` files (this, `config.default.yaml`, the 18
+  prompts, two fixtures). `tests/verify_distribution.py` checks that on demand.
 - **`.gitattributes`** — `*.md text eol=lf` and `bench/corpora/** -text` are what
   make every content hash reproducible across clones. Changing it breaks all 13
   prompt pins and 24 corpus hashes on the next fresh clone, invisibly on the
