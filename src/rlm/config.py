@@ -32,6 +32,37 @@ from rlm.context.truncate import MIN_MARKER_CAP
 # The package's own data directory: the default config and the frozen prompts.
 _DATA = Path(__file__).resolve().parent / "_data"
 
+#: What a checkout looks like from inside the package. `bench/` is the marker rather
+#: than `pyproject.toml` because it is the thing the callers actually need.
+_REPO_MARKERS = ("bench", "pyproject.toml")
+
+#: Stands in for the repo root when there is none. Never exists, and says why in its
+#: own path, so a write that lands here fails with a message instead of succeeding
+#: somewhere wrong.
+NO_REPO = Path("<no-rlm-checkout-found>")
+
+
+def find_repo_root(start: Path | None = None) -> Path:
+    """Walk up for a checkout, or return `NO_REPO`.
+
+    The experiment surface -- `rlm bench`, the ledger, the report, the benchmark
+    manifest -- only means anything inside a checkout, because `bench/` is deliberately
+    not in the wheel. Until 2026-09-01 those paths were computed as
+    `Path(__file__).resolve().parents[N]`, which in an INSTALLED package resolves to
+    the venv's `Lib` directory: `rlm bench` would have written its ledger and its
+    RESULTS.md into the consumer's site-packages parent and reported success.
+
+    A walk that can fail is the fix. `NO_REPO` is not a valid destination and does not
+    exist, so the failure is a legible path in an error rather than a file in a
+    surprising place. This module is the home for it because `measure/bench.py` and
+    `cli.py` both need it and both already import from here.
+    """
+    here = (start or Path(__file__)).resolve()
+    for candidate in here.parents:
+        if all((candidate / m).exists() for m in _REPO_MARKERS):
+            return candidate
+    return NO_REPO
+
 
 def default_config_path() -> Path:
     """The config the package ships with, resolved against the package itself.
@@ -732,12 +763,40 @@ class Config(_Strict):
         )
 
 
-def load_config(path: Path) -> Config:
-    """Read + parse `path` as YAML and validate it into a Config.
+def resolve_config_path(path: Path | str | None = None) -> Path:
+    """The config to load: the one asked for, then the CWD's, then the package's.
+
+    Same two-step shape as `resolve_prompt_path`, and the order is chosen so that
+    NOTHING CHANGES IN THIS REPO. `config.yaml` exists at the repo root, so a run
+    from here resolves to it exactly as before; the package default is reached only
+    when there is no such file, which is the case a copied `rlm/` is in.
+
+    That ordering is not a convenience. `cli.py:1279-1281` records the reason the
+    benchmark manifest is an artifact path and not a flag: *"a scoring run an operator
+    can point at a different manifest is a scoring run they can point at a friendlier
+    one."* A fallback that could silently prefer the shipped default over the real
+    config on a machine that has both would be the same hazard, so it cannot.
+
+    Added 2026-09-01: the package had shipped a validated, machine-free config since
+    3f71147 that no production code path could reach -- `load_config` took a required
+    Path and `--config` defaulted to the CWD string "config.yaml".
+    """
+    if path is not None:
+        return Path(path)
+    cwd = Path("config.yaml")
+    return cwd if cwd.exists() else default_config_path()
+
+
+def load_config(path: Path | str | None = None) -> Config:
+    """Read + parse a config as YAML and validate it into a Config.
+
+    `path` may be omitted, in which case `resolve_config_path()` decides: the CWD's
+    `config.yaml` when there is one, otherwise the config the package ships with.
 
     Any failure (missing file, bad YAML, schema/cross-field violation) is
     raised as ConfigError — callers never need to catch anything else.
     """
+    path = resolve_config_path(path)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:

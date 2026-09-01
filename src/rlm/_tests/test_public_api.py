@@ -133,3 +133,29 @@ def test_the_typing_block_names_exactly_the_exports():
         f"only in typing {sorted(named - set(rlm._EXPORTS))}, "
         f"only in _EXPORTS {sorted(set(rlm._EXPORTS) - named)}"
     )
+
+
+def test_the_shipped_config_is_reachable_without_a_repo(tmp_path, monkeypatch):
+    """The package shipped a validated config since 3f71147 that no production path
+    could reach: `load_config` took a required Path and `--config` defaulted to the
+    CWD string "config.yaml". A consumer who copied the package got a config file they
+    had to know the name of to find.
+
+    Both directions are pinned here because the ORDER is the safety property.
+    """
+    from rlm.config import default_config_path, resolve_config_path
+
+    # No config.yaml in sight -> the package's own, which is a copied consumer's case.
+    monkeypatch.chdir(tmp_path)
+    assert resolve_config_path() == default_config_path()
+
+    # A config.yaml in the CWD wins, always. `cli.py:1279-1281` states the reason a
+    # scoring input is an artifact and not a flag: "a scoring run an operator can point
+    # at a different manifest is a scoring run they can point at a friendlier one." A
+    # fallback that could prefer the shipped default over a real config present on the
+    # same machine would be that hazard wearing a convenience's clothes.
+    (tmp_path / "config.yaml").write_text("{}", encoding="utf-8")
+    assert resolve_config_path() == __import__("pathlib").Path("config.yaml")
+
+    # An explicit path always wins over both.
+    assert resolve_config_path(tmp_path / "other.yaml") == tmp_path / "other.yaml"

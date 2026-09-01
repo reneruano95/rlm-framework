@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from rlm.config import Config
+from rlm.config import Config, find_repo_root
 from rlm.errors import ConfigError, Outcome
 from rlm.power import energy_j_between
 
@@ -60,7 +60,11 @@ if TYPE_CHECKING:                       # pragma: no cover - typing only
 
     from rlm.episode import Task
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+#: The checkout this package sits in, or `NO_REPO` when it does not sit in one.
+#: Was `Path(__file__).resolve().parents[3]`, which in an installed package resolves
+#: to the venv's Lib directory -- so LEDGER_PATH below was a WRITE destination inside
+#: the consumer's site-packages. See `rlm.config.find_repo_root`.
+REPO_ROOT = find_repo_root()
 
 #: §8's pre-registered within-block order. RLM and B2 run on the resident
 #: topology; B1 and B3 share the one `bench_leaf` relaunch, on their own slots

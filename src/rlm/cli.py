@@ -72,7 +72,9 @@ from rlm.measure.bench import (
 # module is the composition root that must detect them still installed.
 from rlm.measure.bench import _no_hook as _BENCH_NO_HOOK
 from rlm.measure.bench import _no_task_loader as _BENCH_NO_TASK_LOADER
-from rlm.config import Config, PromptRegistry, load_config
+from rlm.config import (
+    Config, PromptRegistry, find_repo_root, load_config, resolve_config_path,
+)
 from rlm.serve.dispatcher import LLMDispatcher, MockDispatcher, ServerClient
 from rlm.episode import (
     Task,
@@ -110,7 +112,10 @@ from rlm.measure.verdict import (
     write_report,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+#: See `rlm.config.find_repo_root`. Was `parents[2]`, which resolves to the venv's
+#: Lib directory in an installed package -- DEFAULT_REPORT_PATH and BENCH_MANIFEST_PATH
+#: below are built from it, and the first is a write destination.
+REPO_ROOT = find_repo_root()
 
 # The exit contract lives in `src/rlm/errors.py` -- `src/rlm/trace/export.py` and
 # `src/rlm/trace/replay.py` return these too, and importing them back out of the
@@ -438,7 +443,7 @@ def _check_cache_types(cfg: Config, probed: dict[str, dict], out, err,
 def cmd_validate(args) -> int:
     out, err = sys.stdout, sys.stderr
     try:
-        cfg = load_config(Path(args.config))
+        cfg = load_config(args.config)
     except ConfigError as exc:
         print(f"config refused: {exc}", file=err)
         return EXIT_REFUSED
@@ -549,7 +554,7 @@ async def _run_one(cfg: Config, task: Task, lifecycle: Lifecycle, task_path: Pat
 def cmd_run(args) -> int:
     out, err = sys.stdout, sys.stderr
     try:
-        cfg = load_config(Path(args.config))
+        cfg = load_config(args.config)
         task_path = Path(args.task_file)
         task = Task.from_file(task_path)
     except ConfigError as exc:
@@ -634,7 +639,7 @@ async def _verify_online(cfg: Config, ep_cfg: Config, episode: dict,
 def cmd_replay(args) -> int:
     out, err = sys.stdout, sys.stderr
     try:
-        cfg = load_config(Path(args.config))
+        cfg = load_config(args.config)
         episode, steps = _read_episode(cfg, args.episode_id)
     except ConfigError as exc:
         print(f"refused: {exc}", file=err)
@@ -2036,7 +2041,10 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
 def cmd_bench(args) -> int:
     out, err = sys.stdout, sys.stderr
     try:
-        config_path = Path(args.config)
+        # resolve_config_path, not Path(args.config): --config now defaults to None so
+        # a copied package can reach the config it ships with, and _raw_config below
+        # needs the SAME file load_config used, not a second guess at it.
+        config_path = resolve_config_path(args.config)
         cfg = load_config(config_path)
         raw_cfg = _raw_config(config_path)
         if cfg.scaffold.dispatcher != "real":
@@ -2108,7 +2116,7 @@ from rlm.trace.export import _export, _export_filter  # noqa: E402
 def cmd_export(args) -> int:
     out, err = sys.stdout, sys.stderr
     try:
-        cfg = load_config(Path(args.config))
+        cfg = load_config(args.config)
     except ConfigError as exc:
         print(f"refused: {exc}", file=err)
         return EXIT_REFUSED
@@ -2143,7 +2151,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="verb", required=True)
 
     def common(p):
-        p.add_argument("--config", default="config.yaml", help="path to config.yaml")
+        p.add_argument("--config", default=None,
+                       help="path to config.yaml (default: ./config.yaml, else the "
+                            "config the package ships with)")
         p.add_argument("--lifecycle-log", default=None,
                        help="JSONL lifecycle log (default: next to the trace store)")
         return p
@@ -2204,7 +2214,9 @@ def build_parser() -> argparse.ArgumentParser:
     b.set_defaults(func=cmd_bench)
 
     e = sub.add_parser("export", help="export a run or episode as a bundle")
-    e.add_argument("--config", default="config.yaml", help="path to config.yaml")
+    e.add_argument("--config", default=None,
+                   help="path to config.yaml (default: ./config.yaml, else the "
+                        "config the package ships with)")
     e.add_argument("id", help="a bench run_id, or an episode_id (both UUIDs)")
     e.add_argument("--dest", default=None,
                    help="bundle directory (default: <trace dir>/export/<id>)")
