@@ -1,17 +1,25 @@
-# tests/test_winjob.py
-import ctypes
 import os
 import subprocess
 import sys
 import time
-from ctypes import wintypes
 
 import pytest
 
-from rlm.sandbox.winjob import Job
-from rlm.sandbox.winproc import AppContainer, Stdio, kernel32, spawn
+# THE GUARD COMES FIRST, and the order is the whole point. Everything below this line
+# is Windows-only at IMPORT: `ctypes.wintypes` raises on other platforms, and
+# `rlm.sandbox.winproc` calls `ctypes.WinDLL` at module scope. A `pytestmark = skipif`
+# placed after those imports never runs -- collection has already failed, and the
+# shipped suite errors out on the first non-Windows consumer that copies the package.
+# Found 2026-09-01 by a reviewer reading the file, not by a test: the copy test runs on
+# this box, where the guard is never exercised.
+if sys.platform != "win32":  # pragma: no cover - the guard is the point
+    pytest.skip("Windows only: Job Objects and AppContainer", allow_module_level=True)
 
-pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+import ctypes  # noqa: E402
+from ctypes import wintypes  # noqa: E402
+
+from rlm.sandbox.winjob import Job  # noqa: E402
+from rlm.sandbox.winproc import AppContainer, Stdio, kernel32, spawn  # noqa: E402
 
 # NEVER assign a job/pid test around sys.executable under a uv-managed venv:
 # it is a 262 KB trampoline that re-execs the real interpreter as a CHILD

@@ -1,6 +1,8 @@
 # Reorganization: rlm-halo as a private library distributed by copying the package
 
-**Date:** 2026-09-01 · **Status:** PLAN. Nothing has been moved or deleted. HEAD is `3eca663`, working tree clean.
+**Date:** 2026-09-01 · **Status:** EXECUTED, with corrections recorded below. Steps 1-4 and all nine deletion
+groups are committed (`ef85d78` … `abf3e9e`). Where the tree and this document disagree, the tree is right and the
+disagreement is written into §10.
 **Goal, in the owner's words:** a private library, distributed by copying the folder — professional, scalable, modular.
 **Standard of comparison:** `stanfordnlp/dspy`, cloned and read, not described.
 
@@ -31,7 +33,7 @@
 
 **One module already does package data correctly [M].** `src/rlm/trace/store.py:36` — `_SCHEMA_PATH = pathlib.Path(__file__).with_name("schema.sql")`, and `schema.sql` travels inside the package. **This is the pattern the rest must copy.**
 
-**`gate/` is not library code [M].** Nothing anywhere imports it — zero references from `src/`, `bench/` or `tests/`. And it imports nothing from `rlm`: it is pure stdlib (`argparse`, `dataclasses`, `hashlib`, `json`, `pathlib`, `random`, `re`, `statistics`, `sys`, `typing`). These are standalone CLI scripts invoked by shell. **They must not enter the package.** Three rounds of the loop proposed shipping them as `rlm/gate/` with six modules and four CLI verbs; the critic killed it every time as "zero production callers", and the measurement above is why it was right.
+**`gate/` is not library code [M, one half CORRECTED 2026-09-01].** Nothing anywhere imports it — zero references from `src/`, `bench/` or `tests/`, and that half holds. **The other half was wrong**: this document originally said `gate/` imports nothing from `rlm`. It does, in three places, all function-local — `gate/decide.py:133` (`from rlm.measure.checkers import check`), `gate/screens.py:146` (`ChunkIndex`) and `:202` (`check`). The measurement used `grep "^import \|^from "`, anchored to line start, which cannot see an indented import. The conclusion survives for the surviving reason — nothing imports `gate`, and it is invoked by shell — but the dependency direction below is corrected: `gate/` sits at the same layer as `bench/`, not below it. Three rounds of the loop proposed shipping them as `rlm/gate/` with six modules and four CLI verbs; the critic killed it every time as "zero production callers", and the measurement above is why it was right.
 
 **prime-agent is concluded.** It was a one-off probe that local models can drive a recursive harness. `D:\spike` is deleted. The evidence that lived only in WSL was rescued to `docs/research/2026-08-27-s6-lite-v0/runtime/` in `3eca663`, verified byte-for-byte. Nothing lives outside the repo.
 
@@ -106,7 +108,7 @@ rlm-halo-framework/
 └── config.yaml, pyproject.toml, ARCHITECTURE.md, CHANGELOG.md, DIRECTION.md, README.md
 ```
 
-**Allowed dependency direction, one total order:** `rlm/` → stdlib + declared deps only. `bench/` → `rlm/`. `gate/` → nothing. `tests/` → all three. Nothing may point left.
+**Allowed dependency direction, one total order:** `rlm/` → stdlib + declared deps only. `bench/` → `rlm/`. `gate/` → `rlm/` (function-local, in three places; see §1). `tests/` → all three. Nothing may point left.
 
 ### 4.1 The public API boundary
 

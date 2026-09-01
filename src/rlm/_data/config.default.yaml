@@ -1,15 +1,15 @@
 # Derived from the repo's config.yaml -- do not hand-edit.
 #
 # This is the config the PACKAGE ships with, so a copied `rlm/` can be imported
-# and its suite run with no repo present. Nine leaves differ from the real
-# config, and only those nine: the three server `model` paths, their
-# `backend_dir`s, one `-md` draft-model flag, and the sandbox `interpreter` and
-# `bootstrap_dir`. Everything else -- budgets, chunk sizes, prompt slots,
+# and its suite run with no repo present. TEN leaves differ from the real
+# config, and only those ten: the three server `model` paths, their
+# `backend_dir`s, the root `dflash` flag AND its `extra_flags` list, and the sandbox
+# `interpreter` and `bootstrap_dir`. Everything else -- budgets, chunk sizes, prompt slots,
 # checkers, dispatch policy -- is byte-for-byte the shipped structure, which is
 # what `tests/test_default_config.py` asserts so the two cannot drift apart.
 #
 # The placeholders are not runnable. Nothing in the shipped suite launches a
-# server; a consumer that wants to run one overrides these nine values.
+# server; a consumer that wants to run one overrides these ten values.
 servers:
   root:
     model: models/root.gguf

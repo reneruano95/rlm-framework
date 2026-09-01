@@ -103,3 +103,33 @@ def test_resolution_is_cached_after_first_access():
     does not re-enter it. Cheap to assert, and it is the reason lazy costs nothing."""
     _ = rlm.Task
     assert "Task" in vars(rlm)
+
+
+def test_the_export_table_and_all_cannot_drift_apart():
+    """`__all__` and `_EXPORTS` are two lists of the same thing; nothing kept them
+    in step. A name in `__all__` with no `_EXPORTS` entry raises AttributeError on
+    access -- caught by the resolve test above, but only after the fact. A name in
+    `_EXPORTS` and not `__all__` is an export nobody can discover."""
+    assert set(rlm._EXPORTS) == set(rlm.__all__) - {"__version__"}
+
+
+def test_the_typing_block_names_exactly_the_exports():
+    """The TYPE_CHECKING block is a third copy of the same list, written for editors
+    and type checkers. It is invisible at runtime, so nothing else can catch it going
+    stale: an export missing there is a name your editor cannot resolve, and a name
+    there that is no longer exported is a lie a reader will believe."""
+    import ast
+    import pathlib
+
+    tree = ast.parse(pathlib.Path(rlm.__file__).read_text(encoding="utf-8"))
+    named = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and getattr(node.test, "id", None) == "TYPE_CHECKING":
+            for stmt in ast.walk(node):
+                if isinstance(stmt, ast.ImportFrom):
+                    named |= {a.asname or a.name for a in stmt.names}
+    assert named == set(rlm._EXPORTS), (
+        "the TYPE_CHECKING block and _EXPORTS disagree: "
+        f"only in typing {sorted(named - set(rlm._EXPORTS))}, "
+        f"only in _EXPORTS {sorted(set(rlm._EXPORTS) - named)}"
+    )

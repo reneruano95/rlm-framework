@@ -6,7 +6,7 @@ beside it, and these tests are what keeps that true: a key added to the real con
 and forgotten in the default would give consumers a package whose shipped config is
 a different shape from the one every recorded run used.
 
-The nine leaves that legitimately differ are enumerated below and nowhere else.
+The TEN leaves that legitimately differ are enumerated below and nowhere else.
 """
 from pathlib import Path
 
@@ -18,12 +18,17 @@ from rlm.config import Config, default_config_path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REAL = REPO_ROOT / "config.yaml"
 
-# The only leaves allowed to differ, and why each one has to:
+# The only leaves allowed to differ, and why each one has to. TEN of them, and the
+# count is stated because an earlier version of this file said "nine" while listing ten
+# -- `servers.root.dflash` and `servers.root.extra_flags` are two leaves, not one.
 #   servers.*.model        model weights live outside the repo (GGUF, tens of GB)
 #   servers.*.backend_dir  a built llama.cpp, also outside the repo
-#   servers.root.dflash    + its flag set: config.py refuses dflash=true without a
-#                          -md drafter, and refuses a -md path that is not on disk,
-#                          so a shipped default cannot keep speculative decoding on
+#   servers.root.dflash    turned off, and
+#   servers.root.extra_flags  its whole flag set removed with it: config.py refuses
+#                          dflash=true without a -md drafter, refuses a -md path that
+#                          is not on disk, and refuses '--spec-type draft-dflash' when
+#                          dflash is false. Three interlocking validators, so the set
+#                          can only leave whole -- which is why this is two leaves.
 #   scaffold.sandbox.*     the interpreter and bootstrap dir are this box's
 MACHINE_LEAVES = {
     "servers.root.model",
@@ -67,7 +72,7 @@ def test_the_shipped_default_has_the_same_keys_as_the_real_config(real, shipped)
 
 
 def test_only_the_enumerated_machine_leaves_differ(real, shipped):
-    """Everything but the nine machine leaves is byte-for-byte the shipped structure."""
+    """Everything but the ten machine leaves is byte-for-byte the shipped structure."""
     rv = dict(_leaves(real))
     sv = dict(_leaves(shipped))
     differing = {p for p in rv if rv[p] != sv.get(p)}

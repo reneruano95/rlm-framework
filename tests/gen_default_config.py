@@ -16,7 +16,9 @@ import yaml
 REPO = pathlib.Path(__file__).resolve().parents[1]
 raw = yaml.safe_load((REPO / "config.yaml").read_text(encoding="utf-8"))
 
-# The nine machine leaves, replaced with portable placeholders. A consumer
+# The ten differing leaves, replaced with portable placeholders. TEN, not nine: the
+# root's `dflash` flag and its `extra_flags` list are two separate leaves, and an
+# earlier count said nine while the list beside it named ten. A consumer
 # overrides them; the shipped suite never launches a server, so they only have to
 # validate.
 for name in ("root", "leaf", "bench_leaf"):
@@ -48,15 +50,15 @@ header = (
     "# Derived from the repo's config.yaml -- do not hand-edit.\n"
     "#\n"
     "# This is the config the PACKAGE ships with, so a copied `rlm/` can be imported\n"
-    "# and its suite run with no repo present. Nine leaves differ from the real\n"
-    "# config, and only those nine: the three server `model` paths, their\n"
-    "# `backend_dir`s, one `-md` draft-model flag, and the sandbox `interpreter` and\n"
-    "# `bootstrap_dir`. Everything else -- budgets, chunk sizes, prompt slots,\n"
+    "# and its suite run with no repo present. TEN leaves differ from the real\n"
+    "# config, and only those ten: the three server `model` paths, their\n"
+    "# `backend_dir`s, the root `dflash` flag AND its `extra_flags` list, and the sandbox\n"
+    "# `interpreter` and `bootstrap_dir`. Everything else -- budgets, chunk sizes, prompt slots,\n"
     "# checkers, dispatch policy -- is byte-for-byte the shipped structure, which is\n"
     "# what `tests/test_default_config.py` asserts so the two cannot drift apart.\n"
     "#\n"
     "# The placeholders are not runnable. Nothing in the shipped suite launches a\n"
-    "# server; a consumer that wants to run one overrides these nine values.\n"
+    "# server; a consumer that wants to run one overrides these ten values.\n"
 )
 io.open(out, "w", encoding="utf-8", newline="\n").write(
     header + yaml.safe_dump(raw, sort_keys=False, allow_unicode=True, width=100)

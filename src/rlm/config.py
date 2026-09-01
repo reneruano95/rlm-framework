@@ -38,9 +38,11 @@ def default_config_path() -> Path:
 
     A copied `rlm/` has no repo to read, so this is what `load_config()` falls back
     to. It is derived from the repo's `config.yaml` and differs from it in exactly
-    nine leaves -- the three server model paths, their backend dirs, one DFlash flag
-    set, and the two sandbox paths. `tests/test_default_config.py` asserts the rest
-    is structurally identical, so the two cannot drift.
+    TEN leaves: the three server `model` paths, their three `backend_dir`s, the root's
+    `dflash` flag AND its `extra_flags` list (the DFlash set cannot leave by halves --
+    three validators interlock), and the two sandbox paths. Counted, not estimated:
+    `tests/test_default_config.py` asserts the differing set is exactly those ten and
+    that everything else is structurally identical, so the two cannot drift.
     """
     return _DATA / "config.default.yaml"
 
