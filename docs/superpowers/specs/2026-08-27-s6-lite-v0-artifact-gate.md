@@ -266,3 +266,53 @@ project has already gated three times and rejected three times.
 **What does NOT carry over:** `kind` is drawn from prime-agent's harness entry
 taxonomy. A proposer aimed at `src/rlm/` takes its kinds from the 13 prompt slots
 `Config._prompt_refs()` returns, and nothing in this scaffold has a "skill".
+
+---
+
+## 12. The enforcement contract, preserved from `gate/extension/rlmh-gate.ts` before its deletion
+
+**Added 2026-09-01.** The extension was deleted (reorganization group D6). It was 317
+lines of TypeScript written against prime-agent's `ExtensionAPI`; its four handlers are
+that host's hooks, and with prime-agent concluded no runtime can load it. What it
+guaranteed is written down here, because the 148 recorded episodes rest on these three
+properties and a reimplementation against `src/rlm/`'s own scaffold needs the contract.
+
+**Why it existed.** prime-agent's Continual Harness applies whatever the model proposes;
+there is no per-edit veto. Measured on this box 2026-08-27: **given a free hand the local
+root wrote 8 of 8 artifacts as `memory` holding the answers to the tasks it had just been
+shown.** The extension made the model structurally unable to write its own harness — I1
+as a mechanism rather than an instruction.
+
+**The four handlers, and what each could and could not do:**
+
+| handler | power | what it did |
+|---|---|---|
+| `session_before_refine` | **VETO** | returned `{skip:true}` for every round not carrying the gate's marker, raising `RefineSkippedError` in the host. The only hard stop available. |
+| `before_agent_start` | **FILTER** | received the assembled system prompt and could replace it. Stripped any rendered harness line whose entry id was not in the accepted set, then appended the gate's own block. This caught a direct `rlm.harness.create_*` write from the kernel, which `tool_call` cannot see because `refine.run` is a host request, not a tool. |
+| `refine_complete` | **NOTIFY ONLY** | fired after the state file was written; its return value is ignored and a throw is swallowed by the host. It could not veto, and the file did not pretend it could. |
+| `tool_call` | **BUDGET** | blocked the Nth consecutive byte-identical ipython cell. prime-agent ships no identical-turn guard; C5's `max_identical_turns: 3` is the scaffold's. Measured 2026-08-27: one agg-07 episode emitted **29 identical cells over 51 turns, burned 88.7K tokens and 1,384 s, and produced no answer** — R15's attractor inside prime-agent, and prime-agent issue #1326. |
+
+**Fail loudly.** If any of the four could not be registered the factory threw, so a host
+upgrade that moved the API stopped the run instead of silently degrading. Any
+reimplementation keeps that: a guard that cannot install must not install quietly.
+
+### Which of the three guarantees was actually exercised — measured, and the answer is uncomfortable
+
+From `docs/research/2026-08-27-s6-lite-v0/runtime/ledger.jsonl`, the extension's own event
+log, recovered in `3eca663`. All four handlers called `log()` when they fired, so an
+absent event type means the handler never fired. The file holds exactly two event types
+across 156 episodes:
+
+- **The FILTER is the only one that did work, and only the delivery half.** 155
+  `prompt_filtered` rows split cleanly: 78 at `kept=0, accepted=0` (the OFF arm) and 77
+  at `kept=1, accepted=1` (the ON arm). That is the per-episode proof the arms differed.
+  But `stripped` is **0 in all 155 rows**, and there are zero `stripped_entries` events —
+  the stripping half was never exercised against the case it was built for.
+- **The VETO never fired.** Zero `before_refine` rows in 156 episodes: the model never
+  attempted a self-refine during a gated decision. I1-as-mechanism is verified by its own
+  test, not by the decision runs.
+- **The BUDGET never fired.** Zero `identical_turn_blocked` rows. R15 did not manifest
+  inside the gate runs at `max_identical_turns: 3`. Insurance, not a measured save.
+
+So a reimplementation should carry all three, and should not claim any of the three was
+proven in production by these decisions. Only the delivery channel was.
