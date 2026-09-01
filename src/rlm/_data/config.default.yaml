@@ -1,0 +1,180 @@
+# Derived from the repo's config.yaml -- do not hand-edit.
+#
+# This is the config the PACKAGE ships with, so a copied `rlm/` can be imported
+# and its suite run with no repo present. Nine leaves differ from the real
+# config, and only those nine: the three server `model` paths, their
+# `backend_dir`s, one `-md` draft-model flag, and the sandbox `interpreter` and
+# `bootstrap_dir`. Everything else -- budgets, chunk sizes, prompt slots,
+# checkers, dispatch policy -- is byte-for-byte the shipped structure, which is
+# what `tests/test_default_config.py` asserts so the two cannot drift apart.
+#
+# The placeholders are not runnable. Nothing in the shipped suite launches a
+# server; a consumer that wants to run one overrides these nine values.
+servers:
+  root:
+    model: models/root.gguf
+    mtp: false
+    dflash: false
+    port: 8080
+    backend: vulkan
+    backend_dir: llama.cpp
+    log_path: traces/logs/root-server.log
+    ctx: 32768
+    parallel: 1
+    cache_type: q8_0
+    flash_attn: 'on'
+    ub: 512
+    b: 2048
+    extra_flags:
+    - -lm none
+    - --no-context-shift
+  leaf:
+    model: models/leaf.gguf
+    port: 8081
+    backend: vulkan
+    backend_dir: llama.cpp
+    log_path: traces/logs/leaf-server.log
+    ctx: 327680
+    parallel: 128
+    slot_policy: never_reuse
+    cache_type: q8_0
+    flash_attn: 'on'
+    ub: 512
+    b: 2048
+    extra_flags:
+    - -lm none
+    - --no-kv-unified
+    - --cont-batching
+    - --cache-ram 0
+    - -ctxcp 0
+  bench_leaf:
+    model: models/bench_leaf.gguf
+    port: 8081
+    backend: vulkan
+    backend_dir: llama.cpp
+    log_path: traces/logs/leaf-server-bench.log
+    ctx: 524288
+    parallel: 2
+    cache_type: q8_0
+    flash_attn: 'on'
+    ub: 512
+    b: 2048
+    per_call_timeout_s: 900
+    extra_flags:
+    - -lm none
+    - --no-kv-unified
+    - --cache-ram 0
+    - -ctxcp 0
+  fallback_leaf: null
+scaffold:
+  dispatcher: real
+  chunk:
+    size_tokens: 640
+    stride_tokens: 480
+    overhead_tokens: 1920
+    snap_to_boundary: true
+    snap_tolerance: 0.1
+  truncation_cap_chars: 2000
+  budgets:
+    max_depth: 1
+    max_subcalls: 926
+    max_wall_clock_s: 1300
+    restricted_max_wall_clock_s: 2100
+    max_total_tokens: 1500000
+    max_identical_turns: 3
+    max_predict:
+      root: 1024
+      leaf: 512
+  retries:
+    max_attempts: 3
+    backoff_s:
+    - 1
+    - 4
+    per_call_timeout_s: 240
+  root_window_kill_fraction: 0.9
+  sampling:
+    root:
+      temperature: 0.7
+      top_p: 0.8
+      seed: 1
+    leaf:
+      temperature: 0.3
+      top_p: 0.9
+      seed: 1
+  prompts:
+    root:
+      path: prompts/root.v3.md
+      sha256: 3fb653e3eacafa50b53d12c08cc70982fe4a6ad19bf01cffbf7966771917b6b6
+    root_restricted:
+      path: prompts/root-restricted.v1.md
+      sha256: 65af229386acb5972bc26dfb771006c5bce96f73d8065b888f689ea404726c9c
+    leaf_prefix:
+      path: prompts/leaf-prefix.v1.md
+      sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76
+    leaf_envelope:
+      path: prompts/leaf-envelope.v2.md
+      sha256: 58d813fa36766e4ea9800b9004577d31b6d71fcbb26d38f4b0ef83d911d12867
+    strategy_templates:
+      needle:
+        path: prompts/strat-needle.v1.md
+        sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d
+      aggregation:
+        path: prompts/strat-aggregation.v2.md
+        sha256: 4baeea34d2dda4a5b1022ed5fa2366c6a6d78161238482526820eb8d34bb35fa
+      synthesis:
+        path: prompts/strat-synthesis.v1.md
+        sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c
+      code_qa:
+        path: prompts/strat-codeqa.v1.md
+        sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e
+      default:
+        path: prompts/strat-default.v1.md
+        sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415
+    baselines:
+      b1_single_shot:
+        path: prompts/b1-single-shot.v1.md
+        sha256: 528223ad24988ec76f55d1a5835cfcace05593e796af87bae59d6aeb0c32f8d5
+      b2_leaf_summary:
+        path: prompts/b2-leaf-summary.v1.md
+        sha256: 2621d76a602ba8300d10177f6cf488d7ba7f9121042a3f8a2444a9271f5064ec
+      b2_root_final:
+        path: prompts/b2-root-final.v1.md
+        sha256: e4c67521a16a87e09e98ca59aa3604b6ab262f85287e5701eaf46056959e6f1b
+      b3_single_shot:
+        path: prompts/b3-single-shot.v1.md
+        sha256: b8591d4e8895c9ad80c847f888c1b095e1f14068b2649c3a14cbf60bcaea1267
+  leaf_envelope:
+    enabled: false
+    grammar: false
+  sandbox:
+    interpreter: python
+    bootstrap_dir: sandbox_bootstrap
+    network_isolation: appcontainer
+    appcontainer_per_episode: true
+    deny_ctypes: false
+    memory_limit_mb: 4096
+    active_process_limit: 1
+  root:
+    enable_thinking: false
+    window_tokens: 32768
+    seed_schedule: per_turn
+    history_mode: raw
+  leaf:
+    enable_thinking: false
+  dispatch_concurrency: 1
+trace:
+  db_path: traces/rlm.duckdb
+  blob_root: traces/blobs
+  export_every_episode: true
+benchmark:
+  version: v1
+  manifest_sha256: 571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91
+  seeds:
+  - 1
+  - 2
+  - 3
+  escalation_seeds:
+  - 4
+  - 5
+power_sampling:
+  enabled: true

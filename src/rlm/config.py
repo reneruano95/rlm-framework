@@ -29,6 +29,46 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, mo
 from rlm.errors import ConfigError
 from rlm.context.truncate import MIN_MARKER_CAP
 
+# The package's own data directory: the default config and the frozen prompts.
+_DATA = Path(__file__).resolve().parent / "_data"
+
+
+def default_config_path() -> Path:
+    """The config the package ships with, resolved against the package itself.
+
+    A copied `rlm/` has no repo to read, so this is what `load_config()` falls back
+    to. It is derived from the repo's `config.yaml` and differs from it in exactly
+    nine leaves -- the three server model paths, their backend dirs, one DFlash flag
+    set, and the two sandbox paths. `tests/test_default_config.py` asserts the rest
+    is structurally identical, so the two cannot drift.
+    """
+    return _DATA / "config.default.yaml"
+
+
+def resolve_prompt_path(path: Path) -> Path:
+    """Resolve a prompt path as written, then inside the package.
+
+    Two roots, one path string, and the order matters. Step one is the path exactly
+    as the config (or a stored `config_snapshot`) declares it, so every one of the
+    614 recorded episodes keeps resolving the way it did when it ran, and
+    `trace/replay.py` needs no change. Step two is the package's own `_data/prompts/`,
+    which is what makes a copied `rlm/` work with no repo around it.
+
+    The path is NOT resolved at parse time, deliberately: `config_snapshot` records
+    `ref.path` verbatim, and that record is evidence. Resolving early would write an
+    absolute, machine-specific path into every future snapshot and change the shape
+    of a format that stored runs are already in.
+
+    The safety net for step two is the sha256 pin the caller checks next: if the
+    package copy has diverged from the file a run actually used, the hash mismatch
+    catches it. Without a pin there is no net, which is the argument for pinning
+    every prompt rather than for resolving differently.
+    """
+    if path.exists():
+        return path
+    inside = _DATA / "prompts" / path.name
+    return inside if inside.exists() else path
+
 
 class _Strict(BaseModel):
     """Shared base: `extra="forbid"` on every nested model, not just the root."""
@@ -590,12 +630,13 @@ class Config(_Strict):
         for name, ref in self._prompt_refs():
             if ref.sha256 is None:
                 continue
-            if not ref.path.exists():
+            resolved = resolve_prompt_path(ref.path)
+            if not resolved.exists():
                 raise ValueError(
                     f"scaffold.prompts.{name}.path ({ref.path}) is pinned "
                     f"(sha256={ref.sha256}) but does not exist"
                 )
-            actual = _sha256_hex(ref.path.read_bytes())
+            actual = _sha256_hex(resolved.read_bytes())
             if actual != ref.sha256:
                 raise ValueError(
                     f"scaffold.prompts.{name}.path ({ref.path}): sha256 mismatch "
@@ -664,24 +705,24 @@ class Config(_Strict):
             "default": prompts.strategy_templates.default,
         }
         return PromptRegistry.from_files(
-            root_path=prompts.root.path,
+            root_path=resolve_prompt_path(prompts.root.path),
             root_sha256=prompts.root.sha256,
-            leaf_prefix_path=prompts.leaf_prefix.path,
+            leaf_prefix_path=resolve_prompt_path(prompts.leaf_prefix.path),
             leaf_prefix_sha256=prompts.leaf_prefix.sha256,
-            root_restricted_path=(prompts.root_restricted.path
+            root_restricted_path=(resolve_prompt_path(prompts.root_restricted.path)
                                   if prompts.root_restricted is not None else None),
             root_restricted_sha256=(prompts.root_restricted.sha256
                                     if prompts.root_restricted is not None else None),
-            leaf_envelope_path=(prompts.leaf_envelope.path
+            leaf_envelope_path=(resolve_prompt_path(prompts.leaf_envelope.path)
                                 if prompts.leaf_envelope else None),
             leaf_envelope_sha256=(prompts.leaf_envelope.sha256
                                   if prompts.leaf_envelope else None),
-            strategy_paths={cat: ref.path for cat, ref in strategy_refs.items()},
+            strategy_paths={cat: resolve_prompt_path(ref.path) for cat, ref in strategy_refs.items()},
             strategy_sha256={
                 cat: ref.sha256 for cat, ref in strategy_refs.items()
                 if ref.sha256 is not None
             },
-            baseline_paths={name: ref.path for name, ref in baseline_refs.items()},
+            baseline_paths={name: resolve_prompt_path(ref.path) for name, ref in baseline_refs.items()},
             baseline_sha256={
                 name: ref.sha256 for name, ref in baseline_refs.items()
                 if ref.sha256 is not None
