@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
+import rlm as _rlm
+PKG_PROMPTS = Path(_rlm.__file__).resolve().parent / "_data" / "prompts"
+
+
+PROMPTS = PKG_PROMPTS
 FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "leaf-prefix.v1.md",
          "strat-needle.v1.md", "strat-aggregation.v1.md",
          "strat-aggregation.v2.md",
@@ -174,7 +178,7 @@ def test_v3_is_root_v1_plus_exactly_the_chunk_form():
 
 def test_config_pins_the_v3_root_prompt():
     """The pin is the only thing that decides what the running root reads."""
-    from rlm.config import load_config
+    from rlm.config import load_config, resolve_prompt_path
     cfg = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
     assert cfg.scaffold.prompts.root.path.name == "root.v3.md"
     actual = hashlib.sha256((PROMPTS / "root.v3.md").read_bytes()).hexdigest()
@@ -212,10 +216,12 @@ def test_the_pinned_aggregation_template_counts_for_an_overlapping_chunker():
     forces coverage and punishes sampling, so this lands as a wrong answer in
     the arm being measured, not as an error anyone sees.
     """
-    from rlm.config import load_config
+    from rlm.config import load_config, resolve_prompt_path
 
     cfg = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
-    text = Path(cfg.scaffold.prompts.strategy_templates.aggregation.path).read_text(
+    text = resolve_prompt_path(
+        Path(cfg.scaffold.prompts.strategy_templates.aggregation.path)
+    ).read_text(
         encoding="utf-8").lower()
     assert "`chunks` overlaps" in text, "the template never says the windows overlap"
     assert "never sum per-chunk counts" in text
@@ -224,8 +230,10 @@ def test_the_pinned_aggregation_template_counts_for_an_overlapping_chunker():
 
 
 def test_config_pins_match_the_files_on_disk():
-    from rlm.config import load_config
+    from rlm.config import load_config, resolve_prompt_path
     cfg = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
     for path, pinned in cfg.pinned_prompt_hashes().items():
-        actual = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        # `pinned_prompt_hashes` keys are the paths as DECLARED, because that is what
+        # `config_snapshot` records; the file they name now lives in the package.
+        actual = hashlib.sha256(resolve_prompt_path(Path(path)).read_bytes()).hexdigest()
         assert actual == pinned, f"{path} drifted from its config pin"

@@ -23,7 +23,7 @@ import duckdb
 import pytest
 import yaml
 
-from rlm.config import Config
+from rlm.config import Config, resolve_prompt_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -256,8 +256,8 @@ def leaf_prefix_text() -> str:
         raw = yaml.safe_load((REPO_ROOT / "config.yaml").read_text(encoding="utf-8"))
         prompts = raw["scaffold"]["prompts"]
         _LEAF_PREFIX = PromptRegistry.from_files(
-            root_path=REPO_ROOT / prompts["root"]["path"],
-            leaf_prefix_path=REPO_ROOT / prompts["leaf_prefix"]["path"],
+            root_path=resolve_prompt_path(Path(prompts["root"]["path"])),
+            leaf_prefix_path=resolve_prompt_path(Path(prompts["leaf_prefix"]["path"])),
             strategy_paths={},
         ).leaf_prefix()
     return _LEAF_PREFIX
@@ -870,10 +870,10 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
     raw["servers"]["root"]["model"] = "mock-root.gguf"   # == FakeRootServer /props
     raw["scaffold"]["dispatcher"] = "mock"
     prompts = raw["scaffold"]["prompts"]
-    prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
-    prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+    prompts["root"]["path"] = str(resolve_prompt_path(Path(prompts["root"]["path"])))
+    prompts["leaf_prefix"]["path"] = str(resolve_prompt_path(Path(prompts["leaf_prefix"]["path"])))
     if prompts.get("leaf_envelope"):
-        prompts["leaf_envelope"]["path"] = str(REPO_ROOT / prompts["leaf_envelope"]["path"])
+        prompts["leaf_envelope"]["path"] = str(resolve_prompt_path(Path(prompts["leaf_envelope"]["path"])))
     for ref in prompts["strategy_templates"].values():
         ref["path"] = str(REPO_ROOT / ref["path"])
     for ref in (prompts.get("baselines") or {}).values():
@@ -1036,10 +1036,10 @@ def valid_config_file(minimal_cfg_dict: dict, tmp_path: Path) -> Path:
     since the D7 confinement probe is the point of it."""
     raw = copy.deepcopy(minimal_cfg_dict)
     prompts = raw["scaffold"]["prompts"]
-    prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
-    prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+    prompts["root"]["path"] = str(resolve_prompt_path(Path(prompts["root"]["path"])))
+    prompts["leaf_prefix"]["path"] = str(resolve_prompt_path(Path(prompts["leaf_prefix"]["path"])))
     if prompts.get("leaf_envelope"):
-        prompts["leaf_envelope"]["path"] = str(REPO_ROOT / prompts["leaf_envelope"]["path"])
+        prompts["leaf_envelope"]["path"] = str(resolve_prompt_path(Path(prompts["leaf_envelope"]["path"])))
     for ref in prompts["strategy_templates"].values():
         ref["path"] = str(REPO_ROOT / ref["path"])
     for ref in (prompts.get("baselines") or {}).values():

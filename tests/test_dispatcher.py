@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rlm.config import Config
+from rlm.config import Config, resolve_prompt_path
 from rlm.serve.dispatcher import LLMDispatcher, MockDispatcher, predicted_reuse
 from rlm.errors import DispatchError, StepStatus
 
@@ -161,8 +161,8 @@ def _absolutized_prompt_paths(raw: dict) -> dict:
     them absolute so `from_config` can load the registry regardless of the
     working directory the suite happens to run from."""
     prompts = raw["scaffold"]["prompts"]
-    prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
-    prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+    prompts["root"]["path"] = str(resolve_prompt_path(Path(prompts["root"]["path"])))
+    prompts["leaf_prefix"]["path"] = str(resolve_prompt_path(Path(prompts["leaf_prefix"]["path"])))
     for ref in prompts["strategy_templates"].values():
         ref["path"] = str(REPO_ROOT / ref["path"])
     return raw

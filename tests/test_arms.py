@@ -38,7 +38,7 @@ from rlm.measure.arms import (
     run_b3,
     truncate_head_tail,
 )
-from rlm.config import Config
+from rlm.config import Config, resolve_prompt_path
 from rlm.episode import Task
 from rlm.errors import (
     BudgetBreach,
@@ -141,11 +141,11 @@ def bench_cfg(minimal_cfg_dict: dict, tmp_path: Path):
               leaf_seed: int | None = None) -> Config:
         raw = copy.deepcopy(minimal_cfg_dict)
         prompts = raw["scaffold"]["prompts"]
-        prompts["root"]["path"] = str(REPO_ROOT / prompts["root"]["path"])
-        prompts["leaf_prefix"]["path"] = str(REPO_ROOT / prompts["leaf_prefix"]["path"])
+        prompts["root"]["path"] = str(resolve_prompt_path(Path(prompts["root"]["path"])))
+        prompts["leaf_prefix"]["path"] = str(resolve_prompt_path(Path(prompts["leaf_prefix"]["path"])))
         if prompts.get("leaf_envelope"):
             prompts["leaf_envelope"]["path"] = str(
-                REPO_ROOT / prompts["leaf_envelope"]["path"])
+                resolve_prompt_path(Path(prompts["leaf_envelope"]["path"])))
         for ref in prompts["strategy_templates"].values():
             ref["path"] = str(REPO_ROOT / ref["path"])
         for ref in (prompts.get("baselines") or {}).values():

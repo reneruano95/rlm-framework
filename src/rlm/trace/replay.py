@@ -35,7 +35,7 @@ from typing import Any
 
 import duckdb
 
-from rlm.config import Config, PromptRegistry
+from rlm.config import Config, PromptRegistry, resolve_prompt_path
 from rlm.errors import ActionType, Actor, ConfigError, RlmError, StepStatus
 from rlm.episode import compose_user_message, no_cell_observation
 from rlm.serve.roottext import extract_cell, history_message
@@ -120,15 +120,24 @@ def episode_config(snapshot: dict) -> tuple[Config, Any]:
     # one, and a rebuild that skipped it would replay those as prompt DRIFT.
     restricted_ref = prompts.get("root_restricted")
     try:
+        # Resolved, not opened raw. A snapshot records the path as the run declared
+        # it -- `prompts/root.v3.md` -- and the prompts now live inside the package,
+        # so a literal open fails on all 614 stored episodes. `resolve_prompt_path`
+        # tries the recorded path first, so a checkout that still has the file where
+        # the run found it replays byte-identically, and falls back to the package
+        # copy otherwise. The `prompt_hashes` comparison a few lines below is the
+        # safety net: a package copy that has drifted from the file the run used
+        # surfaces as prompt DRIFT rather than as a silent substitution.
         registry = PromptRegistry.from_files(
-            root_path=Path(prompts["root"]["path"]),
-            root_restricted_path=(Path(restricted_ref["path"])
+            root_path=resolve_prompt_path(Path(prompts["root"]["path"])),
+            root_restricted_path=(resolve_prompt_path(Path(restricted_ref["path"]))
                                   if restricted_ref else None),
-            leaf_prefix_path=Path(prompts["leaf_prefix"]["path"]),
-            leaf_envelope_path=(Path(envelope_ref["path"]) if envelope_ref else None),
-            strategy_paths={cat: Path(ref["path"])
+            leaf_prefix_path=resolve_prompt_path(Path(prompts["leaf_prefix"]["path"])),
+            leaf_envelope_path=(resolve_prompt_path(Path(envelope_ref["path"]))
+                                if envelope_ref else None),
+            strategy_paths={cat: resolve_prompt_path(Path(ref["path"]))
                             for cat, ref in prompts["strategy_templates"].items()},
-            baseline_paths={name: Path(ref["path"])
+            baseline_paths={name: resolve_prompt_path(Path(ref["path"]))
                             for name, ref in baseline_refs.items()},
         ).load()
     except KeyError as exc:

@@ -883,6 +883,13 @@ class PromptRegistry:
         )
 
     def _load_one(self, name: str, path: Path, pinned: str | None) -> str:
+        # Resolution lives HERE, at the one place every prompt is actually opened,
+        # rather than at each call site. Three separate callers were found bypassing
+        # a call-site version on 2026-09-01 -- `Config.prompt_registry`,
+        # `trace/replay.py`, and a test building a registry by hand -- which is what
+        # a convention enforced in N places always gets you. `resolve_prompt_path`
+        # is idempotent, so a caller that already resolved loses nothing.
+        path = resolve_prompt_path(path)
         try:
             data = path.read_bytes()
         except OSError as exc:

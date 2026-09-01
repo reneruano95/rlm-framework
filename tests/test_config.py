@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rlm.config import Config, PromptRegistry, config_snapshot, load_config
+from rlm.config import Config, PromptRegistry, config_snapshot, load_config, resolve_prompt_path
 from rlm.errors import ConfigError
 
 
@@ -595,7 +595,7 @@ def test_every_baseline_prompt_is_pinned_and_renders(valid_cfg):
     for _, ref in valid_cfg._prompt_refs():
         assert ref.sha256 is not None, f"{ref.path} is not pinned"
         assert pinned[str(ref.path)] == hashlib.sha256(
-            ref.path.read_bytes()).hexdigest()
+            resolve_prompt_path(ref.path).read_bytes()).hexdigest()
 
 
 def test_render_baseline_without_baselines_configured_is_refused(minimal_cfg_dict):

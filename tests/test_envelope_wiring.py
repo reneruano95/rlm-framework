@@ -19,7 +19,9 @@ from rlm.config import ConfigError, PromptRegistry
 from rlm.errors import EnvelopeParseError, StepStatus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PROMPTS = REPO_ROOT / "prompts"
+import rlm as _rlm
+PKG_PROMPTS = Path(_rlm.__file__).resolve().parent / "_data" / "prompts"
+PROMPTS = PKG_PROMPTS
 
 
 # --------------------------------------------------------------------------- #
