@@ -39,10 +39,16 @@ packages = ["src/rlm"]
 
 # The editable install must put BOTH the repo root and `src/` on sys.path.
 # `src/` is what makes `import rlm` resolve; the repo root is what makes
-# `import bench` resolve, and `rlm bench` needs it at RUNTIME -- `rlm/bench.py`,
-# `rlm/cli.py` and `rlm/verdict.py` take `bench.manifest` as a function-local
-# import precisely because `bench/` is deliberately NOT in the wheel (see
-# `src/rlm/bench.py`'s module docstring and `tests/test_import_rules.py`).
-# `milestones/s1/` and `milestones/s2/` resolve the same way -- `bench/vocab.py` imports both at
-# module import time, which is why those directories cannot be archived.
+# `import bench` resolve, and `rlm bench` needs it at RUNTIME -- `rlm/cli.py` and
+# `rlm/measure/verdict.py` take `bench.manifest` as a function-local import
+# precisely because `bench/` is deliberately NOT in the wheel (see
+# `tests/test_import_rules.py`, which enforces it).
+#
+# Three claims were removed here on 2026-09-01, each verified false:
+#   - a citation to `src/rlm/bench.py`'s docstring -- that file does not exist
+#   - "`bench/vocab.py` imports `milestones/s1` and `s2` at module import time" --
+#     `vocab.py:29` says in so many words that it "imports nothing from
+#     `milestones/`", and `grep sys.path bench/*.py` finds nothing
+#   - "which is why those directories cannot be archived" -- they were archived in
+#     `ff6c8ea`, and the guard that would have stopped it went in the same commit
 dev-mode-dirs = [".", "src"]
