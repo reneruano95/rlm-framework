@@ -577,5 +577,19 @@
    "cell": "import re\nfrom collections import Counter\ndef names(doc):\n    return re.findall(r\"\\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b\", doc)\ncnt = Counter()\nfor d in docs:\n    for c in names(d):\n        cnt[c]+=1\nfor k,v in cnt.most_common(40):\n    print(v,k)",
    "observation_view": ""
   }
- ]
+ ],
+ "provenance": {
+  "note": "Extracted once from traces/rlm.duckdb, which is git-ignored run output. The generator (tests/fixtures/repetition/extract.py) was deleted 2026-09-01; everything needed to regenerate these turns is recorded here.",
+  "sql": "SELECT step_idx, action_payload, observation_view FROM steps WHERE episode_id = ? AND action_type = 'repl_exec' AND status = 'ok' ORDER BY step_idx",
+  "extract_cell_args": {
+   "langs": [
+    "repl",
+    "python",
+    "py"
+   ],
+   "select": "first"
+  },
+  "what_this_episode_did": "synth-07: the model repeated one cell 111x and the episode ended in budget_kill",
+  "turns_captured": 115
+ }
 }

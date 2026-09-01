@@ -397,5 +397,19 @@
    "cell": "import re\nfrom collections import Counter\ndocs = context.split(\"=== DOCUMENT BREAK ===\")\ndef all_orgs(doc):\n    subj = re.findall(r\"\\[ENT-\\d+\\]\\s+(.+?)\\n\", doc)\n    disp = re.findall(r\"custody passed from the (.+?) to the (.+?)\", doc)\n    names = list(subj)\n    for a, b in disp:\n        names.append(a)\n        names.append(b)\n    return names\n\nsets = []\nfor d in docs:\n    names = all_orgs(d)\n    sets.append(set(names))\n    print(f\"doc: {len(names)} mentions, {len(set(names))} unique\")\n\ninter = sets[0] & sets[1] & sets[2]\nprint(\"intersection:\", inter)",
    "observation_view": "[stdout]\ndoc: 274 mentions, 161 unique\ndoc: 277 mentions, 158 unique\ndoc: 271 mentions, 156 unique\nintersection: {'E', 'A', 'Z', 'M', 'W', 'B', 'Y', 'K', 'Q', 'T', 'X', 'P', 'I', 'J', 'C', 'S', 'F', 'O', 'G', 'U', 'N', 'Glincrowetofts Bonding Yard', 'H', 'D', 'R', 'L'}\n"
   }
- ]
+ ],
+ "provenance": {
+  "note": "Extracted once from traces/rlm.duckdb, which is git-ignored run output. The generator (tests/fixtures/repetition/extract.py) was deleted 2026-09-01; everything needed to regenerate these turns is recorded here.",
+  "sql": "SELECT step_idx, action_payload, observation_view FROM steps WHERE episode_id = ? AND action_type = 'repl_exec' AND status = 'ok' ORDER BY step_idx",
+  "extract_cell_args": {
+   "langs": [
+    "repl",
+    "python",
+    "py"
+   ],
+   "select": "first"
+  },
+  "what_this_episode_did": "synth-01: the model repeated one cell 70x and the episode ended in context_exhausted",
+  "turns_captured": 79
+ }
 }
