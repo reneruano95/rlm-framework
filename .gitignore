@@ -36,3 +36,6 @@ upstream/__pycache__/
 # outputs are not.
 runs/*
 !runs/README.md
+
+# Playwright MCP scratch: console logs and page snapshots from browser tooling.
+.playwright-mcp/
