@@ -1,10 +1,29 @@
-"""The dependency rule (spec §5): C1-C3, C5, C6 must not import C4 or any LLM client."""
+"""The dependency rule (spec §5): C1-C3, C5, C6 must not import C4 or any LLM client.
+
+Resolution is by `find_spec`, not by walking up from this file. Measured 2026-09-01:
+with a `parents[1]/"src"/"rlm"` walk, a COPIED package makes that path absent, all 25
+isolation cases `pytest.skip("not implemented yet")`, and the coverage guard below
+computes `on_disk` from an empty rglob and passes against `set()` -- so the one test
+that still ran was the one that proved nothing. `1 passed, 25 skipped` was the whole
+lint. This is the instrument every structural claim in the reorganization is measured
+by, so it fails loudly instead: a listed module that is absent is an error, never a skip.
+"""
 import ast
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-RLM = Path(__file__).resolve().parents[1] / "src" / "rlm"
+
+def _rlm_root() -> Path:
+    """The installed/importable `rlm` package, wherever it is."""
+    spec = importlib.util.find_spec("rlm")
+    if spec is None or not spec.origin:
+        raise RuntimeError("rlm is not importable -- the dependency lint cannot run")
+    return Path(spec.origin).resolve().parent
+
+
+RLM = _rlm_root()
 
 # modules that must never reach a model server, directly or transitively
 ISOLATED = [
@@ -124,22 +143,50 @@ def _imports(path: Path) -> set[str]:
 @pytest.mark.parametrize("rel", ISOLATED)
 def test_isolated_modules_do_not_import_llm_clients(rel):
     path = RLM / rel
-    if not path.exists():
-        pytest.skip(f"{rel} not implemented yet")
+    assert path.exists(), (
+        f"{rel} is on the ISOLATED list but absent from {RLM}. A listed module that "
+        f"vanished is either a rename the list did not follow or a package that did "
+        f"not copy whole -- both are lint failures, not reasons to skip."
+    )
     for name in _imports(path):
         assert name.split(".")[0] not in FORBIDDEN_ROOTS, f"{rel} imports {name}"
         assert name not in FORBIDDEN_RLM, f"{rel} imports {name}"
 
 
+# Exempt by RELATIVE PATH, not by basename. The old rule was `p.name not in {...}`,
+# which meant any rename that reused an exempt basename inherited the exemption, and
+# any rename AWAY from one silently lost it. Two of these hold an HTTP client, so
+# losing their exemption makes the lint unsatisfiable in both directions at once:
+# listed -> fails on httpx, unlisted -> fails the coverage guard.
+# `__init__.py` stays a basename rule because every one of them is exempt, at any depth.
+EXEMPT_PATHS = frozenset({
+    "serve/dispatcher.py",   # C4 itself: this is where the client belongs
+    "serve/rootclient.py",   # C4 itself
+    "episode.py",            # composition root, spec-frozen exemption
+    "cli.py",                # composition root, spec-frozen exemption
+    "config.py",
+    "trace/lifecycle.py",
+    "errors.py",
+})
+
+
 def test_lint_covers_every_isolated_module_that_exists():
     """Guard against a component being added without lint coverage."""
-    listed = {p.replace("/", "\\") for p in ISOLATED} | {p for p in ISOLATED}
+    listed = {p.replace("\\", "/") for p in ISOLATED}
     on_disk = {
         str(p.relative_to(RLM)).replace("\\", "/")
         for p in RLM.rglob("*.py")
-        if p.name not in {"__init__.py", "dispatcher.py", "rootclient.py",
-                          "episode.py", "cli.py", "config.py", "lifecycle.py",
-                          "errors.py"}
+        if p.name != "__init__.py"
     }
-    uncovered = on_disk - {p.replace("\\", "/") for p in listed}
+    assert on_disk, (
+        f"the coverage guard found no modules under {RLM}. An empty scan makes this "
+        f"assertion vacuous, which is exactly the silent green it exists to prevent."
+    )
+    uncovered = on_disk - listed - EXEMPT_PATHS
     assert not uncovered, f"components missing from ISOLATED lint list: {uncovered}"
+
+
+def test_every_exempt_path_exists():
+    """An exemption for a module that is gone is a hole nothing reports."""
+    missing = {p for p in EXEMPT_PATHS if not (RLM / p).exists()}
+    assert not missing, f"EXEMPT_PATHS names modules that do not exist: {missing}"
