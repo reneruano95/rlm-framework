@@ -321,7 +321,19 @@ Applying that floor to a 0–100 scale, and then applying it again to the rubric
 
 ## 5. The three beliefs, adjudicated
 
-### (a) The harness-swap confound — DESTROYED for both papers. Our same-model baselines are not the differentiator.
+### (a) The harness-swap confound — DESTROYED for both papers, and then found in our own S4. Our baselines are not same-model at all.
+
+> **AMENDED 2026-09-01, same day, against this project's interest** [V]. When this section was
+> written it accepted the premise that our baselines are same-model and disputed only whether that
+> made us special. **The premise is false.** `config.yaml:274` pins the **bench** model to the *leaf*
+> GGUF (`Qwen3.6-35B-A3B-UD-Q4_K_M`), not the root's (`Qwen3.8-27B-Q4_K_M`, `:38`);
+> `checks/test_config.py:625` *enforces* it — `assert bench.model == leaf.model`; and `arms.py`'s
+> own docstring says **"B1 — the leaf model, single shot."** Meanwhile S4's winning RLM arm made
+> **zero leaf calls**, so it ran the root model alone. **S4's +30 / +13 / +29 therefore compare the
+> 27B root carrying the scaffold against the 35B-A3B leaf carrying none — a harness swap and a model
+> swap together, which is the exact charge this section levels at the two papers.** The papers hold
+> their models fixed and we do not. Read everything below knowing the indictment lands on us and not
+> on them, and do not build on those three margins until a same-model arm exists.
 
 `2026-08-31-papers-verified.md` §5 conclusion 4 says our B1/B2/B3 baselines being the same model as the RLM arm makes our margins *"immune to the confound that hollows out AutoDesign and Prime Agent, which report a harness swap and a model swap together and call it a harness gain."* **That is false for both papers** [V].
 
