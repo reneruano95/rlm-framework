@@ -1,10 +1,18 @@
-# tests/test_bridge.py
 import asyncio
 import json
 
-from conftest import _in_process_pair
+import pytest
 
+from rlm._tests._helpers import _in_process_pair
 from rlm.bridge import MAX_FRAME, FrameReader, encode_frame
+
+# The two async tests below carry an EXPLICIT marker rather than relying on
+# `asyncio_mode = "auto"`, which the repo sets and a consumer running
+# `pytest --pyargs rlm` does not. A `pytest_collection_modifyitems` hook was tried
+# first and does not work: pytest-asyncio decides during collection, so the marker
+# arrives too late and the tests fail with "async def functions are not natively
+# supported". A module-level `pytestmark` works but also marks the three sync tests
+# in this file, which pytest-asyncio warns about. Measured 2026-09-01.
 
 
 def test_frames_are_ascii_only_so_lone_surrogates_survive():
@@ -36,6 +44,7 @@ def test_oversize_frame_is_refused_not_buffered():
         raise AssertionError("oversize frame must be refused")
 
 
+@pytest.mark.asyncio
 async def test_eight_concurrent_requests_are_matched_out_of_order():
     """The fan-out idiom the prompt registry teaches must not deadlock."""
     parent, child = _in_process_pair()
@@ -50,6 +59,7 @@ async def test_eight_concurrent_requests_are_matched_out_of_order():
     assert [r["echo"] for r in results] == list(range(8))
 
 
+@pytest.mark.asyncio
 async def test_parent_death_fails_pending_requests_instead_of_hanging():
     parent, child = _in_process_pair()
     parent.on_request(lambda kind, payload: asyncio.sleep(30))

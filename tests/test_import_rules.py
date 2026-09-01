@@ -176,7 +176,10 @@ def test_lint_covers_every_isolated_module_that_exists():
     on_disk = {
         str(p.relative_to(RLM)).replace("\\", "/")
         for p in RLM.rglob("*.py")
-        if p.name != "__init__.py"
+        # `_tests/` ships inside the package but is the suite, not a component:
+        # the rule under test is which PRODUCT modules may hold an HTTP client.
+        # Caught by this very test on 2026-09-01, the run after _tests/ landed.
+        if p.name != "__init__.py" and "_tests" not in p.parts
     }
     assert on_disk, (
         f"the coverage guard found no modules under {RLM}. An empty scan makes this "
