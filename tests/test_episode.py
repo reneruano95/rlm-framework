@@ -553,6 +553,20 @@ async def test_a_concurrent_fanout_loses_no_window_to_a_rotation(
     every chunk, and a partial map still prints an answer. The episode reports
     SUCCESS with windows silently missing -- which is precisely the failure §8
     says the category must catch.
+
+    KNOWN FLAKE UNDER FULL-SUITE LOAD, first recorded 2026-09-01. Measured over
+    five full runs of `pytest tests src/rlm/_tests` on this box: four green, one
+    failure here; and 3 of 3 green when run alone. Nothing in the reorganization
+    that surrounds those runs touches fanout, rotation or the dispatcher. The
+    reading is that six windows under one `asyncio.gather`, racing a manager that
+    genuinely stops a listener, are sensitive to machine load -- which is the
+    same property that makes this the only test able to catch the bug it targets.
+
+    This is recorded rather than quarantined ON PURPOSE. A flaky test guarding a
+    SILENT failure is the worst kind to skip: the failure mode it catches prints
+    an answer and reports SUCCESS, so if this test is ignored nothing else
+    reports the loss. If it fails, re-run it alone before believing it; if it
+    fails alone, it is real.
     """
     pm = RestartingLeafProcess(mock_server, down_s=0.2)
     env = episode_env(root_script=[CONCURRENT_FANOUT, FINAL], answer="42",
