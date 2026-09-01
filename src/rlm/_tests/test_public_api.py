@@ -24,6 +24,7 @@ EXPECTED = [
     "Config",
     "ConfigError",
     "DispatchError",
+    "Dispatcher",
     "EpisodeResult",
     "LLMDispatcher",
     "Lifecycle",

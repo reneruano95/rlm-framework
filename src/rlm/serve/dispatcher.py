@@ -142,7 +142,7 @@ import json
 import re
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 import httpx
 
@@ -251,6 +251,42 @@ _MAX_PREFLIGHT_ROTATIONS = 16
 #: layout the model happened to type correctly.
 LAYOUT_CHUNK_QUESTION = "chunk_question"
 LAYOUT_QUESTION_ONLY = "question_only"
+
+
+@runtime_checkable
+class Dispatcher(Protocol):
+    """What `episode.py` requires of whatever talks to a model.
+
+    Seven members, and the number is not a design choice -- it is what an AST pass
+    over `episode.py` found it calling on `self.dispatcher`, nothing added for
+    symmetry. `LLMDispatcher` and `MockDispatcher` both satisfy it, and until
+    2026-09-01 the second did not: it had four of the seven, and the three missing
+    ones are read UNGUARDED on the rotation path, so a mock in `run_episode` raised
+    AttributeError as soon as a leak or slot exhaustion triggered it.
+
+    Runtime-checkable so a test can assert conformance rather than discover a gap by
+    hitting it. `isinstance` against a Protocol checks that the names EXIST, not that
+    they behave -- which is the honest limit of this seam and the reason the mock's
+    `rotate_pool` raises instead of returning quietly.
+
+    A third implementation is what this is for: point `rlm` at something that is not
+    llama.cpp and the compiler-checkable half of the contract is here.
+    """
+
+    async def query(self, prompt: str, *, role: str, call_id: str, **kwargs: Any) -> Any: ...
+
+    async def count_tokens(self, text: str, *, role: str = "leaf") -> int: ...
+
+    def set_corpus(self, chunks: Any) -> None: ...
+
+    @property
+    def restart_required(self) -> bool: ...
+
+    def rotating(self) -> Any: ...
+
+    def rotate_pool(self) -> None: ...
+
+    steps: list[dict[str, Any]]
 
 
 def compose_leaf_user(question: str, chunk: str | None) -> str:
@@ -1679,9 +1715,19 @@ class LLMDispatcher:
 
 
 class MockDispatcher:
-    """Same interface as LLMDispatcher (`.query`, `.semaphore`), answering
-    from a fixed `{f"{role}:{sha256(prompt).hexdigest()}": response}` table
-    instead of a live server."""
+    """A `Dispatcher` with no server: answers come from a fixed
+    `{f"{role}:{sha256(prompt).hexdigest()}": response}` table.
+
+    It implements the WHOLE protocol, which it did not until 2026-09-01. Before
+    that it carried four of the seven members `episode.py` calls, and the three it
+    lacked -- `restart_required`, `rotating`, `rotate_pool` -- are read UNGUARDED at
+    `episode.py:703,718,722`. So a mock handed to `run_episode` raised AttributeError
+    the moment a leak or slot exhaustion triggered the rotation path, and it looked
+    fine only because no test using it had ever reached that branch.
+
+    A mock has no pool and no process, so the rotation semantics below are not stubs
+    of convenience -- they are what "no server" actually means.
+    """
 
     def __init__(self, fixtures: dict[str, str], *, parallel: int = 1024) -> None:
         self._fixtures = dict(fixtures)
@@ -1699,6 +1745,31 @@ class MockDispatcher:
         writes carry the same leak columns. There is no slot pool here: a
         MockDispatcher never touches a server, so it has no slot to reuse."""
         self._chunk_index = ChunkIndex.from_chunks(chunks) if chunks else None
+
+    @property
+    def restart_required(self) -> bool:
+        """Never. There is no slot pool to exhaust, so nothing can require a
+        restart -- which is the only answer a serverless double can give."""
+        return False
+
+    @contextlib.asynccontextmanager
+    async def rotating(self):
+        """A no-op window. The real one quiesces, lets the caller replace the
+        process, and guarantees reopen; with no process there is nothing to
+        quiesce and nothing to reopen, so entering and leaving is the whole of it."""
+        yield
+
+    def rotate_pool(self) -> None:
+        """Refused, loudly, and that is the point.
+
+        The real one adopts a fresh pool because a new process made every slot
+        virgin again. A mock that silently accepted this would let a test assert
+        R13's never-reuse policy against a pool that never existed -- a green
+        result about nothing. A test that reaches here needs a real dispatcher."""
+        raise DispatchError(
+            "MockDispatcher.rotate_pool: there is no slot pool to rotate. A test "
+            "that reaches the rotation path needs LLMDispatcher, not this double."
+        )
 
     async def count_tokens(self, text: str, *, role: str = "leaf") -> int:
         """A dry run has no server to ask, so this is a stated approximation,

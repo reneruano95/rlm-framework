@@ -52,8 +52,8 @@ __all__ = [
     # configuration, including the config the package ships with
     "Config", "ConfigError", "load_config", "default_config_path", "config_snapshot",
     "PromptRegistry", "resolve_prompt_path",
-    # talking to a model: the real one, and the double the shipped suite runs on
-    "LLMDispatcher", "MockDispatcher",
+    # talking to a model: the contract, the real one, and the double the suite runs on
+    "Dispatcher", "LLMDispatcher", "MockDispatcher",
     # recording what happened
     "TraceLogger", "Lifecycle",
     # the isolate the model's code runs in
@@ -78,6 +78,7 @@ _EXPORTS = {
     "config_snapshot": ("rlm.config", "config_snapshot"),
     "PromptRegistry": ("rlm.config", "PromptRegistry"),
     "resolve_prompt_path": ("rlm.config", "resolve_prompt_path"),
+    "Dispatcher": ("rlm.serve.dispatcher", "Dispatcher"),
     "LLMDispatcher": ("rlm.serve.dispatcher", "LLMDispatcher"),
     "MockDispatcher": ("rlm.serve.dispatcher", "MockDispatcher"),
     "TraceLogger": ("rlm.trace", "TraceLogger"),
@@ -109,7 +110,9 @@ if TYPE_CHECKING:  # so a type checker and an editor see the real symbols
     )
     from rlm.measure.checkers import CHECKERS, check, near_miss_suite  # noqa: F401
     from rlm.sandbox.manager import SandboxManager  # noqa: F401
-    from rlm.serve.dispatcher import LLMDispatcher, MockDispatcher  # noqa: F401
+    from rlm.serve.dispatcher import (  # noqa: F401
+        Dispatcher, LLMDispatcher, MockDispatcher,
+    )
     from rlm.serve.leakcheck import ChunkIndex  # noqa: F401
     from rlm.serve.serverproc import LlamaServerProcess  # noqa: F401
     from rlm.trace import TraceLogger  # noqa: F401
