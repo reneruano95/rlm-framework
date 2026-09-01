@@ -215,3 +215,54 @@ There is real quality headroom to gate on, despite v1 being nearly saturated: in
 
 1. **The proposer's model.** Local root (consistent with "everything local", and the thing under test), or a stronger model offline (better candidates, but then the artifact is not something the local agent could have produced alone)? v0 assumes **local root**; say if that should be an arm instead of an assumption.
 2. **Failure appetite.** R1 says the honest expected outcome is that nothing passes. Is *"the gate works and rejects everything"* an acceptable v0 deliverable, or should v0 also hand-author one artifact known to help (e.g. E3's cross-check instruction) as a **positive control** that proves the gate can say yes? This spec's recommendation is **yes, add the positive control** — a gate never observed to accept is not yet known to work.
+
+---
+
+## 11. The proposer's contract, preserved from `gate/propose.py` before its deletion
+
+**Added 2026-09-01.** `gate/propose.py` was deleted (reorganization group D8): it never
+ran — `git log --all --diff-filter=A` finds zero `round-*.json` across the repo's whole
+history, and §6 of the 08-28 results says so directly, *"The proposer does not exist.
+Step 5 has not begun"*, in the same commit that added the file. Its output format was
+prime-agent's `HarnessEntry` and its input was prime-agent session JSONL, so both ends
+died with that harness.
+
+Its SYSTEM prompt did not die with it. It is genuine design derived from a measured
+failure: in pc-02's agg-07 trace the local root wrote **8 of 8 artifacts as memorised
+answer logs**, which is what every constraint below exists to refuse. Any future
+proposer — pointed at `src/rlm/`'s own scaffold rather than at prime-agent — starts here.
+
+```
+You read the execution trace of an agent that solved (or failed) one task and you
+propose ONE reusable operating rule that would make the next attempt at a task of this
+KIND go better.
+
+You are not answering the task. You are not summarising what happened. You are writing
+a rule for a future agent that will never see this trace.
+
+HARD CONSTRAINTS, and a proposal that breaks any of them is discarded unread:
+- Name no number, count, file path, identifier, organisation or entity that appears in
+  the corpus or in the answer. A rule that mentions a specific value is a memorised
+  answer wearing a rule's clothes.
+- Name no configuration setting, budget, timeout, cap, route or termination rule. You
+  cannot change those and asking for more of them is not a rule.
+- Do not write a generic virtue. "Be careful", "double-check your work" and "think step
+  by step" are worthless: the agent in this trace was already trying. A rule earns its
+  place by naming the SPECIFIC MECHANISM that went wrong and the SPECIFIC OBSERVABLE
+  that would have revealed it.
+
+Reply with ONE JSON object and nothing else:
+{"kind": "prompt" | "skill", "title": "<short imperative>", "content": "<the rule>"}
+
+`kind` is "skill" only when the rule is a concrete procedure a future agent could follow
+mechanically; otherwise "prompt". Keep `content` under 900 characters.
+```
+
+Two constraints are worth reading as measurements rather than style. The first — no
+value that appears in the corpus — is the direct answer to the 8-of-8 failure. The
+third — no generic virtue — is what separates a rule from the class of artifact this
+project has already gated three times and rejected three times.
+
+**What does NOT carry over:** `kind` is drawn from prime-agent's harness entry
+taxonomy. A proposer aimed at `src/rlm/` takes its kinds from the 13 prompt slots
+`Config._prompt_refs()` returns, and nothing in this scaffold has a "skill".
