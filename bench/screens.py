@@ -57,7 +57,16 @@ from typing import Any, Sequence
 # it moved on 2026-09-01. A depth count is a silent dependency on the layout.
 REPO_DEFAULT = find_repo_root(pathlib.Path(__file__))
 
-ALLOWED_KINDS = frozenset({"prompt", "skill"})
+#: What a candidate for THIS scaffold may be. One kind, because that is how many
+#: this scaffold has: `Config._prompt_refs()` returns 13 named prompt slots, and
+#: nothing in `src/rlm` has a "skill" -- that was prime-agent's harness taxonomy.
+#:
+#: Dropping it changes no recorded verdict, and that was measured rather than assumed:
+#: across all ten archived harness snapshots the entries are 23 `memory` and ZERO of
+#: every other kind. The 8-of-8 finding -- the local root writing every artifact as a
+#: memorised answer log -- is a finding about `memory`, which S-kind rejected then and
+#: rejects now. `skill` was accepted by a screen that never saw one.
+ALLOWED_KINDS = frozenset({"prompt"})
 
 #: Models in `src/rlm/config.py` whose fields are budgets, caps, routes or
 #: termination rules -- the surface I1 says no artifact may write. Field names are
@@ -251,7 +260,26 @@ class Screens:
                              passed=all(r.passed for r in results), results=results)
 
     def check_state(self, state: dict) -> list[ScreenVerdict]:
-        """Screen every entry of a HarnessState-shaped candidate set."""
+        """Screen every entry of a HarnessState-shaped candidate set.
+
+        THIS SHAPE IS ARCHIVED EVIDENCE, NOT THE INPUT FORMAT. It is prime-agent's
+        `harness_state.json`, and prime-agent is a concluded spike. The only files
+        this reads today are the ten snapshots under
+        `docs/research/2026-08-26-prime-agent-spike/results/phase-b/harness/`, kept
+        because they are what the recorded screening actually ran against.
+
+        `check()` above is the part that is not prime-agent-shaped: it takes a plain
+        `{id, kind, title, content}` and runs the four screens. A candidate producer
+        for `src/rlm` writes that dict directly; it does not need this reader, and
+        this reader is not a template for it.
+
+        No such producer exists. `gate/propose.py` was deleted 2026-09-01 having never
+        run, and the reason it cannot simply be rewritten is recorded rather than
+        vague: the episode store holds 237 successful RLM episodes of which SIX
+        delegate substantively, so there is nothing yet to mine a rule from. That is
+        what benchmark v2 exists to change, and it is the real blocker -- not this
+        file's shape.
+        """
         out: list[ScreenVerdict] = []
         for kind, entries in (state.get("entries") or {}).items():
             for entry in (entries or {}).values():
@@ -285,7 +313,10 @@ def _normalised_contains(text: str, answer: str) -> bool:
 def main() -> int:
     import argparse
     ap = argparse.ArgumentParser(description="Screen a candidate artifact set.")
-    ap.add_argument("state", help="a harness_state.json-shaped candidate set")
+    ap.add_argument("state",
+                    help="an ARCHIVED prime-agent harness_state.json. See "
+                         "Screens.check_state: this is the evidence reader, not the "
+                         "input format a producer for src/rlm would write.")
     ap.add_argument("--repo", default=str(REPO_DEFAULT))
     ap.add_argument("--split", default=None)
     ap.add_argument("--json", action="store_true")

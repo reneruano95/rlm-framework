@@ -44,7 +44,9 @@ def main() -> int:
 
     # ---- S-kind --------------------------------------------------------------
     check("S-kind accepts prompt", s.s_kind(entry(kind="prompt")).passed)
-    check("S-kind accepts skill", s.s_kind(entry(kind="skill")).passed)
+    # "skill" is prime-agent's kind and names nothing here; see ALLOWED_KINDS.
+    check("S-kind rejects skill (no such thing in this scaffold)",
+          not s.s_kind(entry(kind="skill")).passed)
     check("S-kind rejects memory", not s.s_kind(entry(kind="memory")).passed)
     check("S-kind rejects subagent (a route, per I1)", not s.s_kind(entry(kind="subagent")).passed)
 

@@ -236,6 +236,36 @@ Named rather than quietly dropped:
 
 - **No `rlm/gate/` subpackage.** §1 measured why: `gate/` is stdlib-only with zero importers. It stays where it is.
 - **No second package root (`rlmx/`).** Its stated justification was moving "30 frozen task checkers" out of the library. **There are 6 checkers**, all generic format logic (`measure/checkers.py:126-133`), and the split has nothing to move.
-- **No `ARCHITECTURE.md` split.** Real problem, cited by line across the research record, owed as its own decision.
+- **No `ARCHITECTURE.md` split — DECIDED 2026-09-01, and the premise was wrong.** It was
+  carried through this whole document as "170 KB is not a reference, it is an archive".
+  Measured: **582 lines**, 16 sections, the largest 35.6 KB. The bytes come from line
+  LENGTH, not from size — 290 characters per line on average, one of 5,355, because each
+  paragraph is a single line. 582 lines is navigable. Against that, splitting costs **40
+  line citations across 8 documents**, all of which resolve today (checked: zero out of
+  range) and none of which any test guards. The last commit to touch the file produced a
+  30-insertion, 7-deletion diff — readable. The real cost of the long lines is narrow and
+  survivable: one `grep` returns 5,163 characters. **It stays.** Reflowing would break the
+  same 40 citations for a smaller gain than splitting, so that is refused too.
 - **No CI.** This is the one axis where dspy is genuinely ahead, and it is not a layout change. Until it exists, every rule here is enforced by a suite someone must remember to run — state that honestly rather than claim the guarantee.
-- **Re-pointing the gate's decision machinery at `src/rlm/`'s own scaffold** — the owner's stated requirement. Four rounds of the loop failed to address it, and it is not a reorganization: it is the design of what replaces prime-agent as the thing being gated. It gets its own spec.
+- **Re-pointing the gate at `src/rlm/` — SPLIT 2026-09-01 into the part that was
+  actionable and the part that is blocked, rather than deferred whole.**
+
+  *Done:* `ALLOWED_KINDS` dropped `"skill"`. It was prime-agent's harness taxonomy and
+  names nothing here — `Config._prompt_refs()` returns 13 named prompt slots and none is
+  a skill. Measured before changing it: across all ten archived harness snapshots the
+  entries are **23 `memory` and zero of every other kind**, so no recorded verdict moves.
+  The 8-of-8 finding is about `memory`, which S-kind rejected then and rejects now;
+  `skill` was accepted by a screen that never saw one. `check_state` and the CLI now say
+  plainly that the `harness_state.json` shape is ARCHIVED EVIDENCE, not the input format
+  — `check()` already takes a plain `{id, kind, title, content}` and is the generic half.
+
+  *Refused:* making the taxonomy injectable. One caller, no second in sight — the seam
+  the critic killed three times in planning, and it would be built for a consumer that
+  does not exist.
+
+  *Blocked, on something nameable:* the gate has no candidate PRODUCER. `gate/propose.py`
+  never ran and was deleted; rewriting it is not the obstacle. The episode store holds
+  **237 successful RLM episodes of which six delegate substantively**, so there is
+  nothing to mine a rule from yet. Benchmark v2 is what changes that, and until it does,
+  a producer would be a generator with no material. This is not "later" — it is a
+  dependency with a number on it.
