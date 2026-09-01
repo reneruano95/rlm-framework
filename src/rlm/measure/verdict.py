@@ -26,7 +26,7 @@ pre-registration exists to prevent:
     gate;
   * every win claim states its cost multiple beside the margin.
 
-WHY IT IS ISOLATED (tests/test_import_rules.py). A verdict must be
+WHY IT IS ISOLATED (checks/test_import_rules.py). A verdict must be
 recomputable from the record with no server reachable -- that is what makes
 S4 re-scoreable offline and what stops a model-graded step from creeping into
 scoring. So this module imports duckdb, `rlm.measure.stats` and the standard library,

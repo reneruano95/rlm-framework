@@ -22,7 +22,7 @@ exactly one place -- `config.yaml` -- which is also the only place
 **What this module may not do:** talk HTTP. Readiness is an injected
 `health_probe` coroutine, supplied by whoever already owns a client, so this
 module imports nothing but the standard library and the config schema
-(`tests/test_import_rules.py` lints it).
+(`checks/test_import_rules.py` lints it).
 """
 from __future__ import annotations
 

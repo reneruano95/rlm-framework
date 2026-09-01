@@ -27,7 +27,8 @@ tells you whether you may touch it.
 |---|---|---|
 | `src/rlm/` | **live code** | The runtime, and the only thing in the wheel. Moved here from `rlm/` on 2026-08-22. |
 | `bench/` | **live code + frozen artifact** | The benchmark builder *and* frozen v1 (`manifest.json`, `tasks/`, `corpora/`). The frozen half is pinned by `benchmark.manifest_sha256`. |
-| `tests/` | **live code** | Repo-level tests: the benchmark, the gate, citations, the dependency lint. The package carries its own contract suite at `src/rlm/_tests/`, which ships inside the copy unit. 869 tests across the two. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant, and resolves the package by `find_spec` so it cannot pass vacuously on a copy. |
+| `checks/` | **live code** | Tests of the **repo**: the benchmark, the gate, the ~176 milestone citations, the dependency lint. They read `bench/`, `docs/` and git history, so they cannot travel with the package — which is why they are not called `tests/`. `test_import_rules.py` enforces the C1–C6 dependency rule as a checked invariant, and resolves the package by `find_spec` so it cannot pass vacuously on a copy. Renamed from `tests/` on 2026-09-01. |
+| `src/rlm/_tests/` | **live code, inside the package** | Tests of the **library**: envelope, budget, dispatcher protocol, lifecycle, sandbox. Reads nothing outside `src/rlm/`, so it ships inside the copy unit and a consumer can verify the wheel they installed — the same rule that put the prompts in `_data/`. 887 tests across the two directories on 2026-09-01 — 717 in `checks/`, 170 here; `pytest` runs both (`testpaths` in `pyproject.toml`). |
 | `src/rlm/_data/` | **frozen artifact, inside the package** | The 18 sha-pinned prompts and `config.default.yaml`. Moved here from a root-level `prompts/` on 2026-09-01 so a copied `rlm/` needs no repo. See "before you move anything". |
 | `upstream/` | **active work, not evidence** | llama.cpp defect reports (R13 slot leak, R14 continuous batching). Both still open upstream. It belongs to no gate and `ARCHITECTURE.md` cites it zero times — it was briefly filed under `milestones/` on 2026-08-22 and moved back out the same day, because "a bug report about someone else's project" is not a milestone. |
 | `docs/` | **live documents** | Research, specs, plans. Conventions in [`docs/README.md`](docs/README.md). |
@@ -49,7 +50,7 @@ Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
    `ARCHITECTURE.md`, `CHANGELOG.md`, `config.yaml` and `src/rlm` docstrings
    were deliberately kept — a spec that stops saying where its numbers came
    from is worse than one whose citations need a `git show` — and
-   `tests/test_citations.py` checks every one is still retrievable.
+   `checks/test_citations.py` checks every one is still retrievable.
 2. **`traces/` is gitignored *and* is the sole episode truth.** Both halves matter:
    git will not save you, and nothing else holds the record.
 3. **`tools/llamacpp-vulkan-dflash2/` has no zip and cannot be re-downloaded.** It
@@ -60,9 +61,9 @@ Verified on 2026-08-22 by deleting it: confinement re-tested as denied.
 ## Commands
 
 ```bash
-uv run pytest -q                              # 869 tests, ~10 min (repo + the package's own)
+uv run pytest -q                              # 887 tests, ~10 min (repo + the package's own)
 uv run pytest --pyargs rlm -q                 # just the package's contract suite, ~7 s
-uv run python tests/verify_distribution.py    # copy it out, build a wheel, prove both run
+uv run python checks/verify_distribution.py    # copy it out, build a wheel, prove both run
 uv run rlm validate --no-server-probe         # config + prompt pins + sandbox confinement
 uv run rlm replay <episode-id>                # re-derive an episode from the store alone (I4)
 uv run rlm bench --smoke                      # the only path that launches the root server
@@ -102,7 +103,7 @@ trace store alone. Several things are therefore frozen, and two of them fail
   sibling lookup. Still not *declared* package data, and verified 2026-09-01 that it
   does not need to be: hatchling includes it because it sits inside the package, and
   a built wheel carries all 22 non-`.py` files (this, `config.default.yaml`, the 18
-  prompts, two fixtures). `tests/verify_distribution.py` checks that on demand.
+  prompts, two fixtures). `checks/verify_distribution.py` checks that on demand.
 - **`.gitattributes`** — `*.md text eol=lf` and `bench/corpora/** -text` are what
   make every content hash reproducible across clones. Changing it breaks all 13
   prompt pins and 24 corpus hashes on the next fresh clone, invisibly on the

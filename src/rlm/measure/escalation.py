@@ -11,7 +11,7 @@ means driving arms against live servers, which is composition-root work.
 
 WHY THIS IS ITS OWN MODULE. Choosing and serialising cells is JSON and verdict
 inspection -- no server, no dispatcher, no HTTP client -- so it belongs UNDER
-§5's dependency-rule lint (`tests/test_import_rules.py` ISOLATED). The lint is
+§5's dependency-rule lint (`checks/test_import_rules.py` ISOLATED). The lint is
 load-bearing here rather than tidy: a planner that could ASK a server which
 cells to re-run would be choosing its own replicates, and §8's pre-registration
 exists to prevent exactly that.

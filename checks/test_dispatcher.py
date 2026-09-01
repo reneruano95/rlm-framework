@@ -1,4 +1,4 @@
-# tests/test_dispatcher.py
+# checks/test_dispatcher.py
 import copy
 import hashlib
 import os

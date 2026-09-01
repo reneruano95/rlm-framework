@@ -1,4 +1,4 @@
-# tests/test_rootclient.py
+# checks/test_rootclient.py
 import hashlib
 
 import pytest
@@ -110,7 +110,7 @@ async def test_fixed_schedule_keeps_the_old_behaviour(fake_root_server, minimal_
 
 async def test_history_renders_one_think_block_per_past_turn(fake_root_server):
     """Qwen3.8's template emits its OWN empty think block in front of every
-    past assistant turn (tests/fixtures/repetition/qwen38_chat_template.jinja).
+    past assistant turn (checks/fixtures/repetition/qwen38_chat_template.jinja).
     Storing assistant_prefix(rendered) + raw therefore rendered TWO blocks per
     turn in every S4 and re-validation request (v0.3.16 finding). After the
     fix the history carries exactly one, and the next render is the previous

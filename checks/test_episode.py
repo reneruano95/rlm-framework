@@ -1,4 +1,4 @@
-# tests/test_episode.py
+# checks/test_episode.py
 import asyncio
 import sys
 

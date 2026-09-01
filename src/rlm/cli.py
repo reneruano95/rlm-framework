@@ -736,7 +736,7 @@ def cmd_replay(args) -> int:
 #
 # WHY THIS CLASS LIVES HERE, IN THE PROCESS ROOT, AND NOT IN A NEW MODULE.
 # `src/rlm/measure/bench.py`'s dependency-rule exemption is spec-frozen at exactly two
-# modules -- `src/rlm/episode.py` and `src/rlm/cli.py` (`tests/test_import_rules.py`'s
+# modules -- `src/rlm/episode.py` and `src/rlm/cli.py` (`checks/test_import_rules.py`'s
 # `ISOLATED` list and its comment on `bench.py`). A standalone `rlm/benchserve.py`
 # was the first design considered, and it does not survive that lint. Every
 # module on disk that is not one of the two exempt composition roots (or the

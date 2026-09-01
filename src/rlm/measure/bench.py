@@ -3,7 +3,7 @@ two rules that make a 39-hour run survivable — resume and rerun-once.
 
 WHAT THIS MODULE IS ALLOWED TO TOUCH. It is the shape of a composition root
 (it sequences the arms across two server profiles), but it is NOT one: the
-dependency rule (spec §5, linted by `tests/test_import_rules.py`) exempts
+dependency rule (spec §5, linted by `checks/test_import_rules.py`) exempts
 exactly two modules — `src/rlm/episode.py` and `src/rlm/cli.py` — and widening that
 list is the drift `src/rlm/episode.py`'s docstring forbids. So `src/rlm/measure/bench.py` is
 listed as ISOLATED instead, and everything that reaches a model server or a
@@ -54,7 +54,7 @@ if TYPE_CHECKING:                       # pragma: no cover - typing only
     # `rlm.episode` reaches C4 and `bench.manifest` is not in the wheel; both
     # are structural here (a task is `.task_id` + what the arm does with it,
     # a manifest is `.tasks`/`.sha256`/`.validate`), so the types are all
-    # that is needed. `tests/test_bench.py` pins both out of the runtime
+    # that is needed. `checks/test_bench.py` pins both out of the runtime
     # import set.
     from bench.manifest import BenchmarkManifest, TaskEntry
 

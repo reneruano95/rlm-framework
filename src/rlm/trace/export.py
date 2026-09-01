@@ -7,7 +7,7 @@ trace store and nothing else.
 WHY THIS IS ITS OWN MODULE. Same family as `src/rlm/trace/replay.py`, same reason: this
 is offline re-derivation, and inside `src/rlm/cli.py` nothing stopped it growing a
 dependency on a live server. Here §5's dependency-rule lint
-(`tests/test_import_rules.py` ISOLATED) forbids `httpx`, `rlm.serve.dispatcher` and
+(`checks/test_import_rules.py` ISOLATED) forbids `httpx`, `rlm.serve.dispatcher` and
 `rlm.serve.rootclient` on every run. An export that needed a running server would be
 an export nobody else could reproduce, which defeats the point of shipping one.
 

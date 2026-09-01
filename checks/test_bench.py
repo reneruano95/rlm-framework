@@ -4,7 +4,7 @@ SCHEDULING is what is under test here, so everything model-facing is a double:
 no servers, no real arms, no `run_episode`. The arms arrive as recording
 callables injected through `BenchCtx` -- which is not a test affordance but the
 production wiring: `src/rlm/measure/bench.py` sits on the isolated side of the dependency
-rule (`tests/test_import_rules.py`), so the only way it can reach C4 at all is
+rule (`checks/test_import_rules.py`), so the only way it can reach C4 at all is
 through a callable someone else built.
 """
 from __future__ import annotations
@@ -861,7 +861,7 @@ async def test_temperature_is_stamped_without_a_power_sampler(tmp_path, bench_cf
 def test_bench_imports_neither_c4_nor_the_benchmark_package():
     """Two rules in one assertion. `rlm.episode` reaches C4, so importing it
     would put an HTTP client behind the scheduler (`src/rlm/measure/arms.py`'s rule, and
-    `tests/test_import_rules.py` lists bench.py as isolated). And `bench/` is
+    `checks/test_import_rules.py` lists bench.py as isolated). And `bench/` is
     not in the shipped wheel (`pyproject.toml` packages = ["rlm"]), so a
     runtime import of the manifest module would break the installed package."""
     tree = ast.parse((REPO_ROOT / "src" / "rlm" / "measure" / "bench.py").read_text(encoding="utf-8"))
@@ -904,7 +904,7 @@ def test_default_outputs_are_not_inside_the_evidence_archive():
 # ServerOrchestra (Task 10): FakeProcess/fake-client doubles, no real servers.
 #
 # `ServerOrchestra` fills bench.py's `quiesce_fn`/`handshake_fn`/
-# `swap_servers_fn` hooks -- but the lint (`tests/test_import_rules.py`)
+# `swap_servers_fn` hooks -- but the lint (`checks/test_import_rules.py`)
 # forces the CLASS ITSELF to live in `src/rlm/cli.py`, not a new module: it needs
 # `ServerClient` for the §4 handshake, and `FORBIDDEN_RLM` bans `rlm.serve.dispatcher`
 # from any module that would have to join `ISOLATED` (see the module docstring

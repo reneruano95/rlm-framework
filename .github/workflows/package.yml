@@ -14,7 +14,7 @@ name: package
 #
 # DOES NOT CHECK: the full repo suite. It needs this box -- a live llama-server, a
 # GPU, Windows Job Objects against real processes -- and pretending otherwise would
-# give a green tick that means less than the one it replaces. `pytest tests` stays a
+# give a green tick that means less than the one it replaces. `pytest checks` stays a
 # local gate, and that limit is stated here rather than hidden.
 
 on:

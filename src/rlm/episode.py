@@ -1,7 +1,7 @@
 """The episode runner — the composition root (spec §5, §6).
 
 THIS IS THE ONLY MODULE PERMITTED TO IMPORT BOTH C4 AND THE ISOLATED
-COMPONENTS. `tests/test_import_rules.py` enforces the rest of the dependency
+COMPONENTS. `checks/test_import_rules.py` enforces the rest of the dependency
 rule; nothing enforces this one but review, so it is written here: if a second
 module ever needs both, the design has drifted and the fix is to move the
 wiring here, not to widen the lint list.

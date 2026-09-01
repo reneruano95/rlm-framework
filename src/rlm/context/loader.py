@@ -9,7 +9,7 @@ sandbox heap, and the C6 blob store as ground truth.
 
 The chunker is the other half of C2 and lives in `rlm.context.chunker` (it has to,
 so the injected token counter keeps this module free of any LLM client —
-`tests/test_import_rules.py` lints both).
+`checks/test_import_rules.py` lints both).
 
 **`context` is the corpus; `chunks` is a set of VIEWS of it, and since §7 #2
 those views OVERLAP.** At window 1,024 / stride 768 every token appears in one

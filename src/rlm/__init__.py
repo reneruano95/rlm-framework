@@ -20,7 +20,7 @@ So a facade with module-scope imports raises `ModuleNotFoundError` at child star
 every episode. Staging the closure instead is worse, not better: `episode.py` pulls
 `serve/dispatcher.py`, which pulls `httpx` -- an HTTP client inside the one process the
 whole architecture exists to keep clients out of, and `sandbox/child.py` is on the
-ISOLATED list in `tests/test_import_rules.py` precisely to forbid that.
+ISOLATED list in `checks/test_import_rules.py` precisely to forbid that.
 
 PEP 562 resolves it. Measured 2026-09-01 in a three-module tree identical to what the
 AppContainer sees: `from rlm.bridge import ...` works, bare `import rlm` loads ONE
@@ -37,7 +37,7 @@ the package -- `bench/` and `gate/` -- import exactly five names between them (`
 `CHECKERS`, `check`, `near_miss_suite`, `ChunkIndex`). Everything else below is what
 `cli.py` needs to assemble one episode, which is what the library is FOR.
 
-`tests/` imports 126 names, 125 of them tests-only. Those are internals under test, not
+`checks/` imports 126 names, 125 of them tests-only. Those are internals under test, not
 API, and they stay reachable by their full path. Deep imports are not forbidden; they
 are simply not the supported surface, and nothing here pretends otherwise.
 """

@@ -205,7 +205,7 @@ def _tokenize_response(body: dict) -> dict:
 
 
 def _render_chatml(messages: list[dict], enable_thinking: bool) -> str:
-    """Qwen3.8-27B's ChatML shape (tests/fixtures/repetition/qwen38_chat_template.jinja),
+    """Qwen3.8-27B's ChatML shape (checks/fixtures/repetition/qwen38_chat_template.jinja),
     the branches the scaffold exercises. Shared by both fake servers: since the
     S2 leaf-template fix, the LEAF renders through /apply-template too (D14).
 
@@ -487,7 +487,7 @@ class MockLlamaServer:
 
     # -- genuine removal, for rotation tests ------------------------------- #
     #
-    # `FakeLeafProcess` (tests/test_episode.py) replaces NOTHING: the mock
+    # `FakeLeafProcess` (checks/test_episode.py) replaces NOTHING: the mock
     # server keeps answering across a "restart", so every rotation test written
     # against it passes whether or not the scaffold actually quiesced the
     # traffic it was about to pull the process out from under. These two make

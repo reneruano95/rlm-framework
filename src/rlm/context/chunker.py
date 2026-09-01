@@ -53,7 +53,7 @@ boundary within a ±10% token tolerance — so a cut may move LATER and a window
 may hold up to `size * (1 + snap_tolerance)` tokens; its head is then that far
 from its end, i.e. the tolerance further than `stride`. Found by hypothesis
 (34 tokens, size 32, sparse boundaries → one 34-token window against a stride of
-32) and pinned in `tests/test_chunker.py`
+32) and pinned in `checks/test_chunker.py`
 (`test_partition_snap_may_overshoot_the_stride_horizon_by_the_tolerance`,
 `horizon_for`). It is a limit of the geometry §7 #2 CONDEMNED, not of the one it
 recommends: at `stride == size` the horizon clause is nearly vacuous anyway. The

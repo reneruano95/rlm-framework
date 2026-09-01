@@ -1,4 +1,4 @@
-# tests/test_leakcheck.py
+# checks/test_leakcheck.py
 """R13's foreign-string detector (spec §10 R13 (3), §5 C4).
 
 The corpus fixtures below are cut down from the real leaked answers quoted in

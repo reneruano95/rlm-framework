@@ -13,7 +13,7 @@ re-derivation able to ask a server what the prompt was would be checking the
 server against itself. Inside `src/rlm/cli.py` nothing maintained that -- the
 composition root imports HTTP clients and dispatchers, so only convention stood
 between this code and a shortcut. Here §5's dependency-rule lint
-(`tests/test_import_rules.py` ISOLATED) enforces it: no `httpx`, no
+(`checks/test_import_rules.py` ISOLATED) enforces it: no `httpx`, no
 `rlm.serve.dispatcher`, no `rlm.serve.rootclient`, checked on every run.
 
 Reaching this required splitting `src/rlm/serve/roottext.py` out of `src/rlm/serve/rootclient.py`

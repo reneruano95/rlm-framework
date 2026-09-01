@@ -1,4 +1,4 @@
-# tests/test_prompts.py
+# checks/test_prompts.py
 import hashlib
 import re
 from pathlib import Path

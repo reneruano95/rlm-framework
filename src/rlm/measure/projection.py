@@ -7,7 +7,7 @@ rather than buried in the middle of the operator surface.
 
 WHY THIS IS ITS OWN MODULE. Pure arithmetic over manifest entries and ledger
 records: no server, no dispatcher, no HTTP client. It therefore belongs UNDER
-§5's dependency-rule lint (`tests/test_import_rules.py` ISOLATED), where
+§5's dependency-rule lint (`checks/test_import_rules.py` ISOLATED), where
 something checks that it stays that way. `src/rlm/cli.py` re-exports every public
 name, so the existing import sites keep working.
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 # the calibration table projects a cost per arm, and a projection over a
 # DIFFERENT arm list than the one the grid runs is a silently wrong number.
 # `rlm.measure.bench` is itself lint-covered, so this does not widen the dependency
-# surface -- see tests/test_import_rules.py.
+# surface -- see checks/test_import_rules.py.
 from rlm.measure.bench import ARM_ORDER
 
 

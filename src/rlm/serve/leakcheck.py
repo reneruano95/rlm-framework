@@ -23,7 +23,7 @@ contamination monitor -- the per-arm hit count is part of the S4 verdict.
 
 THE TWO STATED LIMITS (§10 R13 (3)). Both are properties of the method, not
 bugs to be fixed later, and both are pinned by tests in
-`tests/test_leakcheck.py`:
+`rlm/_tests/test_leakcheck.py`:
 
   1. **Paraphrased leakage is invisible.** An answer that carries another
      chunk's content in its own words carries none of that chunk's
@@ -55,7 +55,7 @@ THE PATTERN SET is derived from the strings that actually leaked in
     which is what an opaque key looks like when it is neither a UUID nor hex.
     The digit requirement is what keeps ordinary English words out.
 
-This module is deliberately ISOLATED (`tests/test_import_rules.py`): it
+This module is deliberately ISOLATED (`checks/test_import_rules.py`): it
 imports nothing but `re` and the stdlib, so the trace/analysis side can import
 it without pulling in an HTTP client, and C4 can call it on every answer.
 """

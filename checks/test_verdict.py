@@ -1,7 +1,7 @@
 """Task 11: `src/rlm/measure/verdict.py` -- §8's scoring, inference and report layer.
 
 Everything here runs against a SYNTHETIC store written by the REAL
-`TraceLogger` (tests/test_trace.py + tests/test_bench.py patterns): the module
+`TraceLogger` (checks/test_trace.py + checks/test_bench.py patterns): the module
 under test reads a closed DuckDB file with the same SQL it will run against a
 39-hour benchmark, so a fixture that hand-built rows with a raw INSERT would
 test a different query than the one that ships.

@@ -11,7 +11,7 @@ lint-covered module may import it. That is a real cost, not a label: the replay
 path needs `history_message` and `extract_cell` to re-derive an episode from
 the trace store, and could not be isolated while they sat behind an HTTP
 client. Splitting the text from the transport puts these under §5's
-dependency-rule lint (`tests/test_import_rules.py` ISOLATED) and lets replay
+dependency-rule lint (`checks/test_import_rules.py` ISOLATED) and lets replay
 follow.
 
 `src/rlm/serve/rootclient.py` re-exports all six, so every existing import site keeps

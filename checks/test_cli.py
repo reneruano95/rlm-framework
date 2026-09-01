@@ -1,4 +1,4 @@
-# tests/test_cli.py
+# checks/test_cli.py
 import asyncio
 import io
 import json
@@ -1379,7 +1379,7 @@ def test_the_arm_runners_hand_every_arm_the_blocks_own_seed(
     seed -- on both the root and the leaf, and on the bench-profile arms too,
     which derive their own `Config` and could silently keep the shipped one.
     (`src/rlm/episode.py` and `src/rlm/measure/arms.py` then put that seed on the wire per
-    call; `tests/test_dispatcher.py` pins the wire end.)
+    call; `checks/test_dispatcher.py` pins the wire end.)
     """
     arms = _ArmRecorder().patch(monkeypatch)
     main(_bench_argv(valid_config_file, tmp_path, "--tasks", "needle-02",

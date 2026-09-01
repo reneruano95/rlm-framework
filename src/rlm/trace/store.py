@@ -18,7 +18,7 @@ did not happen"):
     own connection is the only way to see anything while a run is live)
 
 This module is schema-adjacent only: it imports duckdb + stdlib, nothing
-that reaches a model server (tests/test_import_rules.py enforces this).
+that reaches a model server (checks/test_import_rules.py enforces this).
 """
 from __future__ import annotations
 

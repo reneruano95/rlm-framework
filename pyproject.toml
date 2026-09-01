@@ -26,7 +26,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "src/rlm/_tests"]
+testpaths = ["checks", "src/rlm/_tests"]
 asyncio_mode = "auto"
 filterwarnings = ["error"]
 
@@ -42,7 +42,7 @@ packages = ["src/rlm"]
 # `import bench` resolve, and `rlm bench` needs it at RUNTIME -- `rlm/cli.py` and
 # `rlm/measure/verdict.py` take `bench.manifest` as a function-local import
 # precisely because `bench/` is deliberately NOT in the wheel (see
-# `tests/test_import_rules.py`, which enforces it).
+# `checks/test_import_rules.py`, which enforces it).
 #
 # Three claims were removed here on 2026-09-01, each verified false:
 #   - a citation to `src/rlm/bench.py`'s docstring -- that file does not exist

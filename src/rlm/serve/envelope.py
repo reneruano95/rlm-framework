@@ -34,7 +34,7 @@ WHAT IS DELIBERATELY NOT HERE.
     (`milestones/s2/run_sweep.py`), which must apply the same rule to the plain-text arms.
     This module reports what the model emitted.
 
-Isolated by the §5 dependency rule (`tests/test_import_rules.py`): stdlib only,
+Isolated by the §5 dependency rule (`checks/test_import_rules.py`): stdlib only,
 so the trace/analysis side can re-derive envelope verdicts offline from stored
 answers without constructing an HTTP client.
 """

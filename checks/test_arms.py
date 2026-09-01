@@ -938,7 +938,7 @@ def test_settled_tokens_matches_the_episode_runners_implementation():
 def test_strip_reasoning_matches_rootclients_implementation():
     """`arms._strip_reasoning` is `rlm.serve.rootclient.strip_reasoning`, duplicated
     for the same import-rule reason (`arms.py` may not import `rlm.serve.rootclient`
-    -- `tests/test_import_rules.py`). Pinned equal here."""
+    -- `checks/test_import_rules.py`). Pinned equal here."""
     from rlm.measure.arms import _strip_reasoning
     from rlm.serve.rootclient import strip_reasoning
 

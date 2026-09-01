@@ -273,7 +273,7 @@ servers:
     # bench block stops the RLM-profile leaf before starting this one.
     model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
     port: 8081
-    # SWITCHED WITH THE LEAF, 2026-08-23, and not independently: `tests/
+    # SWITCHED WITH THE LEAF, 2026-08-23, and not independently: `checks/
     # test_config.py:619` asserts this profile shares the leaf's backend and
     # model. It is measured, not assumed -- Vulkan answers correctly at this
     # profile's own geometry (`-c 524288 -np 2`, 262,144 tokens per slot) at

@@ -44,7 +44,7 @@ quiesce -> restart -> `rotate_pool()` -> resume sequence with one guarantee
 deliberately narrowed and documented (`ArmEpisode._rotate_leaf`'s docstring):
 this module cannot re-run §4's `/props` handshake against the restarted
 process, because it cannot talk HTTP at all (`FORBIDDEN_ROOTS` in
-`tests/test_import_rules.py`), not merely `rlm.serve.dispatcher`. `None` (no
+`checks/test_import_rules.py`), not merely `rlm.serve.dispatcher`. `None` (no
 `process_manager` injected) is today's behaviour, unchanged: a clean
 `error/slot_pool_exhausted`, never a crash. B1/B3 never pass one -- their one
 call each cannot exhaust a pool sized >= 1.
@@ -64,7 +64,7 @@ profile's 900 s, sized against a 262K-token slot's measured prefill).
 the only module permitted to import both C4 and the isolated components; arms
 stay on the isolated side by taking the dispatcher (and the trace logger, and
 the registry) as injected arguments, with `Task` imported only for typing.
-`tests/test_import_rules.py` lints it.
+`checks/test_import_rules.py` lints it.
 
 **B1'S OVERFLOW POLICY IS PRE-REGISTERED (§8):** a task whose tokenized corpus
 exceeds the window is head+tail truncated to fit, 50/50, and the truncation is
@@ -168,7 +168,7 @@ __all__ = [
 
 # --- §6 outcome_reason vocabulary ------------------------------------------ #
 # DUPLICATED FROM `src/rlm/episode.py` ON PURPOSE: importing it from there would
-# drag C4 into this module (see the docstring). `tests/test_arms.py` pins the
+# drag C4 into this module (see the docstring). `checks/test_arms.py` pins the
 # two definitions equal, so the vocabulary cannot drift in silence.
 CHECKER_FAILED = "checker_failed"
 SERVER_UNREACHABLE = "server_unreachable"
@@ -198,7 +198,7 @@ NO_SUMMARY = "[no summary]"
 #: was error-drained (not a healthy pool that simply served its `--parallel`
 #: windows, spec §5 C4 — see `ArmEpisode._rotate_leaf`); `ROTATION_FAILED`
 #: fires when a `process_manager.restart()` that WAS attempted could not
-#: complete. `tests/test_arms.py` pins both against `rlm.episode`'s.
+#: complete. `checks/test_arms.py` pins both against `rlm.episode`'s.
 SLOT_POOL_EXHAUSTED = "slot_pool_exhausted"
 ROTATION_FAILED = "rotation_failed"
 
@@ -214,7 +214,7 @@ MAX_FIT_VERIFY_ROUNDS = 3
 
 #: The top-level `config_snapshot` keys this module adds. `config_snapshot`
 #: merges `extra` OVER the config dump, so any collision here would silently
-#: replace a whole config section; `tests/test_arms.py` pins them disjoint from
+#: replace a whole config section; `checks/test_arms.py` pins them disjoint from
 #: `Config`'s own fields.
 SNAPSHOT_KEYS = ("prompt_hashes", "pinned_prompt_hashes", "task", "bench")
 
@@ -309,7 +309,7 @@ def bench_slot_capacity(cfg: Config) -> int:
 #: server", recognised by the module their type is defined in.
 #:
 #: `arms.py` may not import `httpx` (the dependency rule -- `FORBIDDEN_ROOTS`
-#: in `tests/test_import_rules.py` bars every HTTP library from this side), so
+#: in `checks/test_import_rules.py` bars every HTTP library from this side), so
 #: `except httpx.HTTPError` is not available here and the family is recognised
 #: structurally instead. The alternative -- `except Exception` around the root
 #: call -- would swallow the scaffold's own bugs and score them as an ordinary
@@ -379,7 +379,7 @@ _THINK_BLOCK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
 
 def _strip_reasoning(text: str) -> str:
     """`rlm.serve.rootclient.strip_reasoning`, DUPLICATED ON PURPOSE: `arms.py` may
-    not import `rlm.serve.rootclient` (`tests/test_import_rules.py`'s
+    not import `rlm.serve.rootclient` (`checks/test_import_rules.py`'s
     `FORBIDDEN_RLM` — it is C4's HTTP client, exactly what the module
     docstring's "THIS MODULE NEVER IMPORTS C4" forbids). B2's root call still
     needs D16's belt-and-braces strip (a leading `<think>...</think>` block,
@@ -788,7 +788,7 @@ class ArmEpisode:
         `assert_props` — total_slots/n_ctx/build_info re-checked against
         config) as an EXTRA, independent verification that the replacement
         really is what config describes. `arms.py` cannot do that: it is one
-        of the ISOLATED modules `tests/test_import_rules.py` forbids from
+        of the ISOLATED modules `checks/test_import_rules.py` forbids from
         importing an HTTP client AT ALL (`FORBIDDEN_ROOTS` blocks `httpx`
         *and* the stdlib `http`/`socket`, not merely `rlm.serve.dispatcher`) — there
         is no way to GET `/props` from inside this module, so re-running the
@@ -1353,7 +1353,7 @@ async def run_b2(task: "Task", cfg: Config, *, dispatcher: Any, root_client: Any
     while the reduce step talks directly to the root server the way
     `milestones/s1/run_s1.py:control_attempt` does. Neither is constructed here --
     `arms.py` may not import `rlm.serve.dispatcher`/`rlm.serve.rootclient` (the dependency
-    rule; `tests/test_import_rules.py` lints it).
+    rule; `checks/test_import_rules.py` lints it).
 
     `process_manager` is a THIRD, optional injected dependency (the
     `rlm.serve.serverproc.ProcessManager` duck type: one method, `.restart()`), and

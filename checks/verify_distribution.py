@@ -1,6 +1,6 @@
 """The acceptance test for "distributed by copying the folder", as one command.
 
-    .venv/Scripts/python.exe tests/verify_distribution.py
+    .venv/Scripts/python.exe checks/verify_distribution.py
 
 Not collected by pytest (its name does not match `test_*.py`), because it builds
 environments and takes a minute. It is the check that would live in CI if this repo

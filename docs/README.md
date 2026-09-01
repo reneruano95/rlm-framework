@@ -17,7 +17,7 @@ working tree on 2026-08-22**. It is still in git: read any of it with
 `git show 4e75b53:milestones/s2/R13.md`. The ~176 citations to it across
 `ARCHITECTURE.md`, `CHANGELOG.md`, `config.yaml` and `src/rlm` docstrings were
 deliberately not stripped — they are the evidence trail behind every gate
-verdict, and `tests/test_citations.py` checks that each one is still
+verdict, and `checks/test_citations.py` checks that each one is still
 retrievable from that commit.
 
 ## Plan checkboxes are not a status signal

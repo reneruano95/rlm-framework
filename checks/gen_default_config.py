@@ -55,7 +55,7 @@ header = (
     "# `backend_dir`s, the root `dflash` flag AND its `extra_flags` list, and the sandbox\n"
     "# `interpreter` and `bootstrap_dir`. Everything else -- budgets, chunk sizes, prompt slots,\n"
     "# checkers, dispatch policy -- is byte-for-byte the shipped structure, which is\n"
-    "# what `tests/test_default_config.py` asserts so the two cannot drift apart.\n"
+    "# what `checks/test_default_config.py` asserts so the two cannot drift apart.\n"
     "#\n"
     "# The placeholders are not runnable. Nothing in the shipped suite launches a\n"
     "# server; a consumer that wants to run one overrides these ten values.\n"

@@ -6,7 +6,7 @@
 # `backend_dir`s, the root `dflash` flag AND its `extra_flags` list, and the sandbox
 # `interpreter` and `bootstrap_dir`. Everything else -- budgets, chunk sizes, prompt slots,
 # checkers, dispatch policy -- is byte-for-byte the shipped structure, which is
-# what `tests/test_default_config.py` asserts so the two cannot drift apart.
+# what `checks/test_default_config.py` asserts so the two cannot drift apart.
 #
 # The placeholders are not runnable. Nothing in the shipped suite launches a
 # server; a consumer that wants to run one overrides these ten values.
