@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""endurance.py -- the C1b driver for the prime-agent local spike.
+"""endurance.py -- a soak driver for any OpenAI-compatible llama-server.
+
+Moved here from the prime-agent spike's tools/ on 2026-09-01 when the rest of that
+directory was deleted. It survives because it is stdlib + urllib with zero coupling
+to prime-agent, and because `gate/decide.py:29-33` cites its result -- +9.9% thermal
+drift across a 2,000-request run -- as THE REASON wall-clock is recorded but never
+gated. Delete it and a live premise of the decision rule stops being reproducible.
+
+Originally: the C1b driver for the prime-agent local spike.
 
 Reading C1b (docs/superpowers/plans/2026-08-26-prime-agent-local-spike.md,
 section 2, Phase C):
