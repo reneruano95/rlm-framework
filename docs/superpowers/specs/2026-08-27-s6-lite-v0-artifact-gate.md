@@ -316,3 +316,98 @@ across 156 episodes:
 
 So a reimplementation should carry all three, and should not claim any of the three was
 proven in production by these decisions. Only the delivery channel was.
+
+---
+
+## 13. The decision rules, preserved from `gate/` before the unrunnable half was deleted
+
+**Added 2026-09-01.** Five of the seven files under `gate/` were deleted (reorganization
+group D10) after a single measurement: **`decide.py` and `reliability.py` parse a cell
+layout — `on|off/<task>/rep<N>/{answer.txt,wall.txt,exit.txt}` — and there are ZERO
+`answer.txt` files anywhere in this repo.** Those cells lived in WSL and were never
+committed, so both tools had no input that exists. The two runners that would have
+produced them target `$HOME` on a user that is gone. `make_split.py`'s output is frozen
+at `78cc7985…` and re-running it would redraw the split, which R7 forbids.
+
+The verdicts they produced are archived under `docs/research/2026-08-27-s6-lite-v0/`.
+The rules they applied are here, because a rule that exists only inside a deleted script
+is a rule the next implementation has to guess.
+
+### The accept rule (`decide.py`)
+
+Two conjuncts, and a candidate must satisfy BOTH:
+
+```
+Q (quality, non-inferiority)
+    no held-out task that passes OFF may fail ON, at >= 2/3 of reps
+    PASS_FRACTION = 2/3                    (ARCHITECTURE.md:377)
+
+K (cost)
+    median per-task ON/OFF token ratio, task-level paired bootstrap
+    K_MEDIAN_MAX        = 0.90     median must be at or below this
+    K_CI_UPPER_MAX      = 1.00     AND the bootstrap CI upper bound strictly below
+    BOOTSTRAP_RESAMPLES = 10_000
+    BOOTSTRAP_SEED      = 20260827  fixed, so a verdict is reproducible from the grid
+```
+
+Resampling is **task-level**, not trial-level: trials within a task are not independent,
+and resampling them would report an interval far narrower than the evidence supports.
+
+Three facts about this rule were measured during the reorganization and belong with it,
+because each one changes how a future verdict should be read:
+
+- **`K_CI_UPPER_MAX` has never bound a single verdict.** The rule is a conjunction
+  (`med <= 0.90 AND hi < 1.00`), and pc-01's median of 1.0151 misses the *median*
+  conjunct by 0.115 — it would reject with the CI test deleted entirely.
+- **The gate's own null floor is median 0.9670, CI [0.9212, 1.0670].** Measured from
+  two byte-identical OFF replications that were already on disk (`run_episode.sh` wrote
+  `EMPTY` before every OFF episode). So `K_CI_UPPER_MAX = 1.00` sits INSIDE the noise
+  band, and the minimum detectable effect is roughly a 10–15% token change.
+- **The rule is cost-only.** Q is non-inferiority and K requires cost to fall, so only a
+  cheaper artifact can pass. A quality improvement that costs more cannot be accepted by
+  this rule as written. That is an owed decision, not a defect to work around silently.
+
+### The reliability reading (`reliability.py`)
+
+`exact_mcnemar_one_sided(b, c)` — `P(X >= c)` for `X ~ Binomial(b + c, 0.5)`, at
+`ALPHA = 0.05`. One-sided in the direction the artifact is supposed to help: `c` counts
+pairs where ON passed and OFF failed. **With no discordant pairs the p-value is 1.0, not
+0** — no evidence either way is not evidence of no effect.
+
+Note it is NOT interchangeable with `rlm.measure.stats.sign_test_p`, which is two-sided.
+Collapsing the two would change verdicts already recorded in the audit rows.
+
+### The split's refusals (`make_split.py`)
+
+The split file is the only source of truth; everything else is a cache of it. The builder
+refused to write a split that:
+
+1. let any answer appear on both sides (**answer-disjointness across the train/held-out
+   boundary**), because a memorised train answer would then score a held-out task; or
+2. **straddled a question-shape cluster within a category** — this is the v1 trap: a
+   split that puts two tasks of the same shape on opposite sides trains on one shape and
+   tests on the same shape wearing a different number.
+
+### The cell contract the runners wrote
+
+`run_decision.sh` scheduled `(task, rep)` blocks with ON and OFF **adjacent in time and
+alternating by rep**, so R9 thermal drift cancels within each paired comparison rather
+than accruing to one arm. `run_episode.sh` wrote, per cell:
+
+```
+<root>/<arm>/<task>/rep<N>/
+    answer.txt        the model's final answer, or absent
+    wall.txt          wall clock, seconds
+    exit.txt          process exit code
+    metrics.pre       server counters before
+    metrics.post      server counters after
+    ledger.jsonl      the extension's events for that episode
+    VOID              present iff the cell was voided
+```
+
+Any reimplementation that wants to reuse the archived decisions must write this layout,
+or state plainly that it is producing a different kind of evidence.
+
+**What survives in code:** `gate/screens.py` and its fixture suite, which have live
+inputs (the harness snapshots under `docs/research/2026-08-26-prime-agent-spike/results/
+phase-b/harness/`) and a passing test. They move to `bench/` with the reorganization.

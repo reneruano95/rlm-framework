@@ -36,7 +36,7 @@ under the old one.
             the index.
 
 Usage:
-    from gate.screens import Screens
+    from bench.screens import Screens
     s = Screens.build(repo, split)          # indexes the held-out side once
     verdict = s.check(candidate)            # ScreenVerdict
 """
@@ -48,9 +48,14 @@ import json
 import pathlib
 import re
 import sys
+
+from rlm.config import find_repo_root
 from typing import Any, Sequence
 
-REPO_DEFAULT = pathlib.Path(__file__).resolve().parent.parent
+# Found by walking up for the repo's markers, not by counting directories. The count
+# was `parent.parent`, correct only while this file sat one level below the root -- and
+# it moved on 2026-09-01. A depth count is a silent dependency on the layout.
+REPO_DEFAULT = find_repo_root(pathlib.Path(__file__))
 
 ALLOWED_KINDS = frozenset({"prompt", "skill"})
 
@@ -82,7 +87,7 @@ def _i1_keywords(repo: pathlib.Path) -> frozenset[str]:
         m = re.search(rf"class {cls}\b.*?(?=\nclass |\Z)", src, re.S)
         if not m:
             raise RuntimeError(
-                f"gate.screens: class {cls} not found in config.py -- the I1 key set is "
+                f"bench.screens: class {cls} not found in config.py -- the I1 key set is "
                 "generated from the schema and cannot silently fall back to a stale literal."
             )
         names.update(re.findall(r"^\s{4}([a-z_][a-z0-9_]*)\s*:", m.group(0), re.M))

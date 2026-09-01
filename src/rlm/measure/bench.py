@@ -116,6 +116,16 @@ LEDGER_FIELDS = ("run_id", "block", "task_id", "seed", "arm", "episode_id",
 #: ledger will append a new grid into a closed result. S4's own ledger stays
 #: at `milestones/s4/results/ledger.jsonl` as evidence; resume it explicitly
 #: with `--ledger` if that is what you mean.
+#: Where a bench run writes, and the directory is created on first write
+#: (`BenchLedger.__init__` mkdirs its parent), so it need not exist in git.
+#:
+#: NOT `milestones/`, deliberately, and the reason is a measured failure rather than
+#: taste: that directory is the evidence archive for gates already taken. A default
+#: landing there meant the next run APPENDED a new grid into a closed ledger and
+#: regenerated a report over one whose hand-written half lives below
+#: NARRATIVE_MARKER -- silently, in both cases. Recorded here on 2026-09-01 when the
+#: `runs/README.md` that used to hold it was deleted with its directory: the reason
+#: belongs beside the constant it explains, not in a folder kept alive to house it.
 LEDGER_PATH = REPO_ROOT / "runs" / "ledger.jsonl"
 
 ArmRunner = Callable[..., Awaitable[Any]]

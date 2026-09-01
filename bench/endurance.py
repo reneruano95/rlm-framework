@@ -3,9 +3,10 @@
 
 Moved here from the prime-agent spike's tools/ on 2026-09-01 when the rest of that
 directory was deleted. It survives because it is stdlib + urllib with zero coupling
-to prime-agent, and because `gate/decide.py:29-33` cites its result -- +9.9% thermal
-drift across a 2,000-request run -- as THE REASON wall-clock is recorded but never
-gated. Delete it and a live premise of the decision rule stops being reproducible.
+to prime-agent, and because the decision rule cites its result -- +9.9% thermal drift
+across a 2,000-request run -- as THE REASON wall-clock is recorded but never gated.
+That rule now lives in section 13 of the s6-lite spec, `decide.py` having been deleted
+2026-09-01 for having no input in the repo; the measurement is still its premise.
 
 Originally: the C1b driver for the prime-agent local spike.
 

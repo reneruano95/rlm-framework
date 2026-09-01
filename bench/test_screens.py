@@ -4,7 +4,7 @@ Every positive fixture is material already committed to this repo -- the memorie
 the local root actually wrote during the spike -- so the suite tests the screens
 against the thing they exist for rather than against inventions.
 
-Run: python gate/checks/test_screens.py
+Run: python bench/test_screens.py
 """
 
 from __future__ import annotations
@@ -13,10 +13,12 @@ import json
 import pathlib
 import sys
 
-REPO = pathlib.Path(__file__).resolve().parent.parent.parent
+# See screens.py: walk up, do not count. This file moved with it.
+from rlm.config import find_repo_root  # noqa: E402
+REPO = find_repo_root(pathlib.Path(__file__))
 sys.path.insert(0, str(REPO))
 
-from gate.screens import Screens  # noqa: E402
+from bench.screens import Screens  # noqa: E402
 
 SPIKE = REPO / "docs" / "research" / "2026-08-26-prime-agent-spike" / "results" / "phase-b" / "harness"
 
