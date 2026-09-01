@@ -43,7 +43,6 @@ from typing import NamedTuple
 
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 userenv = ctypes.WinDLL("userenv", use_last_error=True)
-advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 
 # ---- flags/constants ------------------------------------------------------- #
 CREATE_SUSPENDED = 0x00000004
@@ -60,12 +59,6 @@ PROCESS_TERMINATE = 0x0001
 
 
 # ---- structs ----------------------------------------------------------------- #
-class SECURITY_ATTRIBUTES(ctypes.Structure):
-    _fields_ = [("nLength", wintypes.DWORD),
-                ("lpSecurityDescriptor", wintypes.LPVOID),
-                ("bInheritHandle", wintypes.BOOL)]
-
-
 class SID_AND_ATTRIBUTES(ctypes.Structure):
     _fields_ = [("Sid", wintypes.LPVOID), ("Attributes", wintypes.DWORD)]
 

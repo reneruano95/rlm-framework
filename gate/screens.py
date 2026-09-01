@@ -48,7 +48,7 @@ import json
 import pathlib
 import re
 import sys
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 REPO_DEFAULT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -275,13 +275,6 @@ def _normalised_contains(text: str, answer: str) -> bool:
         return re.search(rf"(?<![\w./-]){re.escape(a)}(?![\w-])", t) is not None
     return a in t
 
-
-def _iter_entries(state: dict) -> Iterable[dict]:
-    for kind, entries in (state.get("entries") or {}).items():
-        for entry in (entries or {}).values():
-            cand = dict(entry)
-            cand.setdefault("kind", kind)
-            yield cand
 
 
 def main() -> int:

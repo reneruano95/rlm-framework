@@ -201,10 +201,6 @@ class Task:
         return _run_checker(mode, value, self.answer)
 
 
-def _normalise(value: Any) -> str:
-    return " ".join(str(value).split()).casefold()
-
-
 def settled_tokens(attempts: list[dict[str, Any]]) -> tuple[int, int]:
     """Total tokens one logical call actually cost, summed over EVERY attempt.
 
