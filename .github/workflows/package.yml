@@ -1,0 +1,113 @@
+name: package
+
+# What this checks, and what it deliberately does not.
+#
+# CHECKS: that `src/rlm/` is still a package someone can copy, import and test.
+# That property is the whole point of the 2026-09-01 reorganization, and until this
+# file existed it was verified by a script a human had to remember to run.
+#
+# It would have caught, on its own, the defect a reviewer found by reading:
+# `_tests/test_winjob.py` imported `ctypes.wintypes` and `rlm.sandbox.winproc` at
+# module scope, ABOVE its skipif, so the shipped suite failed at COLLECTION on any
+# non-Windows consumer. On this box the guard never fires, so no local run could
+# see it. The ubuntu leg below is that reviewer, running every push.
+#
+# DOES NOT CHECK: the full repo suite. It needs this box -- a live llama-server, a
+# GPU, Windows Job Objects against real processes -- and pretending otherwise would
+# give a green tick that means less than the one it replaces. `pytest tests` stays a
+# local gate, and that limit is stated here rather than hidden.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  copy-unit:
+    # The acceptance criterion itself: copy the package out, import it, run its suite.
+    # Two platforms because the point is portability, and the last real bug here was
+    # a Windows-only import that only a non-Windows run could see.
+    name: copy + import + suite (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install only the declared dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pydantic>=2.9" "pyyaml>=6.0" "duckdb>=1.1" "httpx>=0.27" \
+                                "pytest>=8.3" "pytest-asyncio>=0.24" "hypothesis>=6.112" \
+                                "pytest-timeout>=2.3"
+        shell: bash
+
+      - name: Copy the package into an empty project
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cp -r src/rlm "$RUNNER_TEMP/consumer/rlm"
+          find "$RUNNER_TEMP/consumer" -name __pycache__ -type d -prune -exec rm -rf {} +
+        shell: bash
+
+      - name: A bare import must stay cheap and client-free
+        # The property `sandbox/manager.py`'s AppContainer staging depends on: it copies
+        # rlm/__init__.py into a tree holding three modules, and child.py imports
+        # rlm.bridge through it. An eager facade breaks every episode -- in a place no
+        # copy test can see, because the sandbox does not run off Windows.
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          python -c "import sys, rlm; n=len([m for m in sys.modules if m.startswith('rlm')]); assert n==1, f'{n} modules'; assert 'httpx' not in sys.modules; print('1 module, no httpx')"
+        shell: bash
+
+      - name: Run the shipped suite with zero edits
+        working-directory: ${{ runner.temp }}/consumer
+        run: python -m pytest --pyargs rlm -q
+        shell: bash
+
+  wheel:
+    # The other half: build it and install it where the repo has never been. This is
+    # what catches package data that is present only because the source tree is.
+    # The comparison standard has this defect live today -- `dspy.datasets.AlfWorld`
+    # reads a base_config.yml its own pyproject does not ship, so it is broken in
+    # every installed copy.
+    name: wheel builds, ships its data, and its suite runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
+      - name: The data files must be inside the wheel, not merely inside the repo
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          whl = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          data = [n for n in names if not n.endswith(".py") and ".dist-info" not in n]
+          prompts = [n for n in data if "_data/prompts/" in n]
+          assert any("config.default.yaml" in n for n in data), "shipped config missing"
+          assert any("schema.sql" in n for n in data), "schema.sql missing"
+          assert len(prompts) == 18, f"{len(prompts)} prompts in the wheel, want 18"
+          print(f"{len(data)} data files: config, {len(prompts)} prompts, schema.sql")
+          PY
+
+      - name: Install it somewhere the repo has never been, and run its suite
+        run: |
+          python -m venv "$RUNNER_TEMP/v"
+          "$RUNNER_TEMP/v/bin/pip" install -q dist/*.whl "pytest>=8.3" "pytest-asyncio>=0.24" \
+                                              "hypothesis>=6.112" "pytest-timeout>=2.3"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/v/bin/python" -m pytest --pyargs rlm -q
