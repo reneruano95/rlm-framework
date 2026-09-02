@@ -1,0 +1,30 @@
+--- smoke calibration (run_id b650df33-e03d-4791-9eed-cfca19575f39; NOT scored, no report written) ---
+projection constants (milestones/s2/aggregation_options.py): 450 s chunked-arm non-aggregation, 60 s single-shot, 2.78 s/window aggregation (+30% root overhead)
+arm   task         category      measured s  projected s   ratio  outcome
+rlm   agg-02       aggregation         55.5       1187.5   0.05x  success
+rlm-restricted agg-02       aggregation        541.0         60.0   9.02x  fail (checker_failed)
+b2    agg-02       aggregation        809.7       1187.5   0.68x  fail (checker_failed)
+b1    agg-02       aggregation        346.7         60.0   5.78x  fail (checker_failed)
+b3    agg-02       aggregation        691.1         60.0  11.52x  fail (checker_failed)
+rlm   needle-02    needle              62.9        450.0   0.14x  success
+rlm-restricted needle-02    needle              59.2         60.0   0.99x  error (slot_pool_error_drained)
+rlm-restricted needle-02    needle             183.4         60.0   3.06x  success
+b2    needle-02    needle             649.0        450.0   1.44x  fail (checker_failed)
+b1    needle-02    needle             111.8         60.0   1.86x  success
+b3    needle-02    needle             216.8         60.0   3.61x  success
+rlm   synth-01     synthesis           43.1        450.0   0.10x  success
+rlm-restricted synth-01     synthesis         1259.5         60.0  20.99x  context_exhausted (root_window)
+b2    synth-01     synthesis          456.7        450.0   1.01x  success
+b1    synth-01     synthesis           33.5         60.0   0.56x  success
+b3    synth-01     synthesis           12.9         60.0   0.21x  success
+rlm   codeqa-01    code_qa             99.2        450.0   0.22x  success
+rlm-restricted codeqa-01    code_qa            532.8         60.0   8.88x  success
+b2    codeqa-01    code_qa            723.2        450.0   1.61x  fail (checker_failed)
+b1    codeqa-01    code_qa            243.6         60.0   4.06x  fail (checker_failed)
+b3    codeqa-01    code_qa            358.6         60.0   5.98x  fail (checker_failed)
+
+full grid = 30 tasks x 3 seeds x 5 arms, plus §8's escalation allowance (5.3 h, up to 32 extra episodes)
+  from the pre-registered constants:    35.6 h grid + 5.3 h =   40.9 h
+  with these measurements substituted:  45.5 h grid + 5.3 h =   50.7 h
+  the measured figure is the one to judge: 50.7 h against §8's 60 h budget — WITHIN
+exit=1

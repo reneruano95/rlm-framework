@@ -1,0 +1,671 @@
+# S5 PRE-REGISTERED ROW: A3B-as-root (ARCHITECTURE.md §9 S5). Config-only derivative of
+# config.yaml, 2026-09-01. Root = the leaf GGUF at --parallel 1 -c 32768; DFlash2 drafter
+# removed (it drafts for the 27B); root backend_dir = the plain Vulkan build the leaf uses.
+# Everything else byte-identical to config.yaml at commit c0b4e7c. Do NOT edit config.yaml.
+# rlm-halo runtime config (spec ARCHITECTURE.md §5, Appendix A).
+# Validated by rlm.config.Config (pydantic, extra="forbid"). config_snapshot()
+# is the canonical JSON dump of the validated model (stable field order).
+#
+# Prompt files under prompts/ (Task 14) are pinned by sha256 below — see
+# src/rlm/config.py's PromptRegistry and Config.pinned_prompt_hashes() docstrings.
+# A drifted or deleted file fails load_config() loudly (Config's
+# cross-field validator hashes the file on every load).
+
+servers:
+  root:
+    # S5 ROOT SWAP, 2026-08-15 (§9 S5, "target: Qwen3.8-27B ... this slice may
+    # activate early"). Day-one checklist, all nine items:
+    #  (1) dense, not MoE (no expert_count key).
+    #  (2) attention layout: `arch = qwen35`, ssm.inner_size 6144 /
+    #      state_size 128 / conv_kernel 4 -- IDENTICAL to the incumbent, so R7's
+    #      "different architecture" hazard did not materialise (milestones/s2/ARCH-LADDER.md).
+    #  (3) MTP head PRESENT (`nextn_predict_layers = 1`, block_count 65 vs 64);
+    #      the incumbent's Q4_K_M had none, which is why §7 #4 was unmeasurable
+    #      before this swap. Measured below.
+    #  (4) chat template DIFFERS (8,057 -> 8,952 chars). The rendered head moves,
+    #      so the root prefix hash changes -- R3's detector re-pins it on the
+    #      first call (v0.3.7). enable_thinking=false still accepted.
+    #  (5) tokenizer IDENTICAL: gpt2/qwen35 pre, bos 248044, eos 248046, vocab
+    #      and merges hashes equal. So the 3.7727 chars/token calibration, C2's
+    #      chunk geometry and every token count carry over unchanged. Only
+    #      padding_token_id differs (248055 -> 248044), unused here.
+    #  (6) licence: per the model card, same family terms as the incumbent.
+    #  (7) GGUF AGE IS A LIVE RISK: released 2026-08-14, so this community quant
+    #      is ONE DAY old against §9 S5's own "community quants stabilize over
+    #      ~2 weeks". sha256 recorded so a silent re-upload is detectable:
+    #      e00082f779fa385cee8c68a3ec8833a75778cc87272240b942f74e0b8243e520
+    #      (incumbent was 5ed60d0af4650a854b1755bd392f9aef4872643dc25a254bc68043fa638392a0)
+    #  (8) mmproj present on disk and deliberately NOT loaded (text-only root).
+    #  (9) not RLM-post-trained; scaffold prologue unchanged.
+    # Q4_K_M is 15.66 GB, byte-for-byte the same size as the incumbent quant, so
+    # dual residency is unchanged and §4's headroom arithmetic still holds.
+    model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
+    # §7 #4, SUPERSEDED 2026-08-19: MTP -> DFlash2 (`milestones/s2/dflash2_bench.py`,
+    # `milestones/s2/DFLASH2.md`). Same harness, same prompts, same launch line as the
+    # 2026-08-15 MTP measurement; only the speculative flags differ.
+    #
+    # THE INCUMBENT, for the record: `draft-mtp` n-max 2 -> 27.17 t/s (2.11x)
+    # over a 12.87 t/s unspeculated baseline; n-max 6 -> 26.33 t/s (2.05x, a
+    # wash); adding `ngram-mod` -> 18.04 t/s (1.40x), i.e. ngram COSTS a third
+    # of the gain because the root writes fresh code rather than re-emitting a
+    # long shared context. That n-max 6 wash is the signature of MTP's
+    # AUTOREGRESSIVE drafting: each extra draft token costs another drafter
+    # pass, so the extra tokens paid for themselves and no more.
+    #
+    # DFlash2 removes exactly that cost -- it is a block-diffusion drafter, one
+    # forward pass for the whole block. Measured on this box, medians, the
+    # `-r` arms being INDEPENDENT re-measurements rather than re-analyses:
+    #   temperature 0     base 12.84 | mtp-2 26.89 / 27.03 | dflash n4 35.56 /
+    #                     34.35 (1.28-1.32x MTP) | n5 34.75 | n3, n6 ~32 |
+    #                     n2 26.80 (a dead tie with MTP) | n7 24.40 (LOSES)
+    #   temp 0.7 / p 0.8  base 12.85 | mtp-2 26.18 | dflash n4 38.34
+    #                     (2.98x base, 1.46x MTP) | n5 33.60
+    # The second table is the one that governs: 0.7/0.8 is `scaffold.sampling.
+    # root`, i.e. what the root actually runs. §7 #4's target is >=1.4x on
+    # decode; this clears it 2.1x over.
+    #
+    # n-max 4 AND NOT THE UPSTREAM-RECOMMENDED 7. Both the model card and the
+    # PR suggest 7 (the maximum: `n_draft_max = block_size - 1`, block_size 8).
+    # Here 7 is the WORST DFlash2 setting and loses to MTP outright, because
+    # drafter and verifier batches are both `n-max + 1`: n4 does 5 tokens of
+    # work for 3.47 accepted (0.69/unit), n7 does 8 for 4.41 (0.55/unit). On a
+    # bandwidth-bound APU the marginal verified token is not free, so the
+    # setting that maximises ACCEPTANCE LENGTH is not the one that maximises
+    # THROUGHPUT. n4/n5 are within 1.2% of each other, so this is a plateau
+    # with margin on both sides, not a knife-edge.
+    #
+    # OWED, and STILL not satisfiable -- unchanged from the MTP entry, and the
+    # reason this is a speed claim only: R4 requires "unchanged benchmark
+    # success", which is an S4 measurement. Byte-identity cannot substitute --
+    # this stack does not reproduce itself at temperature 0 (baseline
+    # self-identity 0/4; no arm measured exceeded 1/4), exactly as §8 warns.
+    # AND THE S4 GATE PASSED AGAINST `draft-mtp`: those numbers describe a root
+    # this config no longer launches, so S4 is owed a re-run, not an edit.
+    mtp: false
+    dflash: false
+    port: 8080
+    backend: vulkan
+    # NOT the pinned b10375 release zip any more, and this is the load-bearing
+    # cost of the DFlash2 swap. The drafter GGUF carries 7 tensors
+    # (`blk.N.attn_conv_base/proj`, `blk.N.ffn_conv_base/proj`,
+    # `selector_predecessor/successor/hidden`) and 4 KV keys
+    # (`dflash.conv_kernel_size/conv_group_size/selector_rank/selector_top_k`)
+    # that ONLY llama.cpp PR #27342 knows, so b10375 and b10488 cannot load it
+    # at all -- a hard load failure, not a degraded path. There is no released
+    # binary with DFlash2 support as of 2026-08-19.
+    #
+    # So this directory is a FROM-SOURCE build of an unmerged PR (`5ecbe1a`,
+    # MSVC 19.51.36252.0, `-DGGML_VULKAN=ON`), where every other backend_dir in
+    # this file is an official `bXXXXX` zip. That is a real provenance
+    # regression and is written down rather than glossed: the branch can be
+    # force-pushed or abandoned, and `rlm validate`'s build_info assertion now
+    # pins `0.1.2-dev (build 1, commit 5ecbe1a)` instead of a release tag.
+    # Revert target: `tools\llamacpp-vulkan` + the MTP flags below, which is a
+    # two-line change and gives back 27.17 t/s.
+    #
+    # THE BUILD IS CONTROLLED FOR, so the gain is not a compiler artifact: this
+    # binary reproduces the pinned one on the arms they share -- unspeculated
+    # 12.84 vs 12.87 t/s (-0.2%), `draft-mtp` n-max 2 26.89/27.03 vs 27.17
+    # (-0.5%), two independent replicates.
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
+    log_path: traces/logs/root-server-s5-a3b.log
+    ctx: 32768
+    parallel: 1
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    # `-lm none` IS §4's `--no-mmap`: b10375 deprecates `--mmap/-mmp` in favour
+    # of `--load-mode` (R11 flag drift). These are the flags the S1 gate
+    # actually launched with, recorded here so config_snapshot describes the
+    # servers that ran rather than the ones the spec was written against.
+    # `-lv 4` is a launch-contract requirement, not an extra flag: D27's
+    # cache-type assertion parses the log it produces.
+    # The speculative flags live HERE and not in launch_argv on purpose:
+    # serverproc refuses to invent flags in code, because a flag invented in
+    # code is one config_snapshot cannot record (R11). `servers.root.dflash`
+    # above is the declaration; a cross-field validator keeps the two from
+    # disagreeing, and it now guards `draft-dflash` as well as `draft-mtp` --
+    # a check that only knew "draft-mtp" would have gone VACUOUS on this swap
+    # (`mtp: false` + DFlash flags would satisfy it while reintroducing the
+    # silent lie it exists to prevent).
+    #
+    # `-md` has no MTP counterpart: DFlash needs a SECOND file on disk, because
+    # the drafter is a separate 1.09 GiB GGUF rather than a head inside the
+    # target quant. The validator checks the path exists at config load, since
+    # a stale one otherwise fails only after the 15.7 GB target has been read.
+    #
+    # MEASURED MEMORY COST of that second model, from the launch log: drafter
+    # weights 1,079.61 MiB + draft KV 50.00 MiB (SWA-capped, 2,560 cells x 5
+    # layers) + draft compute 517.92 MiB, and the target's own compute buffer
+    # grows 164.28 -> 416.75 MiB because it now verifies batches instead of
+    # single tokens. ~1.9 GiB all in, which takes §4's dual-residency headroom
+    # from 19.5% to ~16.5% free on the 64 GiB carve -- still above the stated
+    # 15% floor, but the margin is materially thinner and `-np 128` on the leaf
+    # is unchanged, so the floor is the thing to re-check first if the leaf is
+    # ever re-sized. MTP cost zero here; its head was already in the quant.
+    #
+    # DFlash2 needs no flag beyond these: `common_speculative_impl_draft_dflash`
+    # auto-detects v2 from the checkpoint's `dflash.selector_top_k` key.
+    extra_flags: ["-lm none", "--no-context-shift"]
+  leaf:
+    # BACKEND SWITCHED ROCm -> VULKAN, 2026-08-23 (v0.3.22). S0 put the leaf on
+    # ROCm for +13.6% prefill at d=32K. That trade is withdrawn on three
+    # measurements, all in `docs/research/2026-08-23-rocm-backend-defect.md`,
+    # all taken on the SAME llama.cpp commit `b10375 ba360efe1` with
+    # byte-identical prompts -- the only difference is which directory
+    # `llama-server.exe` was launched from.
+    #
+    # (1) CORRECTNESS. ROCm cannot attend to content more than roughly a
+    #     thousand tokens behind the generation point: 0/144 against Vulkan's
+    #     240/240 over distances 600-1,500, and 0/32 against 32/32 at a
+    #     2,048-token document. Two uniform-global-attention control models
+    #     fail the same way on ROCm and are 48/48 on Vulkan, so it is not the
+    #     model and not hybrid attention.
+    # (2) R13, THE PRODUCT-BLOCKING ONE. The repo's own `upstream/r13_repro.py`,
+    #     108 calls per backend, same fixtures, same flags: ROCm leaks a
+    #     foreign document's identifier on **32/54** shared-slot calls and 3/54
+    #     virgin; Vulkan is **0/54 and 0/54**. Fisher two-sided p = 2.15e-12.
+    #     Zero is not zero -- 0/108 is a 95% upper bound of 2.8% by the rule of
+    #     three, so "leak-free" is still never written -- but the shared-slot
+    #     arm going 32/54 -> 0/54 is the defect `DIRECTION.md` calls a privacy
+    #     defect and product-blocking.
+    # (3) THROUGHPUT, on the unit that matters. Corpus wall clock at equal
+    #     correctness, one never-reused slot per call: Vulkan is 13% faster
+    #     than ROCm SERIALLY at this geometry and 2.05x faster over a
+    #     200,000-token corpus at a 2,048 window with eight calls in flight,
+    #     32/32 correct throughout, where ROCm is 2/32 at two in flight.
+    #     Long context is not a regression either: 443 t/s against ROCm's 464
+    #     at a 107,726-token prompt, and Vulkan answers correctly at 2K, 8K,
+    #     34K and 108K while ROCm does not.
+    #
+    # WHAT IS DELIBERATELY NOT CHANGED HERE, because each is its own decision
+    # with its own evidence still owed: `size_tokens` stays 640 (the window is
+    # no longer capped by the backend, but moving it is a §8 comparability
+    # event); `dispatch_concurrency` stays 1 (Vulkan is 32/32 at c=8, but that
+    # was measured with the reproducer's client, not `rlm.dispatcher`); and
+    # `slot_policy` stays `never_reuse` (Vulkan is 0/54 on the shared arm, so
+    # reuse may become legal and the whole rotation machinery may become
+    # unnecessary -- that is a larger change than a flag).
+    model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
+    port: 8081
+    backend: vulkan
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
+    log_path: traces/logs/leaf-server.log
+    ctx: 327680
+    # MEASURED AND PINNED 2026-08-13 (`milestones/s2/R13-slotcount.md`). `-np 128
+    # -c 327680` = 2,560 tok/slot, 128 windows per leaf process, 2 rotations
+    # per 200K-token corpus. The two memory axes separate cleanly: KV is priced
+    # by the TOKEN budget (3,400 MiB at every `-np`, 10.625 KiB/token at q8_0)
+    # and recurrent state by SLOT COUNT (62.8125 MiB/slot = S 60.000 + conv R
+    # 2.8125, context-independent from 40,960 down to 1,280 tok/slot). At 128
+    # that is 8,040 MiB of recurrent state, 32.244 GiB leaf residency and
+    # 51.53 GiB dual-resident of the 64 GiB carve -- 19.5% free, above the
+    # stated 15% floor -- for -1.37% prefill / +0.12% decode.
+    # 128 is the LARGEST pool that fits, on two independent grounds: `-np 192`
+    # lands at 13.4% margin (under the floor) and gives 1,706 tok/slot against
+    # the ~1,900 the 1024/768 geometry needs. `-np 64` is the named fallback
+    # and is strictly worse here (4 rotations, plus a reproducible +629 MiB of
+    # unaccounted allocation at that size).
+    parallel: 128
+    # R13 (§10, §5 C4). The only measured-clean policy, and the only supported
+    # value: one never-reused slot per window, both questions about a window on
+    # that window's slot, a server restart when the pool is exhausted.
+    slot_policy: never_reuse
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    # `--cache-ram 0` ADDED 2026-08-14, for two independent measured reasons.
+    # (1) LATENCY (`milestones/s2/OCCUPANCY.md`): `--cache-idle-slots` is on by default and
+    #     saves every idle slot to a host-RAM prompt cache on each new task,
+    #     against a `--cache-ram` default of 8,192 MiB while ONE slot of this
+    #     config is 202.80 MiB -- 41 entries for a 128-slot pool. Past that the
+    #     evictions per request equal the occupancy EXACTLY (0 up to 40, 1 at
+    #     41, then N) at 37.5 ms each: 7,268 evictions, 272 s of a 543 s run,
+    #     per-call wall 2.18 -> 6.69 s with `timings.prompt_ms` flat. This flag
+    #     takes it to a flat 2.05-2.16 s at every occupancy 0-127.
+    # (2) MEASUREMENT CORRECTNESS (`milestones/s2/CACHE-INSTRUMENT.md`): the same host
+    #     cache restores an idle slot's state onto a DIFFERENT slot, so under
+    #     the default `timings.cache_n` is not a function of the prompts and
+    #     not reproducible run to run (the same call reported 0 or 958). With
+    #     the flag, reuse is the exact closed form §7 #3 now asserts --
+    #     239/239 calls, 0 tokens of error, at two `-ub` values.
+    # It is measured to cost the intra-window re-query NOTHING (warm prefill
+    # 50 ms and `cache_n` identical element-for-element with and without it):
+    # `--no-kv-unified` keeps the state in the slot, and the host copy was
+    # never the thing being reused. Under R13's never-reuse policy a saved
+    # entry can never be hit at all, so the 8.2 GiB it costs buys zero.
+    # `--no-cache-idle-slots` is the equivalent alternative; both measured.
+    # `-ctxcp 0` ADDED with the backend switch, and it is load-bearing for the
+    # speed half of it. Gate 0 measured context checkpoints costing the ROOT
+    # 82% of its per-turn wall (`docs/research/2026-08-22-gate0-soak.md` §6).
+    # On the Vulkan leaf they cost the same shape: cold prefill 3,627 ms with
+    # them, **897 ms without** -- faster than ROCm's 1,020 ms. What they buy is
+    # the intra-window warm re-query, which goes with them (`cache_n` 484 ->
+    # 0), and there is no setting that keeps both: `-ctxcp 1` pays the full tax
+    # and buys no reuse, `-ctxcp 2` buys reuse and pays the tax. Losing the
+    # re-query is still net-positive by a wide margin -- two questions on a
+    # window cost 2 x 1.20 s against 3.63 + 3.21 s.
+    # TWO CONSEQUENCES, stated so neither is discovered later. (a) §7 #3's
+    # prefix-cache gates are denominated in `tokens_cached` and are no longer
+    # meaningful on this configuration; `predicted_reuse` is a pure function
+    # for the gate runner and is NOT asserted in the live dispatch path, so
+    # nothing breaks at runtime, but those gates must be re-derived before they
+    # are cited again. (b) DO NOT carry this flag to a ROCm server: it takes
+    # the shipped 640 geometry's absent-question refusals from 7/7 to 0/7
+    # (p = 0.00058 with `--cont-batching` held constant).
+    extra_flags: ["-lm none", "--no-kv-unified", "--cont-batching", "--cache-ram 0",
+                  "-ctxcp 0"]
+    # `env` REMOVED with the backend switch (2026-08-23). It carried
+    # `ROCBLAS_USE_HIPBLASLT: '1'`, which is a rocBLAS setting and does nothing
+    # on Vulkan. It is deleted rather than left inert for the reason it was
+    # added: `config_snapshot` records this block, and a snapshot that names a
+    # BLAS library the server never loads is a false record of what ran. Every
+    # `milestones/s2/` leaf number was taken with it on, under ROCm, and those
+    # numbers now describe a backend this config no longer uses.
+  bench_leaf:
+    # §8:344 (v0.2.6 correction): the B1/B3 relaunch profile. Two slots so B1
+    # and B3 stop sharing slot 0 (R13's smallest repro); 524288/2 = 262144
+    # per-slot = the leaf's full native window.
+    #
+    # SAME PORT as the leaf, deliberately: this is a RELAUNCH of the one leaf
+    # process, not a second server. Dual residency is already 51.53 GiB of the
+    # 64 GiB carve with one leaf up (§4), so two of them do not fit and the
+    # bench block stops the RLM-profile leaf before starting this one.
+    model: 'D:\AI\models\unsloth\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'
+    port: 8081
+    # SWITCHED WITH THE LEAF, 2026-08-23, and not independently: `checks/
+    # test_config.py:619` asserts this profile shares the leaf's backend and
+    # model. It is measured, not assumed -- Vulkan answers correctly at this
+    # profile's own geometry (`-c 524288 -np 2`, 262,144 tokens per slot) at
+    # 2,168 / 8,635 / 34,482 / 107,726-token prompts, 4/4, with the positive
+    # control passing, at 443 t/s against ROCm's 464 on the largest.
+    # NOTE FOR §8: B1's recorded 0/30 was taken on ROCm through this profile,
+    # where a single-shot 256K prompt puts its answer far past the ROCm reach
+    # limit. That result is now suspect as a backend artifact rather than a
+    # baseline, and RLM's +30 margin over B1 rests on it.
+    backend: vulkan
+    backend_dir: 'D:\PROJECTS\rlm-halo-framework\tools\llamacpp-vulkan'
+    log_path: traces/logs/leaf-server-bench.log   # own path: start() truncates (D27)
+    ctx: 524288
+    parallel: 2
+    cache_type: q8_0
+    flash_attn: "on"
+    ub: 512
+    b: 2048
+    # env removed with the backend switch: see the leaf block.
+    # PRE-REGISTERED 2026-08-17, before any scored §8 run exists. The global
+    # `scaffold.retries.per_call_timeout_s: 240` is sized for the RLM profile's
+    # 2,560-token slots; this profile hands B1/B3 a 262,144-token slot and §8
+    # pre-registers corpora that fill it, so the per-call deadline here has to
+    # be denominated in this box's measured long-context prefill rate.
+    #
+    #   measured  2026-08-16, block 23 b1: 104,364 tokens prefilled in 226.9 s
+    #             (460.0 t/s) -- 227 s to first byte, 13 s inside the old 240 s;
+    #             repeated 2026-08-17 at 126,346 tokens / 303.8 s (415.8 t/s).
+    #   projected the largest pre-registered inputs (~1M-char needle corpora,
+    #             ~265K tokens) truncate to ~261K tokens for the 256K slot, and
+    #             at the same 460 t/s that is a ~567 s first byte.
+    #
+    # 600 s would leave ~5% margin on the biggest pre-registered input, which is
+    # the same thin-margin bet the 240 s default just lost at 104K. 900 s is
+    # ~1.6x the worst measured-rate case, and it costs nothing when calls are
+    # fast: it is a deadline, not a delay. C5's episode wall clock still bounds
+    # the run.
+    per_call_timeout_s: 900
+    # `--cont-batching` is deliberately ABSENT (the RLM leaf carries it): this
+    # profile serves exactly two sequential single calls per block, so batching
+    # buys nothing, and R14 (`milestones/s2/OCCUPANCY.md` §7) puts the concurrent-dispatch
+    # decode corruption behind exactly that path. The rest is the shipped leaf
+    # line minus the slot-pool-specific flags.
+    # `-ctxcp 0` here too, and for a stronger reason than on the leaf: this
+    # profile's slot is 262,144 tokens, so a context checkpoint is enormous,
+    # and it serves exactly two sequential single calls per block -- there is
+    # no intra-window re-query for the checkpoint to buy. It also matches how
+    # Vulkan was VALIDATED at this geometry (4/4 correct at 2,168 / 8,635 /
+    # 34,482 / 107,726 tokens); running without it would be a configuration
+    # nobody measured.
+    extra_flags: ['-lm none', '--no-kv-unified', '--cache-ram 0', '-ctxcp 0']
+  fallback_leaf: null
+
+scaffold:
+  dispatcher: real
+  # §7 #2 (v0.3.0, 2026-08-14): WINDOW 640 / STRIDE 480 (25% overlap).
+  # 1,024/768 SUPERSEDED, on quality, and the reason is one measured horizon.
+  # Retrieval falls off a cliff at absolute needle-to-question DISTANCE (38/39
+  # correct within ~1,000 tokens, 0/39 beyond; bracket [989 pass, 1003 fail],
+  # amended 2026-08-23 from `milestones/s2/results/distance.jsonl` -- n=12 per
+  # side, Fisher p = 7.4e-07 -- superseding [967, 1022], one n=3 cell per side),
+  # and INSTRUCTIONS decay over the same distance: instruction-to-generation
+  # distance is (window + question), so 1,024 puts the system prefix PAST the
+  # measured fail point and the leaf stops obeying its own prefix (the margin
+  # is NOT measured: no window between 640 and 1,024 has ever been sampled) --
+  # 30/30 false positives at 1,024 against 0/45 with 45/45 literal recall at
+  # 640 (`milestones/s2/DISTANCE.md`; reproduced by accident in `milestones/s2/OCCUPANCY.md` §8,
+  # 122/128 correct at 1,024 vs 128/128 twice at 640). The stride still puts
+  # every token within `stride` tokens of the end of some window containing it.
+  #
+  # THE PRICE, MEASURED, not assumed (the "free in prefill" claim was half
+  # right). Over a 200,000-token corpus, run through THIS chunker on real
+  # fixture prose, snap on:
+  #   chunk tokens prefilled   276,826 (640/480) vs 282,475 (1024/768)  -2.0%
+  #   windows                      424            vs     268            +58%
+  #   served prompt tokens     646,130            vs 515,903            +25%
+  # -- because the 311-token rendered head and the 516-token (`ub`+4) re-query
+  # rollback are WINDOW-INDEPENDENT, so 58% more windows pay 58% more of them.
+  # Leaf wall at serial dispatch with `--cache-ram 0`: ~1,180 s vs ~884 s,
+  # +33%. Landed anyway: at 1,024 the leaf answers a question it cannot see the
+  # instructions for, so the cheaper geometry buys answers R5 says are no
+  # evidence of anything. Occupancy does NOT discriminate (`milestones/s2/OCCUPANCY.md`
+  # §6: both geometries drain the same 128-slot pool to the same ceiling, and
+  # at peak the 640 call is the CHEAPER one, 6.35 s vs 6.87 s).
+  #
+  # overhead_tokens RE-DERIVED 1536 -> 1920 so that window + overhead stays
+  # 2,560, R13's measured dense-slot budget (`-np 128 -c 327680`, 128 x 2,560 =
+  # servers.leaf.ctx exactly). It covers the rendered leaf prefix (311 tokens,
+  # measured stable across 6 server launches and 373 calls), the question, the
+  # chat template's markup, max_predict.leaf (512) and the +10% snap slack on
+  # the window -- ~950 of the 1,920, so the slot is over-provisioned by design.
+  # The smaller window makes `-np 192` (1,706 tok/slot) GEOMETRICALLY feasible
+  # for the first time; it stays refused on the measured memory floor (13.4%
+  # margin against the stated 15%, `milestones/s2/R13-slotcount.md`). `-np 128` stands.
+  chunk: { size_tokens: 640, stride_tokens: 480, overhead_tokens: 1920, snap_to_boundary: true, snap_tolerance: 0.10 }
+  truncation_cap_chars: 2000
+  budgets:
+    max_depth: 1
+    # RAISED 522 -> 926 for window 640 / stride 480 (§7 #2, v0.3.0), and the
+    # DERIVATION IS NOT THE FORMULA -- the formula was measured wrong.
+    #     ceil((200,000 - 640) / 480) + 1 = 417 windows  -> 834 subcalls
+    # is what the geometry costs if every window end lands exactly one stride
+    # after the last. It does not: C2's `_snap_back` moves an end BACKWARD to
+    # the nearest boundary within the +-10% tolerance, so a gap can be as short
+    # as int(480 x 0.9) = 432 tokens and the window count RISES. Run through
+    # the real chunker on 200,000 tokens of fixture prose it is 424 windows =
+    # 848 subcalls (the shipped 1,024/768 measured 268 windows = 536 subcalls
+    # against its own formula's 261/522, so `max_subcalls: 522` was ALREADY
+    # short by 14 calls and would have truncated coverage silently -- exactly
+    # the failure mode it was raised to prevent).
+    # The bound that cannot be beaten by any corpus, and the value pinned here:
+    #     windows <= ceil(200,000 / (480 x 0.9)) = 463  -> 926 subcalls
+    # The other two budgets, checked against the measured 424-window pass:
+    #   max_total_tokens 1.5M   HOLDS. Settled actuals ~886K (848 calls x
+    #                           ~995 prompt + ~50 output); ~0.97M at the 926
+    #                           ceiling; admission adds only the in-flight
+    #                           reservations, which at serial dispatch is one.
+    #   max_wall_clock_s 900    BREACHED, ~1,180 s of leaf work before root
+    #                           turns -- and it was already breached at
+    #                           1,024/768 (~884 s), so it does NOT discriminate
+    #                           between the geometries. DELIBERATELY NOT
+    #                           RE-DERIVED: it is a §9/§8 per-task-size-class
+    #                           derivation, and `milestones/s2/OCCUPANCY.md` §7 blocks it
+    #                           on a live defect -- concurrent leaf dispatch
+    #                           corrupts the answer (31/32 correct serial,
+    #                           7/32 at 2 in flight), so the only measured-
+    #                           clean dispatch concurrency is 1 and every wall
+    #                           number here is a serial one.
+    # HEADROOM AGAINST §8's DECLARED TASK SIZES, re-checked at this geometry:
+    # 1M chars = 265,060 tokens (3.7727 chars/token, measured) = 552 windows by
+    # formula, <= 614 by the snap bound = 1,104-1,228 subcalls. max_subcalls
+    # BREAKS FIRST AGAIN, at ~75% coverage, and the wall-clock breach grows
+    # from ~955 s to ~1,560 s. §8's "full coverage of a 1M-char corpus is not
+    # affordable" therefore STANDS, with a worse margin. Not raised further:
+    # 1,228 subcalls would only move the breach to the wall clock.
+    max_subcalls: 926
+    # RAISED 900 -> 1300, RULED 2026-08-15, to break the §8 aggregation
+    # deadlock (priced in `milestones/s2/aggregation_options.py`).
+    #
+    # The deadlock: §8 caps aggregation corpora at ~200K tokens so full
+    # coverage FITS, but at the measured 2.78 s/window serial a 200K corpus
+    # needs 1,839 s per episode against a 900 s cap -- so §8 forbade authoring
+    # any aggregation task against the 200K figure "until concurrent dispatch
+    # is usable", and R14 says it never will be (31/32 correct serial, 7/32 at
+    # two in flight; `dispatch_concurrency` is pinned at 1).
+    #
+    # The ruling takes the HYBRID: shrink the aggregation corpus to ~130K
+    # tokens AND raise this cap, rather than either alone. 130,464 tokens =
+    # 302 windows (snap bound) = 604 sub-calls, comfortably inside
+    # max_subcalls 926, and needs 1,199 s per episode.
+    #
+    # 1300 and not 1200 because 1,199 s against a 1,200 s cap is a ONE-SECOND
+    # margin, which is not a margin; 1,300 gives 8.4%. It costs nothing in the
+    # S4 projection -- episodes do not run to the cap, so the projected total
+    # is 39.6 h of the 60 h budget either way.
+    #
+    # What this deliberately does NOT do: option A (keep 200K, raise the cap to
+    # 1,900) was priced and rejected. It preserves the pre-registered corpus
+    # size but more than DOUBLES the runaway-episode kill threshold, and at
+    # N=30 it spends 49.9 h of 60 -- 83% of the budget, with thermal and retry
+    # variance still to come. The hybrid keeps B1, the single-shot baseline RLM
+    # must beat by +3, seeing 25% of the aggregation corpus against 16% at
+    # 200K; option B (shrink only, no cap change) would have handed it 34%.
+    max_wall_clock_s: 1300
+    # THE DELEGATION ARM'S WALL CLOCK, and only that arm's (2026-08-20).
+    #
+    # 1300 above is derived in `milestones/s2/aggregation_options.py` for 604 sub-calls at
+    # the measured 2.78 s/window = 1,199 s, plus 8.4% margin. `rlm-restricted`
+    # exceeds that BY CONSTRUCTION: it must delegate for every READ, not only
+    # for every question, because chunk text is unreadable in its sandbox.
+    # Measured in `rlm bench --smoke`: agg-02 986 s, needle-02 505 s, codeqa-01
+    # 323 s -- and synth-01 killed at 1,306 s having completed 629 leaf calls
+    # and still running. Reverting the prompt's fan-out guidance did not move
+    # it (1,306.7 s both ways), so this is call VOLUME, not strategy.
+    #
+    # 2100 = the arm's own pre-registered sub-call ceiling, priced:
+    # `max_subcalls` 926 x 2.08 s/call (measured, 629 calls in 1,306 s) =
+    # 1,926 s, plus ~10% for the root turns between them. The rule it encodes:
+    # the wall clock must not kill an episode BEFORE it can spend the sub-call
+    # budget §8 already allows it. A kill at 2100 therefore still means
+    # something -- it is not a ceiling raised until nothing can hit it.
+    #
+    # A DIFFERENT BUDGET IS A DIFFERENT MEASUREMENT. This arm's episodes are
+    # not scored under the same kill threshold as rlm/b1/b2/b3, and that has to
+    # be stated beside every margin it appears in. Ruled 2026-08-20 rather than
+    # taken: the alternative -- keep 1300 and report the kills as the cost
+    # result -- was on the table and was declined in favour of a full quality
+    # comparison across all four categories.
+    restricted_max_wall_clock_s: 2100
+    max_total_tokens: 1500000
+    # v0.3.16 (2026-08-21), milestones/s2/REPLAY-LOOP-AB.md. The root re-emitting the SAME
+    # cell and getting the SAME observation is a loop the model does not leave
+    # on its own: measured, once a cell has repeated once it repeats again ~64%
+    # of the time, after a few repeats ~92%, and final_answer is never called
+    # from there. Two production episodes ran 70 and 111 identical turns until
+    # context_exhausted / wall_clock (milestones/s4/RESULTS-dflash2-rlm-only.md). This is
+    # a C5 budget like the others: at max-1 consecutive identical turns the
+    # scaffold appends a correction to the observation; at max the episode
+    # ends budget_kill / max_identical_turns. 0 disables.
+    # A different budget is a different measurement: episodes from before
+    # v0.3.16 are not under this threshold and must not share a grid with
+    # episodes after it.
+    max_identical_turns: 3
+    # S1 re-derivation (§9 S1, milestones/s1/RESULTS.md): observed root answer lengths
+    # max 388 tokens over 55 turns -- root 1024 is comfortable and unchanged.
+    # The leaf distribution (n=9: 1,1,7,7,7,7,7,31,35) is NOT usable: every
+    # one of those calls came from the untemplated leaf path (finding F3), so
+    # lowering leaf max_predict on it would bake a defect into config. Stays
+    # 512; re-derive at S2 once leaf calls carry a chat template.
+    max_predict: { root: 1024, leaf: 512 }
+  retries: { max_attempts: 3, backoff_s: [1, 4], per_call_timeout_s: 240 }
+  root_window_kill_fraction: 0.90
+  sampling:
+    root: { temperature: 0.7, top_p: 0.8, seed: 1 }
+    leaf: { temperature: 0.3, top_p: 0.9, seed: 1 }
+  prompts:
+    # S1 R1 A/B DECIDED 2026-08-13 (milestones/s1/RESULTS.md): root.v1 (tips-only) vs
+    # root.v2 (tips + two worked exemplars), 3 attempts each on both S1
+    # fixtures. Result 6/6 vs 6/6 -- a tie at ceiling, no discrimination. The
+    # pre-registered tie-break keeps the SIMPLER prompt: v2 buys +1,203 root
+    # prompt tokens per episode (1,664 -> 2,867 measured on turn 1) for zero
+    # measured benefit, and a tie is not evidence for the exemplars. The A/B is
+    # CLOSED at two variants (§9 S1 hard cap) and neither arm was ever edited.
+    #
+    # PINNED PROMPT IS root.v3 SINCE 2026-08-13 (§7 #2, "the layout fix is inert
+    # in production"). v3 IS the A/B winner: it is root.v1.md byte-for-byte
+    # except that its three API lines teach `llm_query(question, chunk=...)`,
+    # the kwarg C4 uses to compose [prefix][chunk][question] itself (chunk-first
+    # re-query cache_n=546 vs question-first 0). v1 stayed pinned through S1 and
+    # taught the hand-composed single string, so the running root emitted
+    # chunk=None on every call and §7 #3's gate (b) would have scored a root
+    # never taught the API it is graded on. v1/v2 remain on disk, unmodified and
+    # unpinned, as the recorded S1 arms; milestones/s1/run_s1.py re-pins them itself.
+    root: { path: prompts/root.v3.md, sha256: 3fb653e3eacafa50b53d12c08cc70982fe4a6ad19bf01cffbf7966771917b6b6 }
+    # The `rlm-restricted` (delegation) arm's root prompt, and ONLY that arm's:
+    # `root.v3` above stays pinned for `rlm`, unedited, because the S4
+    # re-validation depends on it. Derived from v3 with five passages changed,
+    # all of them statements that are FALSE once chunks are opaque handles --
+    # the two environment bullets, the truncation paragraph, tip 1, tip 2 and
+    # tip 4. Tip 2 is the load-bearing one: v3 says "a regex, a keyword scan, a
+    # count over `chunks` is free and exact", which in that arm raises, and a
+    # root told to scan and unable to just stops emitting code (measured in the
+    # 2026-08-20 smoke: 83 of 149 steps in codeqa-01 were repl_exec/rejected/
+    # no_cell_extracted -- prose, until the wall clock killed the episode).
+    # A prompt that lies about the environment measures prompt mismatch, not
+    # the value of delegation, which is the one thing this arm exists to price.
+    root_restricted: { path: prompts/root-restricted.v1.md, sha256: 65af229386acb5972bc26dfb771006c5bce96f73d8065b888f689ea404726c9c }
+    # LEAF PREFIX: v1 REMAINS PINNED pending the S2 refusal A/B
+    # (`milestones/s2/REFUSAL-AB.md`). v2 exists on disk, unmodified and unpinned, as the
+    # refusal-strengthened arm; v1 is the control behind every leaf measurement
+    # recorded so far -- including the 95% false-positive rate the A/B exists to
+    # attack -- and is never edited. Whichever arm wins is pinned HERE, once,
+    # with the measurement cited.
+    leaf_prefix: { path: prompts/leaf-prefix.v1.md, sha256: dfaddb37a24594724709d36dbb117fc1b12bfa436229322d4d5ebf46625d0f76 }
+    # The envelope's format block, appended to whichever prefix is pinned. Its
+    # own file and its own hash so the 2x2 (prefix x envelope) varies on two
+    # independent axes and neither prefix carries the format. Declared and
+    # hash-pinned even while `scaffold.leaf_envelope.enabled` is false, so a
+    # drifted or deleted block is refused at config load rather than at the
+    # moment someone flips the switch.
+    leaf_envelope: { path: prompts/leaf-envelope.v2.md, sha256: 58d813fa36766e4ea9800b9004577d31b6d71fcbb26d38f4b0ef83d911d12867 }
+    strategy_templates:
+      needle: { path: prompts/strat-needle.v1.md, sha256: 6203a30dec3fa8280a222b636ae7ef0b65fa01212d416c95ad6c0d1104e0e11d }
+      # PINNED v2 SINCE 2026-08-13. v1 was authored against a PARTITIONING
+      # chunker; §7 #2's window 1,024 / stride 768 makes `chunks` overlapping
+      # windows, so ~25% of the corpus sits in two of them and v1's reduction
+      # step ("deduplicate across chunks, then count") double-counts, while its
+      # boundary-stitching tip manufactures a phantom copy of every item the
+      # overlap already covers. §8 requires this category to force coverage and
+      # punish sampling, so the counting guidance has to match the geometry the
+      # chunker actually ships. v1 stays on disk, unmodified and unpinned, as
+      # the recorded text of every run made before this date.
+      aggregation: { path: prompts/strat-aggregation.v2.md, sha256: 4baeea34d2dda4a5b1022ed5fa2366c6a6d78161238482526820eb8d34bb35fa }
+      synthesis: { path: prompts/strat-synthesis.v1.md, sha256: ed974f736e7d8873a162f0419512d0b9b4ccb5830299b54c72444a62382ab56c }
+      code_qa: { path: prompts/strat-codeqa.v1.md, sha256: 54f99dc59013686b8b8b7323293fc834c20fea4a95cbf8dc9ccbba298ae32c2e }
+      default: { path: prompts/strat-default.v1.md, sha256: f4d12908276113309aab07283ef8cb096b4d8d53e14c8bd794a9b4999a6b7415 }
+    baselines:
+      # §8 baseline arms (S4). Authored 2026-08-16, pinned at commit, never
+      # iterated against benchmark content (no-overfit rule).
+      b1_single_shot: { path: prompts/b1-single-shot.v1.md, sha256: 528223ad24988ec76f55d1a5835cfcace05593e796af87bae59d6aeb0c32f8d5 }
+      b2_leaf_summary: { path: prompts/b2-leaf-summary.v1.md, sha256: 2621d76a602ba8300d10177f6cf488d7ba7f9121042a3f8a2444a9271f5064ec }
+      b2_root_final: { path: prompts/b2-root-final.v1.md, sha256: e4c67521a16a87e09e98ca59aa3604b6ab262f85287e5701eaf46056959e6f1b }
+      b3_single_shot: { path: prompts/b3-single-shot.v1.md, sha256: b8591d4e8895c9ad80c847f888c1b095e1f14068b2649c3a14cbf60bcaea1267 }
+  # DECIDED BY THE S2 A/B (`milestones/s2/REFUSAL-AB.md`), not by taste. `enabled` appends
+  # the format block to the leaf prefix and makes C4 parse/validate the reply
+  # scaffold-side; `grammar` is the SEPARATE server-side enforcement flag and is
+  # never trusted even when on -- llama.cpp has documented silent fail-open on
+  # schema-parse failure (§13), so scaffold-side validation runs identically
+  # either way.
+  leaf_envelope: { enabled: false, grammar: false }
+  sandbox:
+    # MUST be the real base interpreter, never the venv's Scripts\python.exe
+    # trampoline (262 KB stub that re-execs the real interpreter as a CHILD
+    # with a DIFFERENT pid -- measured on this box, Popen.pid != child's own
+    # os.getpid()). Recording the trampoline's pid as episodes.sandbox_pid
+    # would be wrong, would race job.assign against the trampoline's own
+    # re-exec (Cross-check Conflict 1/7), and would make TerminateJobObject
+    # target the wrong process. Absolute path, pinned, never sys.executable.
+    interpreter: 'C:\Users\Rene\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\python.exe'
+    bootstrap_dir: 'D:\PROJECTS\rlm-halo-framework\sandbox_bootstrap'
+    network_isolation: appcontainer
+    appcontainer_per_episode: true
+    deny_ctypes: false
+    memory_limit_mb: 4096
+    active_process_limit: 1
+  root:
+    enable_thinking: false
+    window_tokens: 32768
+    # v0.3.16 (2026-08-21), milestones/s2/REPLAY-LOOP-AB.md §4. Until now the root was
+    # sampled with the SAME seed on every turn of an episode. When two
+    # consecutive turns see near-identical histories -- a cell re-run against
+    # an unchanged observation -- the sampler then makes the same choices, and
+    # a per-turn repeat probability of ~64% (measured with varied seeds)
+    # became 70/70 and 111/111 in production. `per_turn` = seed*1000 + turn:
+    # distinct per turn, still a pure function of the episode seed the bench
+    # assigns, still recorded by config_snapshot. `fixed` is the old rule.
+    seed_schedule: per_turn
+    # v0.3.16 (2026-08-21). The chat template renders EVERY past assistant turn
+    # with its own `<think>\n\n</think>\n\n` before the content; storing
+    # assistant_prefix(rendered) + raw put a second one in front of every past
+    # turn in every S4 and re-validation request (stimuli in
+    # milestones/s2/results/replay-loop-ab/: 17 think blocks for 9 assistant markers).
+    # `raw` stores the completion itself, so the next render is the previous
+    # render + the model's tokens, byte for byte, and the history is what the
+    # model actually saw. `prefix_plus_raw` is the old rule, which `rlm replay`
+    # still applies to every episode whose snapshot carries it (or no key).
+    history_mode: raw
+  leaf:
+    # S1 F3: every leaf reply in the gate was an empty `<think></think>` block
+    # (the untemplated leaf path). At chunk scale the reasoning trace is decode
+    # cost the root never reads, and the hand-run probe with thinking ON never
+    # reached an answer inside 512 tokens. Off, like the root's.
+    enable_thinking: false
+  # NOT `servers.leaf.parallel`, and no longer required to equal it (v0.2.6).
+  # Under never-reuse the two measure different things: `--parallel` is the
+  # POOL -- how many windows one leaf process can serve before it is rotated,
+  # sized by the measured 62.8125 MiB/slot memory bill -- while this is how
+  # many leaf calls may be in flight at once, sized by S0's finding that
+  # aggregate prefill is FLAT across slots (946.7 t/s at 8 ≈ 943.4 at 1).
+  # Tying them would put 128 calls on the wire because the memory allowed 128
+  # slots. 8 was S0's measured value; it may not exceed the pool, since every
+  # in-flight call holds a slot.
+  #
+  # LIVE BLOCKER, 2026-08-14 (`milestones/s2/OCCUPANCY.md` §7): THIS VALUE IS NOT SAFE.
+  # Concurrent leaf dispatch destroys the ANSWER, not merely the latency:
+  # 31/32 correct serial, 7/32 at 2 in flight, 3/32 at 3, 2/32 at 4, 7/128 at
+  # 8 -- degenerate text ('###/remainile'), not wrong answers. Reproduced with
+  # two independent OS processes sharing one server, so it is the server and
+  # not the async client, and R13's detector CANNOT see it (degenerate output
+  # carries no identifier to be foreign). The break is at TWO.
+  # NOT CHANGED HERE, deliberately: this is a defect of the same class as R13
+  # and gets the same treatment -- minimal reproducer, mechanism, upstream
+  # issue -- before a config edit picks a number. Every wall-clock figure in
+  # this file and in §7 #2 is a SERIAL one for exactly this reason, and
+  # `max_wall_clock_s` may not be re-derived until it is characterised.
+  dispatch_concurrency: 1   # R14 (spec v0.3.1): serial only. 2 in flight = 9/32 correct vs 31/32 serial;
+                            # fan-out buys 13% wall and costs 68% of answers. Raise ONLY if the
+                            # --no-cont-batching lead is fixed upstream, and re-measure on
+                            # correct-answers-per-second, never on wall-clock alone.
+
+trace:
+  db_path: traces/rlm.duckdb
+  blob_root: traces/blobs
+  export_every_episode: true
+
+# FROZEN 2026-08-15 (§8: "Frozen and versioned at the end of S2"). `version`
+# names `bench/manifest.json`, whose own sha256 is the freeze hash — one number
+# that moves if any task, corpus hash, checker or precondition result changes:
+#   571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91
+# Built with the REAL leaf tokenizer (`leaf:/tokenize`), not the offline
+# 4-chars-per-token proxy: the proxy is vocabulary-specific and this vocabulary
+# is new, so an approx-counted build is a draft and is versioned "v1-draft".
+# Both §8 preconditions that gate the freeze have passed: the closed-book probe
+# (30 tasks x 2 models x 3 seeds, 0/6 everywhere — no task is answerable without
+# its corpus) and the checker near-miss suites (>=3 per checker, in
+# src/rlm/measure/checkers.py beside the implementations).
+#
+# `manifest_sha256` IS that freeze hash, pinned so `config_snapshot` records
+# WHICH freeze an episode was scored against rather than merely that one
+# existed. `escalation_seeds` are §8's two extra draws, disjoint from `seeds`,
+# spent only on a block whose sign test lands short of significance -- declared
+# up front so escalation is a pre-registered rule and not a decision made after
+# seeing the result.
+benchmark:
+  version: v1
+  manifest_sha256: 571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91
+  seeds: [1, 2, 3]
+  escalation_seeds: [4, 5]
+# S0 item 8 measured the Windows RAPL collector's overhead at +0.56% (noise)
+# and recorded energy_j as ENABLED on this box (milestones/s0/RESULTS.md:73-74). §8 makes
+# the cost scorecard mandatory and energy one of its columns, so leaving this
+# off would have run S4 with the energy column NULL for no reason but a default.
+power_sampling: { enabled: true }

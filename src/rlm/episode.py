@@ -618,9 +618,15 @@ class _EpisodeRun:
         was the hole: a pool drained by three consecutive dispatch failures
         raises the same exception as a pool drained by three answered windows,
         so a failing leaf was relaunched and logged as a planned rotation.
-        C4 therefore records why each slot was consumed and this checks
-        `pool_error_drained` first -- a generation that answered nothing ends
-        the episode `outcome=error` rather than being relaunched.
+        C4 therefore records why each slot was consumed, and `_rotate_leaf`
+        checks `pool_error_drained` AFTER `quiesce()` -- a generation that
+        answered nothing ends the episode `outcome=error` rather than being
+        relaunched. Not before: slots are consumed at `acquire()`, ahead of the
+        concurrency semaphore, so a fan-out wider than the pool exhausts it
+        while every window is still in flight and nothing has been answered
+        *yet*. Judged at that instant, a healthy leaf reads as a failed one,
+        deterministically, for any `--parallel + 1` burst (S5 smoke,
+        2026-09-01). Only a settled generation can be judged.
 
         The retry re-dispatches the SAME `call_id`: a rotation does not make a
         new sub-call, it makes the same one land on a virgin slot, and §5 C4
@@ -652,20 +658,18 @@ class _EpisodeRun:
                         "server_health", role="leaf", state="rotation_unavailable",
                         episode_id=self.episode_id, reason=SLOT_POOL_EXHAUSTED)
                     raise
-                if getattr(self.dispatcher, "pool_error_drained", False):
-                    # WHY the pool emptied decides whether this is a rotation
-                    # at all. Every window on this generation failed, so the
-                    # leaf is not a healthy server that ran out of slots -- it
-                    # is a FAILED server, and §5 C4 has never permitted
-                    # restarting one: doing so masks the fault the trace exists
-                    # to record, and the lifecycle log would have called it a
-                    # planned rotation. The episode ends instead.
-                    self.lifecycle.event(
-                        "server_health", role="leaf", state="rotation_refused",
-                        episode_id=self.episode_id,
-                        reason=SLOT_POOL_ERROR_DRAINED)
-                    await self._trip(Outcome.ERROR, SLOT_POOL_ERROR_DRAINED)
-                    raise
+                # WHY the pool emptied decides whether this is a rotation at
+                # all -- but that question is answered inside `_rotate_leaf`,
+                # AFTER `quiesce()`, and deliberately not here. Slots are
+                # consumed at `acquire()`, ahead of the concurrency semaphore,
+                # so a fan-out wider than the pool reaches this line while
+                # every window on the generation is still in flight and
+                # `answered` is empty BY CONSTRUCTION -- the leaf has not been
+                # asked yet, let alone failed. Judged here, that pool reads as
+                # "served nothing" and a healthy server is refused as failed:
+                # deterministic for any `--parallel + 1` burst (S5 smoke,
+                # 2026-09-01, episode dd0783a8: 129 cancelled, 7 exhausted,
+                # 0 leaf errors). Only a settled generation can be judged.
                 rotation = await self._rotate_leaf()
                 self._stamp_rotation(call_id, rotation)
         raise DispatchError(
@@ -683,6 +687,13 @@ class _EpisodeRun:
 
           quiesce C4  -> no call may be mid-flight while the process it is
                          talking to is replaced;
+          judge       -> ONLY NOW is `pool_error_drained` meaningful: every
+                         window has settled (answered, failed, or cancelled
+                         by its caller). A generation that served nothing and
+                         failed something is a FAILED server and is refused
+                         (`rotation_refused`, episode ends `error`); one that
+                         served anything is rotated. Judging before the
+                         quiesce mistakes "not asked yet" for "failed";
           restart     -> the injected process manager's, never C4's;
           /props      -> §4's handshake, RE-RUN. A rotation that silently comes
                          back with different flags is exactly the failure the
@@ -707,15 +718,40 @@ class _EpisodeRun:
                 return self._rotations
             rotation = self._rotations + 1
             started = time.perf_counter()
-            self.lifecycle.event("server_health", role="leaf", state="rotating",
-                                  episode_id=self.episode_id, rotation=rotation,
-                                  reason=SLOT_POOL_EXHAUSTED)
             # `rotating()` is quiesce -> ... -> resume with the reopen in a
             # `finally` INSIDE C4, so no path out of this block -- including a
             # cancellation landing on the quiesce itself -- can leave the gate
             # closed with nobody to reopen it. That failure mode is a hang, not
             # a refusal: parked calls would produce no step and no outcome.
             async with self.dispatcher.rotating():
+                # THE GENERATION IS JUDGED HERE, AND ONLY HERE: after
+                # `quiesce()`, so every window that was in flight has settled
+                # -- answered, failed, or cancelled by its caller. "Served
+                # nothing" is now a fact about the server and not about the
+                # clock, and `error_drained` additionally requires that the
+                # LEAF failed at least one window: slots the root abandoned
+                # (a cell's `wait_for`) say nothing about the server. A
+                # generation that answered nothing and failed something is a
+                # FAILED server, and §5 C4 has never permitted
+                # restarting one: doing so masks the fault the trace exists to
+                # record, and the log would have called it a planned rotation.
+                # The episode ends instead, and the `rotating` event is never
+                # emitted for it.
+                if getattr(self.dispatcher, "pool_error_drained", False):
+                    self.lifecycle.event(
+                        "server_health", role="leaf", state="rotation_refused",
+                        episode_id=self.episode_id,
+                        reason=SLOT_POOL_ERROR_DRAINED)
+                    await self._trip(Outcome.ERROR, SLOT_POOL_ERROR_DRAINED)
+                    raise SlotPoolExhausted(
+                        "leaf slot pool exhausted by failures: every window on "
+                        "this generation failed and none was answered, so the "
+                        "leaf is a failed server and §5 C4 refuses to relaunch it")
+                self.lifecycle.event("server_health", role="leaf",
+                                      state="rotating",
+                                      episode_id=self.episode_id,
+                                      rotation=rotation,
+                                      reason=SLOT_POOL_EXHAUSTED)
                 try:
                     await self.process_manager.restart()
                     await self._rehandshake_leaf()

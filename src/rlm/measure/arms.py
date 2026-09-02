@@ -743,9 +743,19 @@ class ArmEpisode:
         fault the trace exists to record — only a HEALTHY one whose pool ran
         out is a resource-lifecycle operation). `pool_error_drained` (when the
         dispatcher exposes it, matching `LLMDispatcher`) distinguishes the two
-        shapes of exhaustion the same way `src/rlm/episode.py:586` does: a
-        generation that answered NOTHING is a failed server wearing pool
-        exhaustion's exception, not a healthy one that ran out of windows.
+        shapes of exhaustion: a generation that answered NOTHING is a failed
+        server wearing pool exhaustion's exception, not a healthy one that ran
+        out of windows.
+
+        JUDGED BEFORE THE ROTATION'S QUIESCE, and that is correct HERE ONLY
+        BECAUSE EVERY CALLER IS SERIAL. `src/rlm/episode.py::_rotate_leaf`
+        moved the same judgment to after `quiesce()` (2026-09-01), because a
+        concurrent fan-out wider than the pool reaches exhaustion while every
+        window is still in flight and nothing is answered *yet*. B1/B3 make
+        one call and B2's map is a plain `for` loop, so at any exhaustion here
+        every earlier window has already settled and the pre-quiesce judgment
+        is sound. A concurrent `call_leaf` caller (a benchmark-v2 delegation
+        arm) must move this check into `_rotate_leaf` first.
 
         Retries the SAME `call_id` ONCE after a successful rotation — B2's
         map is serial, so (unlike `src/rlm/episode.py`'s up-to-

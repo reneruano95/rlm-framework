@@ -397,8 +397,20 @@ class SlotPool:
         demonstrated it can serve, and refusing to rotate there would turn a
         single transient failure into a dead episode. What is refused is the
         generation that served nothing at all.
+
+        A settled window has THREE dispositions, not two: answered, failed, or
+        CANCELLED by the caller (a root cell's `asyncio.wait_for` that gave up
+        before the leaf finished; the kill path). A cancelled slot is neither
+        marked answered nor marked failed, and it says nothing about the
+        server -- the leaf was still generating when the root hung up. So a
+        pool spent entirely by cancellations is not a failed server, and the
+        predicate requires at least one window the LEAF actually failed. Found
+        2026-09-02 reviewing the burst fix: two `wait_for` timeouts on a pool
+        of two, then a plain call, refused a healthy leaf with the exact trace
+        signature of the fan-out bug (N cancelled + exhausted + 0 leaf errors).
         """
-        return self.restart_required and not self._answered
+        return (self.restart_required and not self._answered
+                and bool(self._failed))
 
     def mark_answered(self, window: str) -> None:
         self._answered.add(window)

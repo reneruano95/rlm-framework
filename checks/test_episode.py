@@ -724,6 +724,171 @@ async def test_a_pool_that_answered_a_window_still_rotates(episode_env, mock_ser
     assert any(e.get("state") == "rotating" for e in env.lifecycle_events())
 
 
+#: The arrival pattern the trace store showed on 2026-09-01 (S5 A3B-as-root
+#: smoke, needle-02, rlm-restricted, episode dd0783a8): one `asyncio.gather`
+#: over MORE windows than the pool has slots, with NO stagger. Every coroutine
+#: reaches `SlotPool.acquire()` before the first HTTP byte of any completion
+#: is sent, so the overflow call finds the pool spent while `answered` is
+#: still empty by construction -- not because the leaf failed, because it has
+#: not been asked yet. 138 steps: 129 cancelled, 7 "slot pool exhausted",
+#: 2 ok, zero leaf HTTP errors; the bench's rerun of the same cell succeeded.
+#: Every other fan-out in this file is sequential or staggered, which is why
+#: none of them could see it.
+SIMULTANEOUS_BURST = (
+    "```repl\n"
+    "import asyncio\n"
+    "outs = await asyncio.gather(\n"
+    "    *[llm_query('Q?', chunk=f'window {i}') for i in range(5)],\n"
+    "    return_exceptions=True)\n"
+    "print([type(o).__name__ if isinstance(o, BaseException) else 'ok'\n"
+    "       for o in outs])\n"
+    "```")
+
+
+async def test_a_simultaneous_burst_wider_than_a_virgin_pool_rotates_instead_of_dying(
+        episode_env, mock_server):
+    """Five windows under one `gather`, pool of two, nothing staggered.
+
+    `error_drained` means "this generation served NOTHING", and §5 C4 refuses
+    to relaunch a server in that state. But "nothing answered yet" and "nothing
+    will ever be answered" are different facts, and only the second is a
+    failed server. A burst wider than the pool produces the first one every
+    time: the slots are consumed at acquire, ahead of the concurrency
+    semaphore, so the overflow call asks the question before a single
+    completion has been sent. The honest answer to it is to WAIT for the
+    in-flight windows to settle -- which `quiesce()` already does -- and judge
+    the generation afterwards. Killing the episode here diagnoses a healthy
+    server as failed, and it is deterministic: any fan-out of `--parallel + 1`
+    windows on a virgin pool dies before the leaf receives a request.
+    """
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[SIMULTANEOUS_BURST, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+
+    health = [(e.get("state"), e.get("reason")) for e in env.lifecycle_events()
+              if e["kind"] == "server_health"]
+    assert ("rotation_refused", "slot_pool_error_drained") not in health, (
+        f"a healthy leaf that had not yet been asked anything was refused as "
+        f"failed: {health}")
+    assert res.outcome == Outcome.SUCCESS, (res.outcome, res.reason)
+    # Exactly two: windows 0-1 on the virgin pool, 2-3 after the first
+    # rotation, 4 after the second. `>=` would let `_rotate_leaf`'s
+    # early-return guard ("someone rotated while I queued on the lock")
+    # regress into a third, wasted relaunch without this test noticing.
+    assert pm.restarts == 2, f"five windows on a pool of two rotate twice, not {pm.restarts}"
+
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    answered = [s for s in calls if s["status"] == "ok"]
+    assert len(answered) == 5, (
+        f"{len(answered)}/5 windows answered: "
+        f"{[(s['status'], s['error_detail']) for s in calls]}")
+    windows = {env.blob(s["observation_full_ref"]).decode("utf-8") for s in answered}
+    assert len(windows) == 5
+    stray = [s for s in calls if s["status"] == "error"
+             and "slot pool exhausted" not in (s["error_detail"] or "")]
+    assert stray == [], f"leaf traffic died across a rotation: {stray}"
+
+
+#: Two windows the CELL gives up on (a root-authored `wait_for` shorter than
+#: the leaf's latency), then a third plain call. The two cancelled windows
+#: hold slots but are neither answered nor failed; the third exhausts the
+#: pool. Found by the 2026-09-02 review of the burst fix: "settled" has three
+#: dispositions, not two, and a generation whose slots were all CANCELLED by
+#: the root says nothing about the server.
+CANCEL_THEN_EXHAUST = (
+    "```repl\n"
+    "import asyncio\n"
+    "for i in range(2):\n"
+    "    try:\n"
+    "        await asyncio.wait_for(llm_query('slow'), 0.3)\n"
+    "    except asyncio.TimeoutError:\n"
+    "        print('timeout', i)\n"
+    "print(await llm_query('Q?', chunk='window 2'))\n"
+    "```")
+#: `llm_query('slow')` WITHOUT `chunk=`, deliberately: the mock switches to its
+#: slow stream only when the rendered user segment is exactly "slow", and the
+#: chunk layout would make it "window i\n\nslow". A chunk-less call still keys
+#: its own window on `call_id` and still consumes a slot.
+
+
+async def test_a_pool_spent_by_the_cells_own_cancellations_rotates_instead_of_dying(
+        episode_env, mock_server):
+    """A slot the ROOT abandoned is not a slot the LEAF failed.
+
+    `error_drained` exists to refuse relaunching a server that served nothing
+    because it could not. A cell that wraps `llm_query` in a short `wait_for`
+    produces slots that were never answered AND never failed -- the leaf was
+    still generating when the root hung up -- and a predicate of "spent and
+    nothing answered" reads that as a dead server. It is a healthy one whose
+    caller was impatient, and §5 C4's rule about failed servers does not
+    reach it. The third call must rotate and be answered.
+    """
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[CANCEL_THEN_EXHAUST, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+
+    health = [(e.get("state"), e.get("reason")) for e in env.lifecycle_events()
+              if e["kind"] == "server_health"]
+    assert ("rotation_refused", "slot_pool_error_drained") not in health, (
+        f"a leaf whose caller hung up on it was refused as failed: {health}")
+    assert res.outcome == Outcome.SUCCESS, (res.outcome, res.reason)
+    assert pm.restarts == 1
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert [s["status"] for s in calls].count("cancelled") == 2
+    assert [s["status"] for s in calls].count("ok") == 1
+
+
+#: The failed-server quadrant of the SAME arrival pattern as the burst test:
+#: three windows under one gather on a pool of two, against a leaf that fails
+#: every attempt. Here the overflow call's quiesce genuinely BLOCKS on two
+#: live windows, both of which then fail. The generation must still be judged
+#: failed AFTER that wait -- this is the branch the burst fix created, and
+#: without this test nothing pins that "wait, then judge" still refuses.
+FAILING_BURST = (
+    "```repl\n"
+    "import asyncio\n"
+    "outs = await asyncio.gather(\n"
+    "    *[llm_query('Q?', chunk=f'window {i}') for i in range(3)],\n"
+    "    return_exceptions=True)\n"
+    "print([type(o).__name__ if isinstance(o, BaseException) else 'ok'\n"
+    "       for o in outs])\n"
+    "```")
+
+
+async def test_a_burst_whose_in_flight_windows_all_fail_is_still_refused_after_the_wait(
+        episode_env, mock_server):
+    """Judging after the quiesce must not become never judging. Two windows
+    are in flight when the third exhausts the pool; the judge waits for them;
+    both fail on every attempt; the generation served nothing and the leaf is
+    a FAILED server. No relaunch, `rotation_refused`, episode `error`."""
+    mock_server.fail_times(10_000)
+    pm = FakeLeafProcess()
+    env = episode_env(root_script=[FAILING_BURST, FINAL], answer="42",
+                      leaf_port=mock_server.port, process_manager=pm,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2))
+    res = await env.run()
+
+    assert pm.restarts == 0, "a failing leaf was relaunched"
+    assert res.outcome == Outcome.ERROR
+    assert res.reason == "slot_pool_error_drained"
+    health = [(e.get("state"), e.get("reason")) for e in env.lifecycle_events()
+              if e["kind"] == "server_health"]
+    assert ("rotating", "slot_pool_exhausted") not in health, health
+    assert ("rotation_refused", "slot_pool_error_drained") in health, health
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert not [s for s in calls if s["status"] == "ok"], "nothing was answered"
+    # Two WINDOWS failed; each records one error step per attempt, so count
+    # distinct calls, not steps.
+    failed_calls = {s["call_id"] for s in calls if s["status"] == "error"
+                    and "slot pool exhausted" not in (s["error_detail"] or "")}
+    assert len(failed_calls) == 2, [(s["call_id"], s["status"], s["error_detail"])
+                                    for s in calls]
+
+
 async def test_rotation_time_is_inside_the_episodes_measured_wall_clock(
         episode_env, mock_server):
     """§5 C4: "its wall-clock is included in the episode's measured time" --
