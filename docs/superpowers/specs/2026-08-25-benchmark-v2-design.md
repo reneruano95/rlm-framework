@@ -1,6 +1,6 @@
 # Benchmark v2 — the instrument that prices delegation, and supplies S6
 
-**Date:** 2026-08-25 · **Status:** design, approved in session by the owner; awaiting spec review.
+**Date:** 2026-08-25 · **Status:** design, approved in session by the owner 2026-08-25; **amended §14 on 2026-09-02 and approved by the owner the same day**; next step is the implementation plan.
 **Trigger:** `ARCHITECTURE.md` v0.4.0 (2026-08-25) schedules S6 and makes benchmark v2 a precondition of it under I5. The owner then asked to build v2.
 **Supersedes:** decision **D-A4** of `2026-08-22-long-horizon-agent-design.md` ("single track; benchmark v2 parked, not dropped"). That document made the revisit due at Gate 0's resolution (§6.3); Gate 0 resolved PASS on 2026-08-23 (`docs/research/2026-08-22-gate0-soak.md`, commits `af80fa4`, `954d2ca`). See §12.
 **Inputs:** `ARCHITECTURE.md` v0.4.0 §§1, 3, 8, 9, 10; `DIRECTION.md` amendment §0; `docs/research/2026-08-20-rlm-paper-fidelity-and-next-steps.md` §§2, 5.3; `docs/superpowers/specs/2026-08-22-long-horizon-agent-design.md` §§0, 4, 6; `docs/research/2026-08-22-gate0-soak.md`; `config.yaml`; `bench/`; `src/rlm/sandbox/child.py`; `src/rlm/measure/arms.py`; `traces/rlm.duckdb` at 707 non-superseded real episodes.
@@ -229,3 +229,64 @@ Taken by the owner in session on 2026-08-25. Re-litigate only with new facts, pe
 - **`max_depth > 1`.** §9 forbids proposing it before the S4 gate, which passed on v1; v2 does not reopen it.
 - **Any change to `size_tokens`, `dispatch_concurrency` or `slot_policy`.** Still pinned, still owed, still unrelated to this work.
 - **The learning loop itself.** v2 is its precondition, not its first step.
+
+---
+
+## 14. Amendments of 2026-09-02 — what one week of measurement forced into this design
+
+**Approved by the owner in session on 2026-09-02.** Inputs: `docs/research/2026-09-01-s5-a3b-root-smoke.md` (the same-model smoke; the `slot_pool_error_drained` mechanism, fixed in `5be9a41`), `docs/research/2026-09-02-delegation-brake-review.md` (the tasks, not the prompt, hold delegation at zero on v1), `docs/research/2026-09-01-three-papers-verified.md` §5(a) (S4's margins are cross-model). Everything in §§0–13 stands unless a line below says otherwise. Two owner decisions were taken before the amendments and are recorded first.
+
+### 14.0 Decisions taken 2026-09-02 (extends §11)
+
+| # | decision | consequence |
+|---|---|---|
+| **D-B6** | **All sixteen tasks are built in one pass**, interactive included — no staging | D-B4 is confirmed, not re-litigated. The `env` verb (§9) is built alongside the static categories, and v2 freezes once, at N=16, exactly as §3 pre-registers. The owner chose this over a static-first stage knowing the verb is the design's highest-risk item |
+| **D-B7** | **v2 runs with one model in every arm**: the leaf GGUF (`Qwen3.6-35B-A3B-UD-Q4_K_M`) as root and as leaf, the S5 "A3B-as-root" configuration | `rlm`, `rlm-nosubcalls` and `B2` share a model, so every margin in the v2 verdict is the scaffold's. The 27B-root configuration becomes a later S5 row and is not part of the v2 verdict |
+
+### 14.1 Configuration (amends §6, §7)
+
+v2 runs from **`config.v2.yaml`**, derived from `config.s5-a3b-root.yaml` (itself five lines from `config.yaml`: root model → the leaf GGUF, `dflash: false`, plain Vulkan `backend_dir`, own root log path, DFlash2 flags dropped), with `benchmark.version: v2`, the v2 `manifest_sha256`, and the prompt pins of §14.3. `config.yaml` is not modified. `checks/test_config.py:625`'s assertion that `bench_leaf.model == leaf.model` holds trivially. Why this is not a §11 re-litigation: on 2026-08-25 the project believed its baselines were same-model; `2026-09-01-three-papers-verified.md` §5(a) showed S4 compared the 27B root carrying the scaffold against the A3B leaf carrying none. v2 does not inherit that.
+
+**Cost consequence.** The A3B root decodes at ~59 t/s against the 27B's ~13 (35 with DFlash2), and the smoke's free-root cells ran at 0.05–0.22× the pre-registered projection while forced-delegation cells ran at 3–21×. §7's ~27 h is therefore **unreliable in both directions** and is superseded by §14.6.
+
+### 14.2 Second build-time adversary: root self-read (amends §2, §8)
+
+The parser adversary closes v1's failure. It does not close the one the brake review found: the free root solved needle-02 by **printing whole chunks into its own window and reading them** — lossy, lucky, and enough. Any task whose answer sits in a few locatable chunks is answerable by a root that never delegates, however semantic the label.
+
+**Rule, pre-registered:** a task is rejected at build time if its answer is reachable by locating **≤ K = 40 chunks** by any deterministic locator (regex, keyword set, header or field parse — the same family the parser adversary is allowed) and reading those chunks in full. K is derived, not chosen: §1's ~20,000-token root reading ceiling ÷ ~530 tokens per capped observation ≈ 38 read-turns, rounded up for margin. The builder computes, from the labels it actually sampled, the **minimal necessary window set** — the smallest set of chunks whose contents determine the answer — and requires its size to exceed K. For a linear-semantic aggregate over every item this is automatic at ~139 windows; the check makes it explicit, and it is what stops an author from writing "how many HUM questions mention Russia" (locatable by one keyword). For interactive tasks the same rule applies over `env.window` slices: the minimal necessary slice set must exceed K, so no ≤ 40-window navigation reaches the answer.
+
+**Standing:** a precondition of freeze, equal to the four inherited from §8 and to the parser adversary. Both adversaries are authored by a different pass than the generator (V2-R1's response, now covering both). `rlm-nosubcalls` remains the run-time detector of both adversaries' weakness (§6): if it passes half a category, the category is re-authored.
+
+### 14.3 Truthful prompts per arm (amends §6, §9)
+
+The brake review found the pinned prompts telling arms things that are false in their environment: `root.v3.md:37` says `llm_query` *"reaches a small, fast, stateless model"* (false under D-B7 — it is the same model), and `config.py` appends the unforked strategy blocks — *"Scan in code first ... zero sub-calls"* — to a root whose arm cannot read chunks. Neither changed today's outcomes measurably; both violate the arms' own rule that a prompt must not lie about the environment, and both would contaminate `rlm-nosubcalls`, whose whole point is to be `rlm` with delegation removed and nothing else.
+
+Three new pinned files, sha-pinned as always; **no existing prompt file is edited**:
+
+- **`root.v4.md`** — `root.v3.md` with :37 corrected to what is true under D-B7 (*"`llm_query` reaches a sub-model — in this configuration the same model as you, but with no REPL, no memory between calls, and no knowledge of your task beyond the string you hand it"*), and nothing else. Pinned for `rlm` in `config.v2.yaml`. The v3→v4 changelog line records the one sentence.
+- **`root-nosubcalls.v1.md`** — `root.v4.md` with the `llm_query` API entry, the "sub-model" section, and the sub-call-referring tips removed (tips renumbered), so the prompt describes a REPL with `context`, `chunks` and `final_answer` and nothing more. Pinned for `rlm-nosubcalls`. The arm's dispatcher refusal (§9) stays: the prompt and the runtime agree.
+- **`-nosubcalls` variants** of each strategy block that mentions sub-calls (needle, aggregation, code_qa; synthesis has none), with only those sentences removed.
+
+The `rlm` arm's block set is unchanged. The brake itself (`root.v3.md:53,59,60`) is **kept** in v4 — the brake review found it accurate advice and unmeasured, and v2's code-solvable controls exist precisely to keep it honest.
+
+**Name collision, resolved here.** `2026-09-02-delegation-brake-review.md` §4 describes an *optional* brake-removal ablation prompt and calls it `root.v4.md`. That ablation was never built and gates nothing. **`root.v4.md` is reserved by this spec for the :37 correction above**; if the ablation is ever built it is `root-nobrake.v1.md`, so the two cannot be confused in a `config_snapshot`.
+
+### 14.4 The slot-pool precondition is met (amends §7, §10)
+
+§7's cost model assumes a linear-semantic episode drives ~139 windows through a 128-slot leaf pool via rotation. Until 2026-09-01 that assumption was false in the scaffold: any `asyncio.gather` wider than the pool on a virgin generation was killed as `slot_pool_error_drained` before the leaf received a request (129 cancelled / 7 exhausted / 0 leaf errors in the smoke's own trace), and a pool spent by the root's own cancellations read the same way. Both are fixed (`5be9a41`; the judgment now follows `quiesce()` and requires a leaf-failed window; three RED→GREEN tests in `checks/test_episode.py`). **V2-R7, added:** the bench arms' mirror `ArmEpisode._dispatch_leaf` still judges before the quiesce — correct while its callers are serial, and B2 is. If a v2 arm ever fans out through `call_leaf`, that judgment moves first (its docstring names the condition).
+
+### 14.5 Trace archiving is a precondition of the practice stream (amends §5)
+
+The 707-episode store §5 cites as [V] no longer exists: `traces/` is gitignored, it was reset between 2026-08-25 and 2026-09-01, and R16's 237 / 15 / 6 now rest on documents alone. S6's practice stream is worthless if the same happens to it. **Rule:** every v2 run — smoke, train, held-out, practice — is exported with `rlm export <run_id> --dest D:\AI\rlm-halo-archive\<date>-<name>-<run_id8>\` before any `traces/` reset, and the research record of that run carries the archive path and the bundle manifest's `config_snapshot_sha256`. First instance: `2026-09-01-s5-a3b-root-smoke-b650df33` (`9238f263…`). The export reads a closed store, so this is a post-run step, never concurrent with the bench.
+
+### 14.6 Label source, verified (amends §2)
+
+`CogComp/trec` on Hugging Face: 5,452 train + 500 test human-labelled questions, 6 coarse / 50 fine labels, ~10 words per item, downloads 0.36 MB. **Licence on the card: `unknown`**; the CogComp homepage distributes it for research use. Decision under §2's pre-registered rule: **TREC stays primary** — the same source as OOLONG, so v2's linear-semantic regime is comparable with the paper's, and 6 coarse classes is a labelling task a 3B-active leaf can do without drowning the aggregate in label noise. The manifest records the licence status verbatim. **Fallback resolved to a named set:** `PolyAI/banking77` (CC-BY-4.0, 13,083 expert-labelled queries, 77 intents), verified 2026-09-02; it is the substitute if TREC's status is ruled unusable at build time, at the cost of a much harder per-item label. §8.1's closed-book probe is load-bearing for either source.
+
+### 14.7 Smoke before score (strengthens V2-R6)
+
+The S5 smoke showed the pre-registered projection constants (`450 s` chunked non-aggregation, `60 s` single-shot, `2.78 s/window` aggregation) off by 5–20× in both directions on this configuration. **v2's scored run does not start until a `--smoke` pass on the frozen train split has printed its projection**, and if that projection exceeds the owner's 36 h the owner decides before the run. The smoke also validates, on real episodes, that `rlm-nosubcalls` refuses `llm_query` and that the `env` verb survives the same hijack tests `llm_query` does (§9).
+
+### 14.8 Unchanged, restated so no one wonders
+
+Sixteen tasks, 6 · 6 · 4; three streams; three arms; B2 abstains from interactive; +2 margin at N=16; §8's inference layer; no new checkers; geometry 640/480; the `env` verb as §4 specifies it; the ARCHITECTURE.md §8 amendment deferred to the implementation plan (§12).

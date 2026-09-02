@@ -6,6 +6,15 @@ run in `runs/s5-a3b-root/` (gitignored) and moved here unchanged except for this
 and `smoke-calibration.txt` (the `--smoke` table as printed). The config that produced it is
 `config.s5-a3b-root.yaml` at the repo root.
 
+**Archived trace bundle** (2026-09-02, `rlm export b650df33-e03d-4791-9eed-cfca19575f39`): 21 episodes,
+`episodes.parquet` + `steps.parquet` + `blobs/<episode_id>/` for all 21, at
+`D:\AI\rlm-halo-archive\2026-09-01-s5-a3b-root-smoke-b650df33\` — outside the working tree, where no
+`traces/` reset reaches it. `bundle-manifest.json` `config_snapshot_sha256 =
+9238f26354a0306d0e965e41b199547289e297f3b3ca2967b5839155469da7cc`. This is the first run archived
+this way; the convention (export every run that matters to `D:\AI\rlm-halo-archive\<date>-<name>-<run_id8>\`,
+record path + sha here) exists because the 237-episode store R16 rests on was lost to a reset with no
+export.
+
 **Date:** 2026-09-01 · **Config:** `config.s5-a3b-root.yaml` (5-line derivative of `config.yaml` @ c0b4e7c: root model → the leaf GGUF, `dflash: false`, root `backend_dir` → plain Vulkan build, root log path, DFlash2 flags dropped) · **Command:** `rlm bench --config config.s5-a3b-root.yaml --smoke --ledger runs/s5-a3b-root/ledger.jsonl --report runs/s5-a3b-root/RESULTS.md` · **Smoke run_id:** `b650df33-e03d-4791-9eed-cfca19575f39` · **Servers:** root 8080 and leaf 8081 both `Qwen3.6-35B-A3B-UD-Q4_K_M`, both llama.cpp `b10375-ba360efe1` Vulkan.
 
 This is the first run in the project's history where all five arms use the same model. Any
