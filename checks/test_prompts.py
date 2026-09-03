@@ -288,33 +288,56 @@ def test_nosubcalls_body_describes_a_repl_with_no_sub_model():
         "more specific than the tips above, it wins.")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Task 8 finding: the brief's own Step 3 derivation for "
-    "root-nosubcalls.v1.md mandates two full-paragraph rewrites that are NOT "
-    "renumbered tips -- body line 9 (drop the delegation clause: 'You act by "
-    "writing code that inspects those objects, and by delegating chunk-level "
-    "reading to a cheap sub-model. You are an orchestrator, not a reader.' -> "
-    "'You act by writing code that inspects those objects. You are a "
-    "programmer over the context, not a reader of it.') and the '# Budgets' "
-    "paragraph (line 53, drop the 'Sub-calls,' enumeration item and the "
-    "sub-call-spending sentence). Both are correct per the brief and per "
-    "test_nosubcalls_body_describes_a_repl_with_no_sub_model (which they are "
-    "needed to pass -- 'sub-call'/'delegat' must not appear in the body), but "
-    "this test's invariant ('every line not verbatim in v4 is a renumbered "
-    "tip, matched by comparing text after the first \". \"') only accounts for "
-    "the tip-renumbering case (old tips 7-8 -> 1-2), not these two paragraph "
-    "substitutions -- so a correct root-nosubcalls.v1.md cannot satisfy it. "
-    "Left as strict xfail rather than weakened: strict=True fails loudly if "
-    "a future edit makes it pass, since that would mean the invariant no "
-    "longer describes reality.",
-)
+# CONTROLLER RULING (Task 8 fix round 1): the brief's Step 3 derivation for
+# root-nosubcalls.v1.md is v4 minus lines PLUS two mandated full-paragraph
+# rewrites that are neither "kept verbatim" nor a renumbered tip -- the
+# original two-case invariant below (kept-verbatim / renumbered-tip) was
+# incomplete and could never pass for a correct derivation, because it had
+# no way to admit these. Rather than leave that permanently strict-xfailed
+# (which would silently retire the very guarantee this test exists to
+# enforce -- that root-nosubcalls.v1.md is v4 minus lines, not a fresh
+# re-authoring), the invariant gets a third, explicit case: an allowlist of
+# exactly the two authorised rewrites, pinned to their exact before/after
+# text. Every OTHER line must still be kept-verbatim or a correctly
+# renumbered tip; an unauthorised rewrite anywhere else still fails.
+_AUTHORISED_REWRITES = {
+    # body line 9: drop the delegation clause (§14.3's whole point -- this
+    # arm's root does not know a sub-model exists).
+    "You never see the context as text. It is already loaded as Python "
+    "objects in a REPL that persists across your turns. You act by writing "
+    "code that inspects those objects, and by delegating chunk-level "
+    "reading to a cheap sub-model. You are an orchestrator, not a reader.":
+        "You never see the context as text. It is already loaded as Python "
+        "objects in a REPL that persists across your turns. You act by "
+        "writing code that inspects those objects. You are a programmer "
+        "over the context, not a reader of it.",
+    # the "# Budgets" paragraph: drop the "Sub-calls," cap and the
+    # sub-call-spending sentence -- there is nothing to spend sub-calls on.
+    "Sub-calls, tokens, and wall-clock are capped per episode by the "
+    "scaffold. The caps are enforced, not advisory; you cannot raise them "
+    "and asking for more has no effect. A breach kills the episode with no "
+    "answer at all. Spend sub-calls only on text that genuinely has to be "
+    "read; spend code freely.":
+        "Tokens and wall-clock are capped per episode by the scaffold. The "
+        "caps are enforced, not advisory; you cannot raise them and asking "
+        "for more has no effect. A breach kills the episode with no answer "
+        "at all.",
+}
+
+
 def test_nosubcalls_body_is_v4_minus_only_the_sub_call_lines():
     v4 = [l for l in _body("root.v4.md").splitlines() if l.strip()]
     ns = [l for l in _body("root-nosubcalls.v1.md").splitlines() if l.strip()]
     kept = [l for l in ns if l in v4]
-    renumbered = [l for l in ns if l not in v4]
-    # everything not in v4 is a renumbered tip (same text after the "N. ")
+    remainder = [l for l in ns if l not in v4]
+    rewritten = [l for l in remainder if l in _AUTHORISED_REWRITES.values()]
+    renumbered = [l for l in remainder if l not in rewritten]
+    # every authorised rewrite's ORIGINAL must actually be the v4 line it
+    # replaces -- pins both sides, not just the new text.
+    for old, new in _AUTHORISED_REWRITES.items():
+        assert old in v4, old
+        assert new in ns, new
+    # everything else not in v4 is a renumbered tip (same text after the "N. ")
     assert all(any(l.split(". ", 1)[1] == k.split(". ", 1)[1] for k in v4 if ". " in k)
                for l in renumbered if ". " in l), renumbered
-    assert len(kept) + len(renumbered) == len(ns)
+    assert len(kept) + len(rewritten) + len(renumbered) == len(ns)
