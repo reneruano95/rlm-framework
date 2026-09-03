@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from bench._cue_vocab import LABEL_NOUNS, WH_OPENERS, is_verb
 from bench.vocab import SYL_A, organisation
 
 TREC_LABELS = ("ABBR", "ENTY", "DESC", "HUM", "LOC", "NUM")
@@ -81,98 +82,84 @@ def _coined_date(rng: random.Random) -> str:
     return f"{rng.randint(1, 28)} {rng.choice(_MONTHS)} {rng.randint(1990, 2019)}"
 
 
-# The register's paraphrase step (Task 16). TREC's coarse label is
-# wh-word-recoverable ("who" -> HUM, "where" -> LOC), which makes a raw TREC
-# `Query:` line parser-solvable -- exactly what spec §1 forbids. Stripping
-# the leading wh-phrase (and its auxiliary, if one immediately follows) and
-# re-wording the rest through a fixed, seeded template removes the surface
-# cue while keeping the human label: the label is only recoverable by
-# understanding what KIND of thing "the executor in a will" or "Charles
-# Lindbergh" names, which is the leaf's judgment, not a regex's.
-_WH_OPENERS = (
-    r"how\s+(?:many|much|long|far|old)",   # longer form first: greedy alternation
-    r"who", r"whom", r"whose", r"where", r"when", r"which", r"what",
-    r"why", r"name", r"define", r"describe", r"how",
-)
-_WH_RE = re.compile(rf"^(?:{'|'.join(_WH_OPENERS)})\b\s*", re.IGNORECASE)
-
-# TREC's "what/which NOUN AUX ..." construction ("what South American city
-# HAS...", "what actor WAS...") puts the head noun that gives away the label
-# BETWEEN the wh-word and its verb, not right after it -- so the verb is
-# searched for across a window, not just the very next word, and the
-# head-noun phrase in between (the actual give-away: "city", "actor",
-# "president"...) is dropped along with it. Some TREC questions use a bare
-# past-tense main verb with no auxiliary at all ("what president SHOWED...",
-# "who WROTE..."), so the search also matches a regular past tense ("-ed")
-# or a closed set of common irregular past tenses, not only the aux list.
-_AUX_WORDS = {"'s", "is", "are", "was", "were", "do", "does", "did",
-             "can", "could", "will", "would", "has", "have", "had"}
-_IRREGULAR_VERBS = {
-    "wrote", "gave", "took", "said", "did", "went", "came", "knew", "sang",
-    "ran", "wore", "told", "sat", "stood", "held", "led", "bought",
-    "brought", "caught", "fought", "taught", "thought", "spoke", "broke",
-    "chose", "drove", "rode", "sold", "sent", "spent", "kept", "left",
-    "met", "paid", "hit", "made", "had", "got", "began", "won", "lost",
-}
+# The register's paraphrase step (Task 16, extended in the fix round after
+# a reviewer found two survivors: a non-leading "In which year..." and a
+# bare present-tense predicate "the disease KILLS..."). TREC's coarse label
+# is wh-word-recoverable ("who" -> HUM, "where" -> LOC), which makes a raw
+# TREC `Query:` line parser-solvable -- exactly what spec §1 forbids.
+#
+# The wh-word/verb vocabulary (`WH_OPENERS`, `is_verb`) and the per-label
+# content-noun vocabulary (`LABEL_NOUNS`) both live in `bench._cue_vocab`,
+# shared with `bench/adversary.py` -- ONE list, not two hand-kept mirrors,
+# so widening what the adversary can see and widening what the register
+# defends against happen from the same edit (see that module's docstring).
+#
+# Two mechanisms, on purpose, not one, so the report can say which is
+# which per the fix-round ruling:
+#   `_strip_wh`   -- STRUCTURAL. Finds a wh-opener ANYWHERE in the sentence
+#                    (not just leading -- closes "In which year..."), and
+#                    removes it plus everything through the next verb
+#                    (`is_verb`, which now also covers common present-tense
+#                    predicates -- closes "the disease KILLS..."). This is
+#                    a grammar-class rule: it doesn't know or care WHICH
+#                    wh-word or WHICH verb, only that one of each sits
+#                    there.
+#   `_redact_cues` -- BLACKLIST. A fixed content-noun vocabulary
+#                    (`LABEL_NOUNS`) removed wherever it survives
+#                    structural stripping (e.g. "the PRESIDENT of Ghana",
+#                    where "who is" is gone but the head noun "president"
+#                    sits past any verb boundary) -- structure genuinely
+#                    can't reach a noun that isn't next to a wh-word or a
+#                    verb, so this is where a fixed list is unavoidable.
+_PREPOSITIONS = {"in", "on", "at", "for", "of", "about"}
+_HOW_COMPOUNDS = {"many", "much", "long", "far", "old"}
 _VERB_WINDOW = 10
+
+
+def _bare(word: str) -> str:
+    return word.strip("\"'`,.").lower()
+
+
+def _wh_span(words: list[str]) -> tuple[int, int] | None:
+    """The (start, end) word-index span of the first wh-opener anywhere in
+    `words`, including a preceding preposition ("In WHICH year...") and an
+    immediately-following "how"-compound ("HOW MANY..."), if present.
+    `end` is exclusive: `words[start:end]` is the whole opener phrase."""
+    for i, w in enumerate(words):
+        bare = _bare(w)
+        if bare != "how" and bare not in WH_OPENERS:
+            continue
+        start = i - 1 if i > 0 and _bare(words[i - 1]) in _PREPOSITIONS else i
+        end = i + 1
+        if bare == "how" and end < len(words) and _bare(words[end]) in _HOW_COMPOUNDS:
+            end += 1
+        return start, end
+    return None
 
 
 def _verb_pos(words: list[str]) -> int | None:
     for i, w in enumerate(words[:_VERB_WINDOW]):
-        lowered = w.lower()
-        bare = w.strip("\"`,.").lower()          # keep the apostrophe: "'s"
-                                                  # is itself an _AUX_WORDS entry
-        if lowered in _AUX_WORDS or bare in _AUX_WORDS or \
-           bare in _IRREGULAR_VERBS or (bare.endswith("ed") and len(bare) > 3):
+        if is_verb(w):
             return i
     return None
-
-
-# A "what NOUN..." question's head noun can survive verb-stripping when it
-# sits right against the auxiliary ("what RIVER is...", "the PRESIDENT of
-# Ghana") -- these nouns don't help a reader reason about the record, they
-# just NAME the answer's type, which is exactly the surface cue
-# `bench/adversary.py`'s `_label_lexicon`/`_capitalised_tokens` strategies
-# key off (kept in sync with that file's `_LEXICON` by hand, since
-# `bench/adversary.py` imports `corpus_v2` and the reverse import would be
-# circular). Redacting them leaves the record's IDENTITY content --
-# "Ghana", "the Estonia", "Missouri" -- so recovering the label still needs
-# reasoning about what is being asked; it just can't be read off one word.
-#
-# A TREC question that is NOT wh-LED ("In what state...", "CNN is the
-# abbreviation for what") carries its wh-word or trigger phrase mid-
-# sentence, past where the leading-phrase strip looks -- so this same
-# redaction also carries the wh_word_rule's own trigger substrings ("how
-# many", "what year", bare "when"/"who"/"where"/"why"...), and is applied
-# to the WHOLE rest of the sentence, not only the part after a matched
-# leading opener.
-_CUE_WORDS = (
-    "abbreviations", "abbreviation", "acronym", "stand for", "short for",
-    "presidents", "president", "actors", "actor", "authors", "author",
-    "founders", "founder", "wrote", "invented", "married", "persons", "person",
-    "countries", "country", "cities", "city", "states", "state", "capitals",
-    "capital", "rivers", "river", "mountains", "mountain", "continents",
-    "continent", "islands", "island", "oceans", "ocean",
-    "populations", "population", "distances", "distance", "dates", "date",
-    "materials", "material", "languages", "language", "animals", "animal",
-    "movies", "movie", "colors", "colour", "color",
-    "meaning of", "causes", "cause of", "definition",
-    # wh_word_rule's own trigger substrings, redacted wherever they sit --
-    # not only when leading, since "in what year" and "abbreviation for
-    # what" carry them mid-sentence.
-    "how many", "how much", "what year", "what percentage", "what does",
-    "how did", "how does", "how do", "what is the difference",
-    "when", "who", "whom", "whose", "where", "why", "what",
-)
-_CUE_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(w) for w in
-                        sorted(_CUE_WORDS, key=len, reverse=True)) + r")\b",
-    re.IGNORECASE)
 
 
 def _redact_cues(text: str) -> str:
     return re.sub(r"\s+", " ", _CUE_RE.sub("", text)).strip()
 
+
+# NO \b anchors: `adversary._label_lexicon` (unmodified, Task 15) scores a
+# query with plain substring counting (`ql.count(kw)`), not word-bounded
+# matching -- "person" inside "spokesperson", "date" inside "birthdate",
+# "mountain" inside "mountains" all count for it. A word-bounded redaction
+# would leave every one of those standing while still handing the lexicon
+# its hit, so this mirrors the SAME substring semantics the strategy it
+# defends against actually uses, not a tidier approximation of it.
+_CUE_RE = re.compile(
+    "(?:" + "|".join(re.escape(w) for w in
+                     sorted({w for kws in LABEL_NOUNS.values() for w in kws},
+                           key=len, reverse=True)) + ")",
+    re.IGNORECASE)
 
 # Fixed, seeded template set (brief's exact wording) -- never random per call,
 # so the same seed always produces the same paraphrase for the same item.
@@ -184,30 +171,30 @@ _PARAPHRASE_TEMPLATES = (
 
 
 def _strip_wh(text: str) -> str:
-    """Remove a leading wh-phrase, and everything up to and including the
-    verb that follows it within a short window, from a TREC question --
-    leaving the part that names what is being asked about, which the
-    paraphrase templates then wrap. If no verb is found in the window (a
-    bare noun-phrase question, or too short to have one), the single word
-    right after the opener is dropped instead, unless that would empty the
-    rest entirely."""
+    """Remove the first wh-phrase found ANYWHERE in the sentence (not only
+    leading), and everything up to and including the verb that follows it
+    within a short window, from a TREC question -- leaving the part that
+    names what is being asked about, which the paraphrase templates then
+    wrap. Falls back through progressively gentler cuts (drop the opener
+    only, then nothing) rather than ever emitting a blank rest, then runs
+    `_redact_cues` over whatever remains for the content-noun vocabulary
+    structural stripping genuinely can't reach."""
     # Strip trailing sentence punctuation ("?" or ".", TREC tokenises it as
     # its own word, e.g. "Who shoplifts ?" / "Define Spumante .") BEFORE
-    # splitting into words, so it is never counted as a real word -- not by
-    # the verb search, and not by the no-verb branch's "is there more than
-    # one word to safely drop the first of" check below.
+    # splitting into words, so it is never counted as a real word.
     text = re.sub(r"\s*[?.]\s*$", "", text.strip())
-    m = _WH_RE.match(text)
-    if m:
-        words = text[m.end():].split()
-        verb_pos = _verb_pos(words)
+    words = text.split()
+    span = _wh_span(words)
+    if span:
+        start, end = span
+        verb_pos = _verb_pos(words[end:])
         # Each candidate can legitimately come up empty (the verb is the
-        # last word; there's only one word to begin with) -- fall back
+        # last word; there's nothing after the opener at all) -- fall back
         # through progressively gentler cuts rather than ever emitting
         # nothing, down to the un-stripped words themselves.
         candidates = [
-            words[verb_pos + 1:] if verb_pos is not None else None,
-            words[1:] if len(words) > 1 else None,
+            words[:start] + words[end + verb_pos + 1:] if verb_pos is not None else None,
+            words[:start] + words[end:],
             words,
         ]
         rest_words = next((c for c in candidates if c), words)
