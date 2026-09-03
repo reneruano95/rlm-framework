@@ -1798,7 +1798,14 @@ def print_verdict_block(verdict, escalated, *, run_id: str, report_path, out) ->
           f"{'post-escalation' if final.escalated else 'pre-escalation'} grid · "
           f"{'clean pass' if final.clean_pass else ('NOT a clean pass' if final.gate_pass else 'gate failed')}"
           f"{provisional}", file=out)
-    for baseline in BASELINES:
+    # v2's baselines are not b1/b2/b3 (`rules.baselines` says what they are);
+    # the terminal must not name a different set of arms than `render_report`
+    # names in the file it just wrote. `getattr` because a hand-built
+    # `Verdict` (e.g. `escalation.py`'s JSON-rebuild path) may carry no
+    # `rules` at all -- v1's constant is the correct fallback there.
+    baselines = (final.rules.baselines if getattr(final, "rules", None) is not None
+                 else BASELINES)
+    for baseline in baselines:
         pair = final.pairs.get(baseline)
         if pair is None:
             continue

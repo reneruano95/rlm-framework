@@ -973,6 +973,66 @@ def test_v1_default_task_set_is_unchanged():
     assert set(ids) == {t.task_id for t in manifest.tasks}
 
 
+def _grid_and_verdict(manifest, *, arms_passes: dict):
+    """A `Grid` over `manifest`'s tasks, each named arm passing the first `n`
+    of them, decided against `manifest`'s own rules. Mirrors
+    `checks/test_verdict.py`'s `grid_with_passes` -- kept local here rather
+    than imported, since it is a one-off for a single `cli.py` test."""
+    from rlm.measure.verdict import Grid, decide
+
+    task_ids = tuple(t.task_id for t in manifest.tasks)
+    seeds = (1, 2, 3)
+    cells, cell_seeds = {}, {}
+    for arm, n_pass in arms_passes.items():
+        for i, t in enumerate(task_ids):
+            cells[(t, arm)] = tuple([i < n_pass] * len(seeds))
+            cell_seeds[(t, arm)] = seeds
+    grid = Grid(run_id="run-1", task_ids=task_ids, arms=tuple(arms_passes),
+               seeds=seeds, required_seeds=seeds, chunk_sizes=(32768,),
+               cells=cells, cell_seeds=cell_seeds, episode_ids={})
+    return decide(grid, manifest)
+
+
+def test_print_verdict_block_names_a_v2_runs_own_baselines(capsys):
+    """Task 6 fix round 1: the terminal summary used to iterate the module
+    `BASELINES` constant regardless of which manifest produced the verdict,
+    so a v2 run (baselines `rlm-nosubcalls`, `b2`) would print margin lines
+    for B1/B2/B3 -- two arms that never ran -- and never mention
+    `rlm-nosubcalls`, while `render_report`'s written file (fixed earlier in
+    this task) named the right arms. The operator's terminal and the report
+    on disk must agree on which arms this run scored."""
+    manifest = _two_stream_manifest()
+    manifest.rules = {"baselines": ["rlm-nosubcalls", "b2"], "margin": 2,
+                      "escalation_band": [1, 2]}
+    v = _grid_and_verdict(manifest, arms_passes={"rlm": 16, "rlm-nosubcalls": 12,
+                                                 "b2": 10})
+
+    cli.print_verdict_block(v, None, run_id="run-1", report_path="RESULTS.md",
+                            out=sys.stdout)
+    out = capsys.readouterr().out
+
+    assert "vs RLM-NOSUBCALLS" in out and "vs B2" in out
+    assert "vs B1" not in out and "vs B3" not in out
+
+
+def test_print_verdict_block_v1_output_is_unchanged():
+    """A v1 verdict (no `rules.baselines` override -- `for_manifest` on a
+    manifest with no `rules` block gives the module defaults) must still name
+    exactly B1/B2/B3, byte for byte with what this printed before the fix."""
+    manifest = cli.load_benchmark_manifest(
+        SimpleNamespace(benchmark=SimpleNamespace(version=None)))
+    v = _grid_and_verdict(manifest, arms_passes={"rlm": 30, "b1": 20, "b2": 15,
+                                                 "b3": 10})
+
+    buf = io.StringIO()
+    cli.print_verdict_block(v, None, run_id="run-1", report_path="RESULTS.md",
+                            out=buf)
+    out = buf.getvalue()
+
+    for baseline in ("B1", "B2", "B3"):
+        assert f"vs {baseline}" in out
+
+
 def test_smoke_runs_one_seed_of_every_arm_and_never_writes_a_report(
         valid_config_file, tmp_path, capsys, fake_orchestra, monkeypatch):
     arms = _ArmRecorder().patch(monkeypatch)
