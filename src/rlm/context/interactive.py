@@ -29,6 +29,17 @@ DOC_DELIM = "\n\n=== DOCUMENT "
 
 _HEADER = re.compile(r"^=== DOCUMENT (\S+): (.*?) ===\n", flags=re.M)
 
+#: `_HEADER`'s two capture groups are corpus-derived text with NO length bound
+#: of their own (`\S+` for the id, `.*?` anchored only by end-of-line for the
+#: title) -- an adversarial document (v2's own int-05/int-06 carry an
+#: injection record) can put an arbitrarily long line in either position.
+#: `open()` echoes both back to the sandbox, so they are capped HERE, at
+#: parse time, once -- a bound that holds by construction, independent of
+#: whatever cap `_on_env` applies to the dict as a whole (which bounds hit
+#: COUNT and dict SHAPE, not the strings inside it).
+MAX_DOC_ID_CHARS = 100
+MAX_TITLE_CHARS = 200
+
 
 @dataclass(frozen=True)
 class Hit:
@@ -51,8 +62,9 @@ class InteractiveIndex:
         parts = _HEADER.split(text)
         # parts = [preamble, id1, title1, body1, id2, title2, body2, ...]
         for j in range(1, len(parts), 3):
-            docs[parts[j]] = parts[j + 2].strip("\n")
-            titles[parts[j]] = parts[j + 1]
+            doc_id = parts[j][:MAX_DOC_ID_CHARS]
+            docs[doc_id] = parts[j + 2].strip("\n")
+            titles[doc_id] = parts[j + 1][:MAX_TITLE_CHARS]
         if not docs:
             raise ValueError(
                 "an interactive corpus needs at least one "
@@ -80,10 +92,34 @@ class InteractiveIndex:
             windows = self.windows[doc_id]
             starts: list[int] = []
             cursor = 0
-            for w in windows:
+            for i, w in enumerate(windows):
                 start = body.find(w, cursor)
+                if start == -1:
+                    # C2's own invariant (`rlm.context.chunker`'s module
+                    # docstring, clause 1) is that every window is an exact
+                    # substring of the text it windowed -- if that ever stops
+                    # holding, mapping a match to the WRONG window silently
+                    # (rather than failing) is worse than the crash: a search
+                    # hit would name a window that does not actually contain
+                    # it, and `env.window` would then hand back text the root
+                    # never asked for.
+                    raise RuntimeError(
+                        f"window {i} of {doc_id!r} is not a locatable substring "
+                        f"of the document from offset {cursor} onward -- the C2 "
+                        "chunker's exact-substring invariant is violated")
                 starts.append(start)
-                cursor = start + 1
+                # NOT `start + 1`: two consecutive windows can share the
+                # exact same start (the chunker's own starts are only
+                # non-decreasing, not strictly increasing -- several window
+                # ENDS near the tail of a short/repetitive document can
+                # collapse onto the same start). `body.find` with `cursor =
+                # start` still finds THIS window again at the same offset,
+                # correctly; advancing past it would search for the next
+                # window strictly AFTER a position it may legitimately share,
+                # and on repetitive text (no later occurrence of the same
+                # substring) that turns a real, locatable window into a
+                # false invariant violation.
+                cursor = start
             for m in pattern.finditer(body):
                 offset = m.start()
                 for i, start in enumerate(starts):

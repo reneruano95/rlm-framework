@@ -1,5 +1,8 @@
+import pytest
+
 from rlm.context.chunker import ChunkConfig
-from rlm.context.interactive import InteractiveIndex, Hit
+from rlm.context.interactive import (
+    MAX_DOC_ID_CHARS, MAX_TITLE_CHARS, InteractiveIndex, Hit)
 
 CFG = ChunkConfig(size_tokens=64, overhead_tokens=0, snap_to_boundary=True,
                   snap_tolerance=0.10, stride_tokens=48)
@@ -28,8 +31,33 @@ def test_window_is_range_checked_never_clamped():
     ix = InteractiveIndex.from_text(TEXT, CFG, count)
     n = ix.open("d-01")["n_windows"]
     assert ix.window("d-01", n - 1)
-    import pytest
     with pytest.raises(IndexError):
         ix.window("d-01", n)
     with pytest.raises(KeyError):
         ix.window("d-99", 0)
+
+
+def test_a_pathologically_long_header_line_is_bounded_by_construction():
+    """A well-behaved corpus never triggers this, but the guarantee has to
+    hold regardless of corpus content -- v2's own adversarial tasks
+    (int-05/int-06) put an injection record in a document. `open()` must
+    never echo an unbounded, corpus-derived string back to the sandbox."""
+    long_id = "y" * 5000
+    long_title = "X" * 5000
+    text = f"=== DOCUMENT {long_id}: {long_title} ===\nsome body text\n"
+    ix = InteractiveIndex.from_text(text, CFG, count)
+    (doc_id,) = ix.docs
+    assert len(doc_id) <= MAX_DOC_ID_CHARS
+    result = ix.open(doc_id)
+    assert len(result["title"]) <= MAX_TITLE_CHARS
+
+
+def test_search_raises_rather_than_mis_attributing_an_unlocatable_window():
+    """C2's exact-substring invariant is assumed, not re-verified here -- if
+    it is ever violated, a silently WRONG window attribution is worse than a
+    loud failure: a search hit would point at a window that does not
+    actually contain it."""
+    ix = InteractiveIndex(docs={"d-01": "hello world"},
+                          windows={"d-01": ["this text is not in the body"]})
+    with pytest.raises(RuntimeError):
+        ix.search("hello")

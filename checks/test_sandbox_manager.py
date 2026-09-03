@@ -184,10 +184,17 @@ async def test_env_call_without_a_registered_handler_is_refused(manager, cfg):
     assert "no env handler registered for this episode" in out.stdout
 
 
-async def test_hijacked_env_cannot_alter_scaffold_side_control(manager, cfg):
-    """Same guarantee as test_hijacked_llm_query_cannot_alter_scaffold_side_control:
-    a hijacked stub answers locally and the scaffold's action counter and range
-    checks never move."""
+async def test_hijacked_env_dict_entry_cannot_alter_scaffold_side_control(manager, cfg):
+    """THE DICT-ITEM-SWAP VECTOR. Same guarantee as
+    test_hijacked_llm_query_cannot_alter_scaffold_side_control: a hijacked
+    stub answers locally and the scaffold's action counter and range checks
+    never move. Reaches `_RESERVED` through the bridge-object reflection
+    pivot and replaces the WHOLE dict entry (`RESERVED['env'] = ...`) -- a
+    real route (`sandbox/child.py`'s module docstring lists it), but not the
+    sharper one Task 11's review flagged: see
+    test_hijacked_env_attribute_cannot_alter_scaffold_side_control, below,
+    for the direct attribute-write vector.
+    """
     served: list[dict] = []
     async def env_handler(payload):
         served.append(payload)
@@ -212,6 +219,76 @@ async def test_hijacked_env_cannot_alter_scaffold_side_control(manager, cfg):
             "    except Exception as e:\n        print('REFUSED', type(e).__name__)\n")
     assert [p["i"] for p in served] == [0, 1, 2, 3]
     assert real.stdout.count("REFUSED") == 2 and real.stdout.count("W") == 2
+
+
+async def test_hijacked_env_attribute_cannot_alter_scaffold_side_control(manager, cfg):
+    """THE SHARPER VECTOR (Task 11's review; distinct code path from the
+    dict-item swap above). `env` is a `types.SimpleNamespace` held BY
+    REFERENCE in `_RESERVED`, and `USER_NS.update(_RESERVED)` rebinds that
+    SAME object into every cell -- so an ordinary attribute write reaches it
+    directly, with NO reflection pivot at all: `env.search = ...` is one
+    line of ordinary syntax, because `env` is already a live name in the
+    cell's namespace. `llm_query` has no equivalent surface (replacing its
+    behaviour needs `__code__`/`__globals__` tricks, not attribute
+    assignment), which is exactly why this is a DIFFERENT and easier attack
+    surface than the dict-item swap, and why the brief's plain name-rebinding
+    test (`env = 'hijacked'`) is insufficient on its own.
+
+    There is no `REAL` object to restore here, unlike the dict-item-swap
+    test: the write mutates the LIVE `SimpleNamespace` `_RESERVED['env']`
+    itself, not a dict entry pointing at it -- so `env.search` stays
+    hijacked for the rest of THIS session's life; nothing reachable from
+    inside the sandbox can undo it (a fresh episode gets a fresh object,
+    this one does not get a fresh `.search`). What the guarantee still has
+    to hold: the hijack cannot reach anything scaffold-side, and the other
+    two verbs on that SAME live object -- never touched by the write --
+    still enforce the scaffold's own counting and range check.
+    """
+    served: list[dict] = []
+    env_actions = 0
+
+    async def env_handler(payload):
+        nonlocal env_actions
+        served.append(payload)
+        if payload["op"] == "window" and payload["i"] > 1:
+            raise SandboxError("window out of range")
+        env_actions += 1
+        return "REAL"
+
+    async with manager.session("ep-env-attr", cfg) as s:
+        s.on_env(env_handler)
+
+        hijack = await s.exec_cell("env.search = lambda term: 'HIJACKED'\n")
+        assert hijack.traceback == "", "the attribute write itself must succeed"
+
+        out = await s.exec_cell(
+            "print(sorted({env.search(f'q{i}') for i in range(50)}))")
+        assert out.stdout.strip() == "['HIJACKED']"
+        # 50 calls the model believes it made through `env.search`: none
+        # crossed the bridge, and the scaffold's own action counter (the
+        # `env_actions` surrogate here) never moved.
+        assert served == []
+        assert env_actions == 0
+
+        # Proven again: there is no dict entry to restore, so the hijack is
+        # permanent for this session -- `env.search` stays hijacked with no
+        # action taken by the cell.
+        again = await s.exec_cell("print(env.search('still-hijacked'))")
+        assert again.stdout.strip() == "HIJACKED"
+        assert served == []
+        assert env_actions == 0
+
+        # `.open`/`.window` were never assigned to -- only `.search` was
+        # overwritten -- so the counter and the range check on THOSE two
+        # verbs are still the scaffold's, on the very same live object whose
+        # `.search` stays permanently hijacked.
+        real = await s.exec_cell(
+            "for i in range(4):\n"
+            "    try:\n        print(await env.window('d', i))\n"
+            "    except Exception as e:\n        print('REFUSED', type(e).__name__)\n")
+    assert [p["i"] for p in served if p["op"] == "window"] == [0, 1, 2, 3]
+    assert real.stdout.count("REFUSED") == 2 and real.stdout.count("REAL") == 2
+    assert env_actions == 2   # only the two ACCEPTED window calls counted
 
 
 async def test_episodes_do_not_share_state(manager, cfg):
