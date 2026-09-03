@@ -1,3 +1,5 @@
+import pytest
+
 from pathlib import Path
 from bench.corpus_v2 import load_trec, TREC_LABELS, build_linear_semantic
 from bench.tokens import approx_tokens
@@ -43,3 +45,31 @@ def test_most_common_label_answers_a_canonical_word():
     assert c.answer == {"HUM": "person", "LOC": "place", "NUM": "number", "ENTY": "entity",
                         "DESC": "description", "ABBR": "abbreviation"}[top]
     assert c.checker == "name_exact"
+
+
+# Fix round 1: measured_tokens must be bounded by target_tokens INCLUDING the
+# question, not just the bare records. These two seeds were reproduced as
+# known-failing before the fix (8002 and 8012 tokens respectively, both over
+# the 8000 budget) -- kept as regression material.
+@pytest.mark.parametrize("seed,kind", [(9294, "count_label"), (9130, "count_two_labels")])
+def test_measured_tokens_respects_target_tokens_on_known_failing_seeds(seed, kind):
+    items = load_trec()
+    c = build_linear_semantic(seed, 8_000, approx_tokens, "approx-offline", question_kind=kind, items=items)
+    assert c.measured_tokens <= 8_000
+
+
+@pytest.mark.parametrize("kind", ["count_label", "count_two_labels", "most_common_label"])
+def test_measured_tokens_respects_target_tokens_at_a_tight_budget(kind):
+    # Small enough that the question's own tokens are a meaningful fraction of
+    # the budget, so an unaccounted question would overshoot every time
+    # rather than by luck of a large margin.
+    items = load_trec()
+    for seed in range(20):
+        c = build_linear_semantic(seed, 500, approx_tokens, "approx-offline", question_kind=kind, items=items)
+        assert c.measured_tokens <= 500
+
+
+def test_most_common_label_fails_clearly_when_no_record_fits():
+    items = load_trec()
+    with pytest.raises(ValueError, match="too small to fit even one record"):
+        build_linear_semantic(1, 75, approx_tokens, "approx-offline", question_kind="most_common_label", items=items)

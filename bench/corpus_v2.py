@@ -178,37 +178,71 @@ def build_linear_semantic(seed: int, target_tokens: int,
     seed, so a different seed samples a genuinely different subset -- the
     property `test_two_seeds_sample_different_items_and_build_is_deterministic`
     checks.
+
+    THE BUDGET IS THE REPORTED FIGURE. `measured_tokens` is `count(c.text)`,
+    and `c.text` is the question plus the records -- so the records must be
+    sampled against `target_tokens` *minus* the question (and its separator),
+    not against `target_tokens` alone. The question's own token count is
+    known before any record is sampled in every `question_kind`: for
+    `count_label`/`count_two_labels` its `target` is drawn from `TREC_LABELS`
+    independent of what gets sampled, and `most_common_label`'s question text
+    is fixed regardless of which label turns out to be most common. Reserving
+    that space up front, rather than trimming after the fact, keeps the bound
+    structural: `count` is monotone and ceil-subadditive (`count(a) +
+    count(b) >= count(a + b)`, true of `approx_tokens` by construction), so
+    `count(question + sep) + count(records) <= target_tokens` implies
+    `count(question + sep + records) <= target_tokens` too -- no corpus this
+    function returns can be reported over budget.
     """
     rng = random.Random(seed)
-    text, sampled, record_ids = _sample_register(rng, seed, items, target_tokens, count)
+
+    if question_kind == "count_two_labels":
+        target: tuple[str, ...] = tuple(rng.sample(sorted(TREC_LABELS), 2))
+    elif question_kind == "count_label":
+        target = (rng.choice(TREC_LABELS),)
+    else:  # most_common_label: the question text does not depend on target
+        target = ()
+
+    question = _question_text(question_kind, target)
+    reserved = count(question + "\n\n")
+    record_budget = target_tokens - reserved
+    if record_budget <= 0:
+        raise ValueError(
+            f"target_tokens={target_tokens} cannot fit the {question_kind!r} "
+            f"question alone ({reserved} tokens reserved for it)")
+
+    text, sampled, record_ids = _sample_register(rng, seed, items, record_budget, count)
     labels = [i.label for i in sampled]
 
     retries = 0
     if question_kind == "most_common_label":
         while True:
+            if not labels:
+                raise ValueError(
+                    f"target_tokens={target_tokens} leaves a record budget of "
+                    f"{record_budget} tokens after reserving {reserved} for "
+                    f"the question, which is too small to fit even one "
+                    f"record -- most_common_label needs at least one")
             counts = Counter(labels)
             top_count = max(counts.values())
             top_labels = [l for l, c in counts.items() if c == top_count]
             if len(top_labels) == 1:
-                target: tuple[str, ...] = (top_labels[0],)
+                target = (top_labels[0],)
                 break
             # Tie: resample the target seed -- rng continues, does not reset.
             retries += 1
             text, sampled, record_ids = _sample_register(
-                rng, seed, items, target_tokens, count)
+                rng, seed, items, record_budget, count)
             labels = [i.label for i in sampled]
         answer = _LABEL_WORD[target[0]]
         checker = "name_exact"
     elif question_kind == "count_two_labels":
-        target = tuple(rng.sample(sorted(TREC_LABELS), 2))
         answer = str(sum(1 for l in labels if l in target))
         checker = "int_exact"
     else:  # count_label
-        target = (rng.choice(TREC_LABELS),)
         answer = str(sum(1 for l in labels if l == target[0]))
         checker = "int_exact"
 
-    question = _question_text(question_kind, target)
     full_text = question + "\n\n" + text
 
     return LinearSemanticCorpus(
