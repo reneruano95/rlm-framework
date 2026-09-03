@@ -148,17 +148,21 @@ def _redact_cues(text: str) -> str:
     return re.sub(r"\s+", " ", _CUE_RE.sub("", text)).strip()
 
 
-# NO \b anchors: `adversary._label_lexicon` (unmodified, Task 15) scores a
-# query with plain substring counting (`ql.count(kw)`), not word-bounded
-# matching -- "person" inside "spokesperson", "date" inside "birthdate",
-# "mountain" inside "mountains" all count for it. A word-bounded redaction
-# would leave every one of those standing while still handing the lexicon
-# its hit, so this mirrors the SAME substring semantics the strategy it
-# defends against actually uses, not a tidier approximation of it.
+# WORD-BOUNDED (fix round 2/5, overruling round 1's unbounded version).
+# Round 1 dropped the \b anchors so `_redact_cues` would mirror
+# `adversary._label_lexicon`'s loose substring counting exactly -- but that
+# also mangled unrelated words: "candidate" -> "candi", "mountainous" ->
+# "ous", "birthdate" -> "birth". The ruling: Task 18's `build_v2` already
+# REJECTS and reseeds any task whose parser adversary beats chance -- that
+# is a designed part of the pipeline, not a failure mode to route around by
+# degrading every corpus's text quality. Restoring word boundaries lets the
+# rare bad seed (~1.3% by measurement, see the fix-round-2 report) get
+# thrown away by the builder instead of every seed getting its prose
+# mangled to rescue that 1.3%.
 _CUE_RE = re.compile(
-    "(?:" + "|".join(re.escape(w) for w in
-                     sorted({w for kws in LABEL_NOUNS.values() for w in kws},
-                           key=len, reverse=True)) + ")",
+    r"\b(?:" + "|".join(re.escape(w) for w in
+                        sorted({w for kws in LABEL_NOUNS.values() for w in kws},
+                              key=len, reverse=True)) + r")\b",
     re.IGNORECASE)
 
 # Fixed, seeded template set (brief's exact wording) -- never random per call,
