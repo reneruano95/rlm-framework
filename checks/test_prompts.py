@@ -220,7 +220,7 @@ def test_the_pinned_aggregation_template_counts_for_an_overlapping_chunker():
 
     cfg = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
     text = resolve_prompt_path(
-        Path(cfg.scaffold.prompts.strategy_templates.aggregation.path)
+        Path(cfg.scaffold.prompts.strategy_templates["aggregation"].path)
     ).read_text(
         encoding="utf-8").lower()
     assert "`chunks` overlaps" in text, "the template never says the windows overlap"
@@ -237,3 +237,15 @@ def test_config_pins_match_the_files_on_disk():
         # `config_snapshot` records; the file they name now lives in the package.
         actual = hashlib.sha256(resolve_prompt_path(Path(path)).read_bytes()).hexdigest()
         assert actual == pinned, f"{path} drifted from its config pin"
+
+
+@pytest.mark.xfail(
+    strict=False,
+    reason="Task 8 has not yet authored root-nosubcalls.v1.md or the "
+    "strat-*-nosubcalls.v1.md block set the nosubcalls_cfg fixture points "
+    "at; Task 8 removes this mark once those files land.",
+)
+def test_render_root_no_subcalls_uses_the_nosubcalls_body_and_block(nosubcalls_cfg):
+    reg = nosubcalls_cfg.prompt_registry().load()
+    text = reg.render_root("needle", no_subcalls=True)
+    assert "llm_query" not in text and "sub-call" not in text.lower()

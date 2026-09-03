@@ -288,14 +288,6 @@ class PromptRef(_Strict):
     sha256: str | None = None
 
 
-class StrategyTemplates(_Strict):
-    needle: PromptRef
-    aggregation: PromptRef
-    synthesis: PromptRef
-    code_qa: PromptRef
-    default: PromptRef
-
-
 #: The four §8 baseline prompt slots. A `Literal` rather than a bare `str` so
 #: an arm runner asking for a name that was never authored fails at the type
 #: checker and at `render_baseline`, not silently at scoring time.
@@ -335,13 +327,40 @@ class PromptsCfg(_Strict):
     #: The `rlm-restricted` arm's root prompt (the delegation arm). `null`
     #: everywhere that arm is not run, including every pre-2026-08-20 snapshot.
     root_restricted: PromptRef | None = None
-    strategy_templates: StrategyTemplates
+    #: An OPEN mapping (benchmark v2, task 7): category name -> pinned prompt
+    #: file. `config.yaml`'s five keys (needle/aggregation/synthesis/code_qa/
+    #: default) are a valid dict as-is; benchmark v2 adds `linear_semantic`,
+    #: `interactive` and `code_solvable` without touching this schema. `default`
+    #: is the one key every config must declare: an arm runner asking
+    #: `render_root` for a category this dict does not declare is refused
+    #: outright (spec §5, I1) rather than silently redirected to it.
+    strategy_templates: dict[str, PromptRef]
+    #: The `rlm-nosubcalls` arm's own root prompt: separate from `root` because
+    #: that arm refuses `llm_query` at runtime, and a root taught the ordinary
+    #: prompt's sub-call instructions would be taught a tool it cannot use.
+    #: `None` everywhere that arm is not run.
+    root_nosubcalls: PromptRef | None = None
+    #: The `rlm-nosubcalls` arm's own strategy blocks -- a PARALLEL set to
+    #: `strategy_templates`, never a fallback to it, because every ordinary
+    #: block is free to mention `llm_query` and every nosubcalls block must
+    #: not. `None` everywhere that arm is not run.
+    strategy_templates_nosubcalls: dict[str, PromptRef] | None = None
     #: `None` on a pre-S4 config (and in a pre-S4 `config_snapshot`, which must
     #: keep replaying). Every slot declared here must ALSO appear in
     #: `Config._prompt_refs`, `Config.prompt_registry` and `cli.episode_config`'s
     #: rebuild -- a slot the registry loads but the rebuild does not is
     #: `PromptDrift` on replay of every episode that recorded it.
     baselines: BaselinePromptsCfg | None = None
+
+    @field_validator("strategy_templates")
+    @classmethod
+    def _strategy_templates_needs_default(cls, v: dict[str, PromptRef]) -> dict[str, PromptRef]:
+        if "default" not in v:
+            raise ValueError(
+                "scaffold.prompts.strategy_templates must declare a 'default' "
+                "category -- every runner that does not resolve a task to a "
+                "more specific one renders against it")
+        return v
 
 
 class LeafEnvelope(_Strict):
@@ -692,6 +711,14 @@ class Config(_Strict):
                     if prompts.leaf_envelope is not None else [])
         restricted = ([("root_restricted", prompts.root_restricted)]
                       if prompts.root_restricted is not None else [])
+        nosubcalls_root = ([("root_nosubcalls", prompts.root_nosubcalls)]
+                           if prompts.root_nosubcalls is not None else [])
+        strategy = [(f"strategy_templates.{cat}", ref)
+                   for cat, ref in prompts.strategy_templates.items()]
+        strategy_nosubcalls = (
+            [(f"strategy_templates_nosubcalls.{cat}", ref)
+             for cat, ref in prompts.strategy_templates_nosubcalls.items()]
+            if prompts.strategy_templates_nosubcalls is not None else [])
         baselines = ([(f"baselines.{name}", getattr(prompts.baselines, name))
                       for name in BASELINE_NAMES]
                      if prompts.baselines is not None else [])
@@ -700,11 +727,9 @@ class Config(_Strict):
             ("leaf_prefix", prompts.leaf_prefix),
             *envelope,
             *restricted,
-            ("strategy_templates.needle", prompts.strategy_templates.needle),
-            ("strategy_templates.aggregation", prompts.strategy_templates.aggregation),
-            ("strategy_templates.synthesis", prompts.strategy_templates.synthesis),
-            ("strategy_templates.code_qa", prompts.strategy_templates.code_qa),
-            ("strategy_templates.default", prompts.strategy_templates.default),
+            *nosubcalls_root,
+            *strategy,
+            *strategy_nosubcalls,
             *baselines,
         ]
 
@@ -730,13 +755,8 @@ class Config(_Strict):
         baseline_refs = ({name: getattr(prompts.baselines, name)
                           for name in BASELINE_NAMES}
                          if prompts.baselines is not None else {})
-        strategy_refs = {
-            "needle": prompts.strategy_templates.needle,
-            "aggregation": prompts.strategy_templates.aggregation,
-            "synthesis": prompts.strategy_templates.synthesis,
-            "code_qa": prompts.strategy_templates.code_qa,
-            "default": prompts.strategy_templates.default,
-        }
+        strategy_refs = prompts.strategy_templates
+        nosubcalls_refs = prompts.strategy_templates_nosubcalls or {}
         return PromptRegistry.from_files(
             root_path=resolve_prompt_path(prompts.root.path),
             root_sha256=prompts.root.sha256,
@@ -746,6 +766,10 @@ class Config(_Strict):
                                   if prompts.root_restricted is not None else None),
             root_restricted_sha256=(prompts.root_restricted.sha256
                                     if prompts.root_restricted is not None else None),
+            root_nosubcalls_path=(resolve_prompt_path(prompts.root_nosubcalls.path)
+                                  if prompts.root_nosubcalls is not None else None),
+            root_nosubcalls_sha256=(prompts.root_nosubcalls.sha256
+                                    if prompts.root_nosubcalls is not None else None),
             leaf_envelope_path=(resolve_prompt_path(prompts.leaf_envelope.path)
                                 if prompts.leaf_envelope else None),
             leaf_envelope_sha256=(prompts.leaf_envelope.sha256
@@ -753,6 +777,13 @@ class Config(_Strict):
             strategy_paths={cat: resolve_prompt_path(ref.path) for cat, ref in strategy_refs.items()},
             strategy_sha256={
                 cat: ref.sha256 for cat, ref in strategy_refs.items()
+                if ref.sha256 is not None
+            },
+            strategy_nosubcalls_paths={
+                cat: resolve_prompt_path(ref.path) for cat, ref in nosubcalls_refs.items()
+            },
+            strategy_nosubcalls_sha256={
+                cat: ref.sha256 for cat, ref in nosubcalls_refs.items()
                 if ref.sha256 is not None
             },
             baseline_paths={name: resolve_prompt_path(ref.path) for name, ref in baseline_refs.items()},
@@ -894,6 +925,16 @@ class PromptRegistry:
     #: working without it.
     root_restricted_path: Path | None = None
     root_restricted_sha256: str | None = None
+    #: The `rlm-nosubcalls` arm's own root prompt. Optional, and absent on
+    #: every pre-benchmark-v2 config and snapshot -- replay of an older
+    #: episode must keep working without it, same rule as `root_restricted`.
+    root_nosubcalls_path: Path | None = None
+    root_nosubcalls_sha256: str | None = None
+    #: The `rlm-nosubcalls` arm's own strategy blocks, keyed by category. A
+    #: PARALLEL set to `strategy_paths`, never a fallback to it -- see
+    #: `render_root`.
+    strategy_nosubcalls_paths: dict[str, Path] = field(default_factory=dict)
+    strategy_nosubcalls_sha256: dict[str, str] = field(default_factory=dict)
     #: §8's baseline-arm prompts (S4), keyed by `BaselineName`. Empty on a
     #: pre-S4 config -- and on a pre-S4 SNAPSHOT, which `cli.episode_config`
     #: rebuilds this registry from, so replay of an old episode must keep
@@ -904,9 +945,11 @@ class PromptRegistry:
     def __post_init__(self) -> None:
         self._root_body: str | None = None
         self._root_restricted_body: str | None = None
+        self._root_nosubcalls_body: str | None = None
         self._leaf_prefix_body: str | None = None
         self._leaf_envelope_body: str | None = None
         self._strategy_bodies: dict[str, str] = {}
+        self._strategy_nosubcalls_bodies: dict[str, str] = {}
         self._baseline_bodies: dict[str, str] = {}
         self._hashes: dict[str, str] = {}
         self._loaded = False
@@ -925,6 +968,10 @@ class PromptRegistry:
         leaf_envelope_sha256: str | None = None,
         root_restricted_path: Path | None = None,
         root_restricted_sha256: str | None = None,
+        root_nosubcalls_path: Path | None = None,
+        root_nosubcalls_sha256: str | None = None,
+        strategy_nosubcalls_paths: dict[str, Path] | None = None,
+        strategy_nosubcalls_sha256: dict[str, str] | None = None,
         baseline_paths: dict[str, Path] | None = None,
         baseline_sha256: dict[str, str] | None = None,
     ) -> "PromptRegistry":
@@ -939,6 +986,10 @@ class PromptRegistry:
             leaf_envelope_sha256=leaf_envelope_sha256,
             root_restricted_path=root_restricted_path,
             root_restricted_sha256=root_restricted_sha256,
+            root_nosubcalls_path=root_nosubcalls_path,
+            root_nosubcalls_sha256=root_nosubcalls_sha256,
+            strategy_nosubcalls_paths=dict(strategy_nosubcalls_paths or {}),
+            strategy_nosubcalls_sha256=dict(strategy_nosubcalls_sha256 or {}),
             baseline_paths=dict(baseline_paths or {}),
             baseline_sha256=dict(baseline_sha256 or {}),
         )
@@ -982,10 +1033,20 @@ class PromptRegistry:
                 "root_restricted", self.root_restricted_path,
                 self.root_restricted_sha256
             )
+        if self.root_nosubcalls_path is not None:
+            self._root_nosubcalls_body = self._load_one(
+                "root_nosubcalls", self.root_nosubcalls_path,
+                self.root_nosubcalls_sha256
+            )
         for category, path in self.strategy_paths.items():
             pinned = self.strategy_sha256.get(category)
             self._strategy_bodies[category] = self._load_one(
                 f"strategy.{category}", path, pinned
+            )
+        for category, path in self.strategy_nosubcalls_paths.items():
+            pinned = self.strategy_nosubcalls_sha256.get(category)
+            self._strategy_nosubcalls_bodies[category] = self._load_one(
+                f"strategy_nosubcalls.{category}", path, pinned
             )
         for name, path in self.baseline_paths.items():
             self._baseline_bodies[name] = self._load_one(
@@ -998,7 +1059,8 @@ class PromptRegistry:
         if not self._loaded:
             self.load()
 
-    def render_root(self, category: str, *, restricted: bool = False) -> str:
+    def render_root(self, category: str, *, restricted: bool = False,
+                    no_subcalls: bool = False) -> str:
         """root body + '\\n\\n' + the strategy block for `category`.
 
         Raises ConfigError for an unknown category (I1: the model never
@@ -1014,14 +1076,20 @@ class PromptRegistry:
         consequence of exactly that: 83 of 149 steps in the smoke's codeqa-01
         episode were `repl_exec / rejected / no_cell_extracted` — the root
         stopped emitting code and talked until the wall clock killed it.
+
+        `no_subcalls` selects the `rlm-nosubcalls` arm's own root body AND its
+        own, PARALLEL strategy block set (`root_nosubcalls` /
+        `strategy_templates_nosubcalls`) -- never a fallback to the ordinary
+        pinned prompts, which are free to mention `llm_query`, and never to
+        `root_restricted`'s set either. `restricted` and `no_subcalls` name
+        different arms; asking for both is refused rather than silently
+        picking one.
         """
         self._ensure_loaded()
-        if category not in self._strategy_bodies:
-            raise ConfigError(
-                f"{category!r} is not a declared strategy category; the model "
-                "never chooses its own strategy (spec §5, I1)"
-            )
+        if restricted and no_subcalls:
+            raise ConfigError("restricted and no_subcalls are different arms; pick one")
         body = self._root_body
+        blocks = self._strategy_bodies
         if restricted:
             if self._root_restricted_body is None:
                 raise ConfigError(
@@ -1030,7 +1098,19 @@ class PromptRegistry:
                     "to scan chunks this arm makes unreadable"
                 )
             body = self._root_restricted_body
-        return f"{body}\n\n{self._strategy_bodies[category]}"
+        if no_subcalls:
+            if self._root_nosubcalls_body is None or not self._strategy_nosubcalls_bodies:
+                raise ConfigError(
+                    "the rlm-nosubcalls arm needs scaffold.prompts.root_nosubcalls AND "
+                    "scaffold.prompts.strategy_templates_nosubcalls; falling back to the "
+                    "pinned prompts would teach a root an `llm_query` this arm refuses")
+            body, blocks = self._root_nosubcalls_body, self._strategy_nosubcalls_bodies
+        if category not in blocks:
+            raise ConfigError(
+                f"{category!r} is not a declared strategy category; the model "
+                "never chooses its own strategy (spec §5, I1)"
+            )
+        return f"{body}\n\n{blocks[category]}"
 
     def leaf_prefix(self) -> str:
         self._ensure_loaded()

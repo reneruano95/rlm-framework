@@ -353,6 +353,31 @@ def test_config_prompt_registry_builds_a_loadable_registry(tmp_path, minimal_cfg
     assert reg.leaf_prefix() == "LEAF PREFIX BODY"
 
 
+def test_strategy_templates_accept_any_category_key_but_require_default(minimal_cfg_dict):
+    d = copy.deepcopy(minimal_cfg_dict)
+    d["scaffold"]["prompts"]["strategy_templates"]["linear_semantic"] = {
+        "path": "prompts/strat-needle.v1.md"}
+    cfg = Config.model_validate(d)
+    assert "linear_semantic" in cfg.scaffold.prompts.strategy_templates
+    del d["scaffold"]["prompts"]["strategy_templates"]["default"]
+    # `Config.model_validate` wraps pydantic's `ValidationError` into
+    # `ConfigError` (module docstring: "callers only ever catch ConfigError").
+    with pytest.raises(ConfigError, match="default"):
+        Config.model_validate(d)
+
+
+def test_render_root_no_subcalls_needs_both_the_body_and_the_block_set(valid_cfg):
+    reg = valid_cfg.prompt_registry().load()
+    with pytest.raises(ConfigError, match="root_nosubcalls"):
+        reg.render_root("needle", no_subcalls=True)
+
+
+def test_restricted_and_no_subcalls_together_is_refused(valid_cfg):
+    reg = valid_cfg.prompt_registry().load()
+    with pytest.raises(ConfigError, match="restricted and no_subcalls"):
+        reg.render_root("needle", restricted=True, no_subcalls=True)
+
+
 # --------------------------------------------------------------------------- #
 # R13 (spec v0.2.6 §10): slot policy and the subcall budget it exposed.
 # --------------------------------------------------------------------------- #

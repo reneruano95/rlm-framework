@@ -45,6 +45,28 @@ def cfg(valid_cfg: Config) -> Config:
 
 
 @pytest.fixture
+def nosubcalls_cfg(minimal_cfg_dict: dict) -> Config:
+    """A config with the `rlm-nosubcalls` arm's own root + strategy blocks
+    declared -- pointed at file names Task 8 has not authored yet.
+
+    Validates cleanly (unpinned refs are never checked for existence at
+    `Config.model_validate` time), but `PromptRegistry.load()` will raise
+    `ConfigError` until Task 8 lands those files -- which is exactly the
+    `xfail(strict=False)` `test_render_root_no_subcalls_uses_the_nosubcalls_
+    body_and_block` is marked for. Task 8 removes that mark; this fixture then
+    needs no change, since the paths below are the ones it is expected to add.
+    """
+    d = copy.deepcopy(minimal_cfg_dict)
+    prompts = d["scaffold"]["prompts"]
+    prompts["root_nosubcalls"] = {"path": "prompts/root-nosubcalls.v1.md", "sha256": None}
+    prompts["strategy_templates_nosubcalls"] = {
+        cat: {"path": f"prompts/strat-{cat.replace('_', '-')}-nosubcalls.v1.md", "sha256": None}
+        for cat in prompts["strategy_templates"]
+    }
+    return Config.model_validate(d)
+
+
+@pytest.fixture
 def leaf_prefix() -> str:
     """The pinned registry leaf prefix (`leaf_prefix_text()` as a fixture)."""
     return leaf_prefix_text()

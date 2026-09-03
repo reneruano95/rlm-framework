@@ -207,7 +207,7 @@ def test_asking_for_a_restricted_prompt_that_is_not_configured_is_refused(valid_
     p = valid_cfg.scaffold.prompts
     bare = PromptRegistry.from_files(
         root_path=p.root.path, leaf_prefix_path=p.leaf_prefix.path,
-        strategy_paths={"needle": p.strategy_templates.needle.path}).load()
+        strategy_paths={"needle": p.strategy_templates["needle"].path}).load()
     with pytest.raises(ConfigError, match="root_restricted"):
         bare.render_root("needle", restricted=True)
 

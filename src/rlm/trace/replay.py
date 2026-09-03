@@ -119,6 +119,11 @@ def episode_config(snapshot: dict) -> tuple[Config, Any]:
     # from every snapshot recorded before it, present in every `rlm-restricted`
     # one, and a rebuild that skipped it would replay those as prompt DRIFT.
     restricted_ref = prompts.get("root_restricted")
+    # Same rule again for the `rlm-nosubcalls` arm (benchmark v2, task 7):
+    # absent from every pre-v2 snapshot, present in every `rlm-nosubcalls`
+    # one -- a rebuild that skipped either half would replay those as drift.
+    nosubcalls_root_ref = prompts.get("root_nosubcalls")
+    nosubcalls_strategy_refs = prompts.get("strategy_templates_nosubcalls") or {}
     try:
         # Resolved, not opened raw. A snapshot records the path as the run declared
         # it -- `prompts/root.v3.md` -- and the prompts now live inside the package,
@@ -132,11 +137,15 @@ def episode_config(snapshot: dict) -> tuple[Config, Any]:
             root_path=resolve_prompt_path(Path(prompts["root"]["path"])),
             root_restricted_path=(resolve_prompt_path(Path(restricted_ref["path"]))
                                   if restricted_ref else None),
+            root_nosubcalls_path=(resolve_prompt_path(Path(nosubcalls_root_ref["path"]))
+                                  if nosubcalls_root_ref else None),
             leaf_prefix_path=resolve_prompt_path(Path(prompts["leaf_prefix"]["path"])),
             leaf_envelope_path=(resolve_prompt_path(Path(envelope_ref["path"]))
                                 if envelope_ref else None),
             strategy_paths={cat: resolve_prompt_path(Path(ref["path"]))
                             for cat, ref in prompts["strategy_templates"].items()},
+            strategy_nosubcalls_paths={cat: resolve_prompt_path(Path(ref["path"]))
+                                       for cat, ref in nosubcalls_strategy_refs.items()},
             baseline_paths={name: resolve_prompt_path(Path(ref["path"]))
                             for name, ref in baseline_refs.items()},
         ).load()
