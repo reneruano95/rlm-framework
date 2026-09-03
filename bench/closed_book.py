@@ -60,14 +60,31 @@ def ask(base: str, question: str, seed: int, n_predict: int) -> str:
     return raw.rsplit("</think>", 1)[-1].strip()
 
 
-def main() -> int:
+def main(args: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--manifest", type=Path, default=MANIFEST,
+                    help="path to benchmark manifest (default: %(default)s)")
     ap.add_argument("--root", default="http://127.0.0.1:8080")
     ap.add_argument("--leaf", default="http://127.0.0.1:8081")
     ap.add_argument("--n-predict", type=int, default=96)
-    a = ap.parse_args()
+    ap.add_argument("--dry-run", action="store_true",
+                    help="read manifest and list tasks without calling any server")
+    a = ap.parse_args(args)
 
-    m = BenchmarkManifest.load(MANIFEST)
+    m = BenchmarkManifest.load(a.manifest)
+
+    if a.dry_run:
+        # Dry-run: just list tasks without calling any server
+        try:
+            manifest_display = a.manifest.relative_to(REPO)
+        except ValueError:
+            manifest_display = a.manifest
+        print(f"closed-book probe (dry-run): {len(m.tasks)} tasks from "
+              f"{manifest_display}\n")
+        for e in m.tasks:
+            print(f"  {e.task_id:<12} {e.category:<12}")
+        return 0
+
     print(f"closed-book probe: {len(m.tasks)} tasks x 2 models x {len(SEEDS)} "
           f"seeds = {len(m.tasks) * 2 * len(SEEDS)} calls\n")
 
@@ -91,8 +108,12 @@ def main() -> int:
             flag = "   <== ANSWERED WITHOUT THE CORPUS"
         print(f"  {e.task_id:<12} {e.category:<12} {hits}/6{flag}")
 
-    m.write(MANIFEST)
-    print(f"\nwrote probe results into {MANIFEST.relative_to(REPO)}")
+    m.write(a.manifest)
+    try:
+        manifest_display = a.manifest.relative_to(REPO)
+    except ValueError:
+        manifest_display = a.manifest
+    print(f"\nwrote probe results into {manifest_display}")
     if contaminated:
         print(f"\n§8 REQUIRES REWRITE OR REPLACEMENT of: {contaminated}")
         print("The freeze is blocked until they are regenerated.")
