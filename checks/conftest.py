@@ -47,21 +47,25 @@ def cfg(valid_cfg: Config) -> Config:
 @pytest.fixture
 def nosubcalls_cfg(minimal_cfg_dict: dict) -> Config:
     """A config with the `rlm-nosubcalls` arm's own root + strategy blocks
-    declared -- pointed at file names Task 8 has not authored yet.
+    declared, pointed at Task 20's real files.
 
-    Validates cleanly (unpinned refs are never checked for existence at
-    `Config.model_validate` time), but `PromptRegistry.load()` will raise
-    `ConfigError` until Task 8 lands those files -- which is exactly the
-    `xfail(strict=False)` `test_render_root_no_subcalls_uses_the_nosubcalls_
-    body_and_block` is marked for. Task 8 removes that mark; this fixture then
-    needs no change, since the paths below are the ones it is expected to add.
+    CONTROLLER RULING (Task 20): originally built over
+    `prompts["strategy_templates"]` -- config.yaml's five v1 categories
+    (needle, aggregation, synthesis, code_qa, default) -- as a stand-in
+    chosen before benchmark v2's category set was finalised. The
+    `rlm-nosubcalls` root arm only ever runs against benchmark v2's three
+    categories (`linear_semantic`, `interactive`, `code_solvable`; spec §14),
+    never against a v1 category, so those are the categories whose nosubcalls
+    twin actually needs to exist. Hardcoded here rather than derived from
+    `prompts["strategy_templates"]`, since that dict's keys are the v1
+    categories and have no bearing on which nosubcalls files Task 20 ships.
     """
     d = copy.deepcopy(minimal_cfg_dict)
     prompts = d["scaffold"]["prompts"]
     prompts["root_nosubcalls"] = {"path": "prompts/root-nosubcalls.v1.md", "sha256": None}
     prompts["strategy_templates_nosubcalls"] = {
         cat: {"path": f"prompts/strat-{cat.replace('_', '-')}-nosubcalls.v1.md", "sha256": None}
-        for cat in prompts["strategy_templates"]
+        for cat in ("linear_semantic", "interactive", "code_solvable")
     }
     return Config.model_validate(d)
 

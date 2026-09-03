@@ -20,7 +20,14 @@ FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "root.v4.md",
          # decorative: `PromptRegistry._strip_changelog` only strips THIS form,
          # and a header it does not recognise is a header the model reads.
          "b1-single-shot.v1.md", "b2-leaf-summary.v1.md",
-         "b2-root-final.v1.md", "b3-single-shot.v1.md"]
+         "b2-root-final.v1.md", "b3-single-shot.v1.md",
+         # benchmark v2 (Task 20): one strategy block per v2 category, per
+         # root arm -- the `rlm` arm's three teach `llm_query`/delegation,
+         # the `-nosubcalls` twins never name a sub-model (the runtime
+         # refuses `llm_query` in that arm; the prompt must agree).
+         "strat-linear-semantic.v1.md", "strat-interactive.v1.md",
+         "strat-code-solvable.v1.md", "strat-linear-semantic-nosubcalls.v1.md",
+         "strat-interactive-nosubcalls.v1.md", "strat-code-solvable-nosubcalls.v1.md"]
 
 #: The two recorded S1 A/B arms. Their bytes ARE the published 6/6-vs-6/6
 #: result: editing either one retroactively invalidates it, so the hashes are
@@ -200,7 +207,11 @@ def test_prompt_promise_matches_the_configured_extractor():
 
 def test_extraction_shaped_strategies_carry_the_evidence_span_check():
     for name in ("strat-needle.v1.md", "strat-aggregation.v1.md",
-                 "strat-aggregation.v2.md", "strat-synthesis.v1.md"):
+                 "strat-aggregation.v2.md", "strat-synthesis.v1.md",
+                 # Task 20: linear-semantic aggregates over labelled records
+                 # and carries the same evidence-span check; its nosubcalls
+                 # twin keeps the check verbatim (it never names a sub-model).
+                 "strat-linear-semantic.v1.md", "strat-linear-semantic-nosubcalls.v1.md"):
         text = (PROMPTS / name).read_text(encoding="utf-8").lower()
         assert "evidence" in text, f"{name} missing the R12/R5 evidence-span check"
 
@@ -240,26 +251,48 @@ def test_config_pins_match_the_files_on_disk():
         assert actual == pinned, f"{path} drifted from its config pin"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Task 8 status (2026-09-02): root-nosubcalls.v1.md now exists and "
-    "the nosubcalls_cfg fixture's filename guess for it "
-    "('prompts/root-nosubcalls.v1.md') is confirmed correct -- verified by "
-    "running this test with --runxfail: it now fails one step later, past "
-    "loading root_nosubcalls, in PromptRegistry.load()'s strategy_templates_"
-    "nosubcalls loop, with ConfigError: prompt 'strategy_nosubcalls.needle' "
-    "at prompts\\strat-needle-nosubcalls.v1.md could not be read: No such "
-    "file or directory. That file (and its five siblings, one per category) "
-    "is Task 20's deliverable and has not landed yet. strict=True (tightened "
-    "from strict=False) so this mark itself fails loudly, instead of quietly "
-    "XPASSing, the moment Task 20's strat-*-nosubcalls.v1.md set lands -- at "
-    "which point whoever lands it must remove this mark rather than leave it "
-    "standing.",
-)
+# CONTROLLER RULING (Task 20): Task 7/8 wrote this test and the
+# `nosubcalls_cfg` fixture against "needle" -- one of config.yaml's five v1
+# categories -- as an arbitrary stand-in, before benchmark v2's category set
+# was finalised. §14/the amended v2 spec settled on exactly THREE v2-only
+# categories (`linear_semantic`, `interactive`, `code_solvable`; see
+# task-14/15/17/18 briefs), and the `rlm-nosubcalls` root arm only ever runs
+# against those -- config.yaml's v1 categories never run under it. Task 20's
+# actual deliverable is therefore a nosubcalls twin per V2 category, not per
+# v1 category; `nosubcalls_cfg` (checks/conftest.py) has been updated to
+# build `strategy_templates_nosubcalls` over the three v2 categories rather
+# than over `prompts["strategy_templates"]`'s five v1 keys, and this test now
+# exercises `linear_semantic` rather than `needle`. The xfail mark is removed:
+# the six files it was blocked on are landed and this passes on its merits.
 def test_render_root_no_subcalls_uses_the_nosubcalls_body_and_block(nosubcalls_cfg):
     reg = nosubcalls_cfg.prompt_registry().load()
-    text = reg.render_root("needle", no_subcalls=True)
+    text = reg.render_root("linear_semantic", no_subcalls=True)
     assert "llm_query" not in text and "sub-call" not in text.lower()
+
+
+V2_BLOCKS = ["strat-linear-semantic.v1.md", "strat-interactive.v1.md", "strat-code-solvable.v1.md"]
+
+
+@pytest.mark.parametrize("name", V2_BLOCKS)
+def test_v2_blocks_have_headers_and_the_rlm_variants_teach_llm_query_or_code(name):
+    assert (PROMPTS / name).read_text(encoding="utf-8").startswith("<!-- changelog")
+    body = _body(name)
+    assert body.lstrip().startswith("# Strategy: ")
+    if "code-solvable" not in name:
+        assert "llm_query" in body
+
+
+@pytest.mark.parametrize("name", [n.replace(".v1.md", "-nosubcalls.v1.md") for n in V2_BLOCKS])
+def test_nosubcalls_blocks_never_name_the_sub_model(name):
+    body = _body(name).lower()
+    for banned in ("llm_query", "sub-model", "sub-call", "asyncio.gather", "delegat"):
+        assert banned not in body, (name, banned)
+
+
+def test_the_interactive_blocks_teach_env():
+    for name in ("strat-interactive.v1.md", "strat-interactive-nosubcalls.v1.md"):
+        body = _body(name)
+        assert "env.search(" in body and "env.open(" in body and "env.window(" in body
 
 
 def _body(name):  # header stripped, like the loader
