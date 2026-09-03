@@ -1,7 +1,7 @@
 {
   "task_id": "ctl-02-train",
   "text": "Count the records whose Filed line names the month Hesp. Reply with the integer only, nothing else.",
-  "context_path": "../corpora/ctl-02-train.txt",
+  "context_path": "../../corpora/v2/ctl-02-train.txt",
   "category": "code_solvable",
   "answer": "56",
   "checker": "int_exact"

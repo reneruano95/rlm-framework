@@ -1,7 +1,7 @@
 {
   "task_id": "ls-06-train",
   "text": "Each record in this register files one Query. Count the records whose Query asks about a person or group of people or a description, definition, reason or manner. Reply with the integer only, nothing else.",
-  "context_path": "../corpora/ls-06-train.txt",
+  "context_path": "../../corpora/v2/ls-06-train.txt",
   "category": "linear_semantic",
   "answer": "278",
   "checker": "int_exact"

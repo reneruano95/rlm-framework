@@ -1,7 +1,7 @@
 {
   "task_id": "ls-02-held_out",
   "text": "Each record in this register files one Query. Count the records whose Query asks about a thing, object or entity that is not a person or place. Reply with the integer only, nothing else.",
-  "context_path": "../corpora/ls-02-held_out.txt",
+  "context_path": "../../corpora/v2/ls-02-held_out.txt",
   "category": "linear_semantic",
   "answer": "148",
   "checker": "int_exact"

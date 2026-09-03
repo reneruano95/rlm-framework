@@ -43,6 +43,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -124,6 +125,21 @@ def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
     return path
+
+
+def _context_rel(tasks_dir: Path, corpora_dir: Path, task_id: str) -> str:
+    """`context_path` written into a task JSON, relative to `tasks_dir` (where
+    `episode.py` resolves it from -- `p.parent / context_path`), computed from
+    the ACTUAL directories in play rather than assumed. v1's build.py could
+    hardcode `"../corpora/{id}.txt"` because `bench/tasks/` and `bench/corpora/`
+    are siblings; v2 nests both one level deeper under `v2/`, and a
+    `--practice` build's `tasks_dir`/`corpora_dir` are siblings again under
+    `--out`. Computed with `os.path.relpath` so every caller (real build,
+    `--practice`) gets the correct depth instead of a copy-pasted literal --
+    this is the fix for the 2026-09-03 smoke's `config_refused` defect, where
+    every real v2 task file resolved to the nonexistent `bench/tasks/corpora/`."""
+    target = corpora_dir / f"{task_id}.txt"
+    return os.path.relpath(target, start=tasks_dir).replace("\\", "/")
 
 
 def _task_file(tasks_dir: Path, task_id: str, text: str, corpus_rel: str,
@@ -237,7 +253,7 @@ def build_linear_semantic(count, counter_name, *, static_tokens,
 
         question, _, _ = c.text.partition("\n\n")
         cp = _write(corpora_dir / f"{task_id}.txt", c.text)
-        _task_file(tasks_dir, task_id, question, f"../corpora/{task_id}.txt",
+        _task_file(tasks_dir, task_id, question, _context_rel(tasks_dir, corpora_dir, task_id),
                   "linear_semantic", c.answer, c.checker)
 
         windows = math.ceil(c.measured_tokens / 432)
@@ -279,7 +295,7 @@ def build_interactive(count, counter_name, *, static_tokens, interactive_tokens,
         text = _inject(c.text) if adversarial else c.text
         question, _, _ = c.text.partition("\n\n")
         cp = _write(corpora_dir / f"{task_id}.txt", text)
-        _task_file(tasks_dir, task_id, question, f"../corpora/{task_id}.txt",
+        _task_file(tasks_dir, task_id, question, _context_rel(tasks_dir, corpora_dir, task_id),
                   "interactive", c.answer, c.checker)
 
         out.append(_entry(
@@ -323,7 +339,7 @@ def build_code_solvable(count, counter_name, *, static_tokens,
 
         task_id = f"{shape_id}-{stream}"
         cp = _write(corpora_dir / f"{task_id}.txt", c.text)
-        _task_file(tasks_dir, task_id, c.question, f"../corpora/{task_id}.txt",
+        _task_file(tasks_dir, task_id, c.question, _context_rel(tasks_dir, corpora_dir, task_id),
                   "code_solvable", c.answer, checker)
 
         out.append(_entry(

@@ -120,3 +120,28 @@ def test_the_v2_freeze_passes_every_precondition():
         cb = e.closed_book or {}
         assert cb.get("seeds") == 3 and set(cb.get("models", [])) == {"root", "leaf"}
         assert cb.get("passed_without_corpus") == 0
+
+
+def test_every_v2_task_files_context_path_resolves_to_a_real_corpus():
+    """2026-09-03 smoke: every one of the 32 frozen task files carried
+    `context_path: "../corpora/<id>.txt"`, copied unchanged from v1's
+    `build.py` where `bench/tasks/` and `bench/corpora/` are siblings. v2
+    nests both one level deeper under `v2/`, so that string resolved to the
+    nonexistent `bench/tasks/corpora/<id>.txt` instead of the real
+    `bench/corpora/v2/<id>.txt` -- exactly how `rlm.episode` resolves it
+    (`p.parent / context_path`, `src/rlm/episode.py`). A smoke run on real
+    servers hit `config_refused` on 17 of 18 cells before this was caught;
+    the closed-book probe that gated the freeze never goes through this
+    resolution path, so nothing in the suite had this assertion. It does
+    now, for every task in the manifest, not just the three the smoke
+    happened to sample."""
+    m = BenchmarkManifest.load(V2)
+    missing = []
+    for e in m.tasks:
+        task_file = REPO / e.task_file
+        assert task_file.exists(), f"{e.task_id}: task file {task_file} missing"
+        body = json.loads(task_file.read_text(encoding="utf-8"))
+        resolved = (task_file.parent / body["context_path"]).resolve()
+        if not resolved.exists():
+            missing.append((e.task_id, body["context_path"], str(resolved)))
+    assert not missing, f"context_path does not resolve for: {missing}"

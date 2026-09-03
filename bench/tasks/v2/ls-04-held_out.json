@@ -1,7 +1,7 @@
 {
   "task_id": "ls-04-held_out",
   "text": "Each record in this register files one Query. Which kind of thing do the most Queries ask about: a person or group, a place, a numeric value, an entity, a description, or an abbreviation? Reply with exactly one of: person, place, number, entity, description, abbreviation.",
-  "context_path": "../corpora/ls-04-held_out.txt",
+  "context_path": "../../corpora/v2/ls-04-held_out.txt",
   "category": "linear_semantic",
   "answer": "entity",
   "checker": "name_exact"

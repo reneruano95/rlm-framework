@@ -1,7 +1,7 @@
 {
   "task_id": "int-03-held_out",
   "text": "This corpus is a set of 12 registers, each behind its own document id. Each record in every register files one Query. Count, across ALL registers together, the records whose Query asks about a abbreviation or its expansion. Reply with the integer only, nothing else.",
-  "context_path": "../corpora/int-03-held_out.txt",
+  "context_path": "../../corpora/v2/int-03-held_out.txt",
   "category": "interactive",
   "answer": "41",
   "checker": "int_exact"

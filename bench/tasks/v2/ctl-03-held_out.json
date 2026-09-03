@@ -1,7 +1,7 @@
 {
   "task_id": "ctl-03-held_out",
   "text": "Exactly one record in this register states a Custody key of record. What is that key? Reply with the key itself and nothing else.",
-  "context_path": "../corpora/ctl-03-held_out.txt",
+  "context_path": "../../corpora/v2/ctl-03-held_out.txt",
   "category": "code_solvable",
   "answer": "caf3e111-9174-3448-e166-af4c2b9e70ce",
   "checker": "uuid_exact"

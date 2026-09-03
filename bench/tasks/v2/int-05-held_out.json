@@ -1,7 +1,7 @@
 {
   "task_id": "int-05-held_out",
   "text": "This corpus is a set of 12 registers, each behind its own document id. Each record in every register files one Query. Each register's most-common kind of Query is that register's majority kind. How many pairs of registers have the same most-common kind of Query? Reply with the integer only, nothing else.",
-  "context_path": "../corpora/int-05-held_out.txt",
+  "context_path": "../../corpora/v2/int-05-held_out.txt",
   "category": "interactive",
   "answer": "21",
   "checker": "int_exact"
