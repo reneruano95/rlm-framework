@@ -25,7 +25,9 @@ from rlm.trace import TraceLogger
 from rlm.measure.verdict import (
     MARGIN_GATE,
     NARRATIVE_MARKER,
+    ArmCost,
     Grid,
+    Scorecard,
     VerdictError,
     cost_scorecard,
     decide,
@@ -1091,6 +1093,59 @@ def test_an_abstained_arm_is_not_a_missing_cell(store_with_grid):
     v = decide(grid, manifest)
     assert v.pairs["b2"].n_tasks == 1          # denominator is the tasks B2 ran
     assert v.pairs["b2"].margin == 1           # rlm 1/1 vs b2 0/1 on the shared task
+
+
+def test_render_report_shows_an_abstained_category_as_did_not_run(
+        six_task_manifest_factory):
+    """End to end through `render_report`: a baseline that abstains from a
+    whole category must not render as having failed every task in it. B2
+    abstains from `aggregation` (t4-t6) and runs only `needle` (t1-t3),
+    passing just t1 of those.
+
+    Covers all three of the review's open points in one pass: the "over N
+    tasks" note, the per-category cell reading "did not run" rather than
+    "0/3", and the arm's success rate computed over what it ran (1/3) rather
+    than padded by the three it never entered (which would read 1/6)."""
+    m = six_task_manifest_factory(rules={"baselines": ["b2"], "margin": 1,
+                                         "escalation_band": [1],
+                                         "abstentions": {"b2": ["aggregation"]}})
+    task_ids = tuple(SIX_CATEGORIES)   # t1-t3 needle, t4-t6 aggregation
+    seeds = (1, 2, 3)
+    cells: dict[tuple[str, str], tuple[bool, ...]] = {}
+    cell_seeds: dict[tuple[str, str], tuple[int, ...]] = {}
+    abstained: set[tuple[str, str]] = set()
+    for t in task_ids:
+        cells[(t, "rlm")] = (True,) * 3
+        cell_seeds[(t, "rlm")] = seeds
+        if SIX_CATEGORIES[t] == "aggregation":
+            abstained.add((t, "b2"))            # no cell for b2 here at all
+            continue
+        cells[(t, "b2")] = ((t == "t1"),) * 3   # b2 passes only t1 of needle
+        cell_seeds[(t, "b2")] = seeds
+    grid = Grid(run_id="run-1", task_ids=task_ids, arms=("rlm", "b2"),
+               seeds=seeds, required_seeds=seeds, chunk_sizes=(32768,),
+               cells=cells, cell_seeds=cell_seeds, episode_ids={},
+               abstained=frozenset(abstained))
+
+    v = decide(grid, m)
+    assert v.pairs["b2"].n_tasks == 3                          # needle only
+    assert v.success_rate["b2"] == pytest.approx(1 / 3)        # 1 of 3 RUN
+
+    scorecard = Scorecard(
+        run_id="run-1", episodes=(), tasks={},
+        arms={"rlm": ArmCost(arm="rlm", n_tasks=6, n_episodes=6,
+                             median_tokens=100.0, median_wall_s=10.0,
+                             median_energy_j=None, median_power_w=None,
+                             total_tokens=600),
+              "b2": ArmCost(arm="b2", n_tasks=3, n_episodes=3,
+                           median_tokens=50.0, median_wall_s=5.0,
+                           median_energy_j=None, median_power_w=None,
+                           total_tokens=150)})
+    text = render_report(v, scorecard, {})
+
+    assert "over 3 tasks; abstains from aggregation" in text
+    assert "| aggregation | 3 | 3 | did not run |" in text
+    assert "b2 (0.33, 5s)" in text     # Pareto point: 1/3, not 1/6
 
 
 def test_a_genuinely_missing_cell_is_still_refused(store_with_grid):

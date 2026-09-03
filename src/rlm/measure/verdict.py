@@ -396,6 +396,11 @@ class CategoryRow:
     category: str
     n_tasks: int
     passes: Mapping[str, int]
+    #: Arms that abstain from this WHOLE category (every member task is
+    #: abstained for them). The report renders these as "did not run" rather
+    #: than `passes.get(arm, 0)` == 0, which would read as a zero score on a
+    #: category the arm never entered. Empty for every v1 row.
+    abstained: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -469,23 +474,36 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
 
     passes: dict[str, tuple[str, ...]] = {}
     scores: dict[tuple[str, str], float] = {}
+    ran: dict[str, int] = {}
     for arm in grid.arms:
         passed = []
+        arm_ran = 0
         for t in tasks:
             if (t, arm) in grid.abstained:
                 # A declared abstention: this arm never ran the task, so there
                 # is no cell to score and no fractional score to record --
                 # NOT a fail, and NOT the "no cell" refusal `grid.cell` raises
-                # for an arm that ran everything else but this one hole.
+                # for an arm that ran everything else but this one hole. It
+                # is also excluded from THIS ARM's own denominator below --
+                # an abstaining baseline must not render as having failed
+                # every task it never ran.
                 continue
+            arm_ran += 1
             cell = grid.cell(t, arm)
             scores[(arm, t)] = fractional_score(cell)
             if task_passes(cell):
                 passed.append(t)
         passes[arm] = tuple(passed)
+        ran[arm] = arm_ran
 
     n = len(tasks)
-    success_rate = {arm: (len(p) / n if n else 0.0) for arm, p in passes.items()}
+    # Each arm's OWN denominator, not the grid's: with no abstentions
+    # `ran[arm] == n` for every arm (v1, byte-for-byte), but a baseline that
+    # skips a whole category ran fewer tasks than the grid holds, and its
+    # success rate -- which feeds the Pareto chart -- must be over what it
+    # ran, not padded with the skipped category's tasks scored as losses.
+    success_rate = {arm: (len(passes[arm]) / ran[arm] if ran[arm] else 0.0)
+                    for arm in grid.arms}
 
     findings: list[Finding] = []
     pairs: dict[str, PairResult] = {}
@@ -567,8 +585,17 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
         members = [t for t in tasks if categories[t] == cat]
         per_arm = {arm: sum(1 for t in members if t in set(passes[arm]))
                    for arm in grid.arms}
+        # An arm abstains from the WHOLE category iff every one of its member
+        # tasks is abstained for it -- which is what `_abstained` guarantees
+        # (it keys off the task's category, not the task itself), but stated
+        # as `all(...)` here rather than assumed, so a future per-task
+        # abstention would degrade to "0 of N" instead of a false "did not
+        # run".
+        abstained_arms = frozenset(
+            arm for arm in grid.arms
+            if members and all((t, arm) in grid.abstained for t in members))
         rows.append(CategoryRow(category=cat, n_tasks=len(members),
-                                 passes=per_arm))
+                                 passes=per_arm, abstained=abstained_arms))
         rlm_score = per_arm.get(rules.rlm_arm, 0)
         floored = [b for b in rules.baselines if per_arm.get(b, 0) >= rules.tripwire_floor]
         if rlm_present and rlm_score == 0 and floored:
@@ -1104,8 +1131,9 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
           "| category | tasks | " + " | ".join(a.upper() for a in arms) + " |",
           "|---" * (len(arms) + 2) + "|"]
     for row in final.categories:
-        L.append(f"| {row.category} | {row.n_tasks} | "
-                 + " | ".join(str(row.passes.get(a, 0)) for a in arms) + " |")
+        cells = ["did not run" if a in row.abstained else str(row.passes.get(a, 0))
+                for a in arms]
+        L.append(f"| {row.category} | {row.n_tasks} | " + " | ".join(cells) + " |")
     L.append("")
 
     # 6. cost scorecard ------------------------------------------------------ #
