@@ -298,5 +298,4 @@ class BenchmarkManifest:
             raise AssertionError("benchmark manifest violates v2 rules:\n  - "
                                  + "\n  - ".join(errs))
 
-
 __all__ = ["BenchmarkManifest", "TaskEntry", "CATEGORY_SPLIT", "N_TASKS"]
