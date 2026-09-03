@@ -1,3 +1,5 @@
+import re
+
 from bench.adversary import parser_adversary, self_read_adversary
 from bench.corpus_v2 import build_linear_semantic, load_trec
 from bench.tokens import approx_tokens
@@ -20,6 +22,17 @@ def test_the_wh_word_rule_is_a_real_adversary_on_trec():
     c = build_linear_semantic(9101, 20_000, approx_tokens, "approx-offline",
                               question_kind="count_label", items=load_trec(), paraphrase=False)
     assert parser_adversary(c)["wh_word_rules"] > 0.5
+
+
+def test_the_paraphrased_register_takes_the_wh_word_rule_to_chance():
+    c = build_linear_semantic(9101, 20_000, approx_tokens, "approx-offline",
+                              question_kind="count_label", items=load_trec(), paraphrase=True)
+    scores = parser_adversary(c)
+    chance = scores.pop("__chance__")
+    beaten = {k: v for k, v in scores.items() if v > chance + 0.02}
+    assert not beaten, beaten
+    assert not any(q.split()[0].lower() in {"who", "where", "when", "what", "which", "how", "why"}
+                   for q in re.findall(r"^Query: (.+)$", c.text, re.M))
 
 
 def test_self_read_adversary_counts_the_windows_the_answer_needs():
