@@ -833,7 +833,7 @@ def test_bench_refuses_when_the_frozen_manifest_moved(valid_config_file, tmp_pat
     tampered = tmp_path / "manifest.json"
     tampered.write_text(json.dumps(moved, indent=2, ensure_ascii=False) + "\n",
                         encoding="utf-8")
-    monkeypatch.setattr(cli, "BENCH_MANIFEST_PATH", tampered)
+    monkeypatch.setattr(cli, "bench_manifest_path", lambda version: tampered)
 
     rc = main(_bench_argv(valid_config_file, tmp_path, "--smoke"))
     assert rc == cli.EXIT_REFUSED
@@ -873,7 +873,7 @@ def test_bench_refuses_an_unbound_hook(valid_config_file, tmp_path):
     cfg = load_config(valid_config_file)
     raw = yaml.safe_load(valid_config_file.read_text(encoding="utf-8"))
     bare = BenchCtx(raw_cfg=raw, cfg=cfg, run_id="r",
-                    manifest=cli.load_benchmark_manifest(),
+                    manifest=cli.load_benchmark_manifest(cfg),
                     ledger=BenchLedger(tmp_path / "ledger.jsonl"))
     with pytest.raises(ConfigError) as excinfo:
         cli.assert_bench_wiring(bare, ARM_ORDER)
@@ -906,12 +906,71 @@ def test_the_smoke_default_task_set_is_one_non_adversarial_task_per_category():
     timed against them: they are the tasks most likely to behave unlike their
     category, and the whole point of the smoke run is a per-category
     seconds-per-episode number to project 39 hours from."""
-    manifest = cli.load_benchmark_manifest()
+    manifest = cli.load_benchmark_manifest(SimpleNamespace(benchmark=SimpleNamespace(version=None)))
     ids = cli.smoke_task_ids(manifest)
     by_id = {t.task_id: t for t in manifest.tasks}
     assert len(ids) == len({by_id[i].category for i in ids}) == 4
     assert set(ids) == {"needle-02", "agg-02", "synth-01", "codeqa-01"}
     assert not any(by_id[i].adversarial for i in ids)
+
+
+# --------------------------------------------------------------------------- #
+# the manifest path follows benchmark.version, and a grid defaults to the
+# scored stream (Task 6)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_manifest_path_follows_the_benchmark_version():
+    """v1 keeps its historical filename; every later version gets its own
+    manifest file beside it, so a v2 run cannot start against a v1 freeze --
+    or the reverse -- by a missing `benchmark.version`."""
+    from rlm.measure.bench import REPO_ROOT, bench_manifest_path
+
+    assert bench_manifest_path(None) == REPO_ROOT / "bench" / "manifest.json"
+    assert bench_manifest_path("v1") == REPO_ROOT / "bench" / "manifest.json"
+    assert bench_manifest_path("v2") == REPO_ROOT / "bench" / "manifest.v2.json"
+
+
+def _two_stream_manifest():
+    """A small, self-contained v2-shaped manifest: 16 `-train` tasks (the
+    scored stream) and 4 `-held` tasks (held out). Real v2 fixtures land in
+    Tasks 18/21; this is just enough to prove the default-vs-`--tasks`
+    behaviour without them."""
+    from bench.manifest import BenchmarkManifest, TaskEntry
+
+    def entry(task_id: str, stream: str) -> TaskEntry:
+        return TaskEntry(task_id=task_id, category="needle", task_file="x.json",
+                         corpus_path="x", corpus_sha256="0" * 64, corpus_tokens=1,
+                         corpus_date="2026-01-01", checker="exact",
+                         question_sha256="0" * 64, stream=stream)
+
+    tasks = [entry(f"t{i}-train", "train") for i in range(16)] + \
+            [entry(f"t{i}-held", "held_out") for i in range(4)]
+    return BenchmarkManifest(benchmark_version="v2", built_at="2026-09-02",
+                             token_counter="approx-offline",
+                             assumed_training_cutoff="2026-01-01",
+                             tasks=tasks, rules={"scored_stream": "train"})
+
+
+def test_the_default_task_set_is_the_scored_stream():
+    """A v2 grid without --tasks runs the train stream only; held-out is never
+    spent by accident. `--tasks` may still name a held-out task explicitly --
+    the S6 gate will need it."""
+    manifest = _two_stream_manifest()
+
+    ids = cli.default_task_ids(manifest, None)
+    assert len(ids) == 16 and all(i.endswith("-train") for i in ids)
+
+    named = cli.default_task_ids(manifest, ["t0-held"])
+    assert named == ["t0-held"]
+
+
+def test_v1_default_task_set_is_unchanged():
+    """A v1 manifest carries no `rules` block, so `scored_tasks()` returns
+    every task and the default is exactly what it always was."""
+    manifest = cli.load_benchmark_manifest(SimpleNamespace(benchmark=SimpleNamespace(version=None)))
+    ids = cli.default_task_ids(manifest, None)
+    assert set(ids) == {t.task_id for t in manifest.tasks}
 
 
 def test_smoke_runs_one_seed_of_every_arm_and_never_writes_a_report(
@@ -1597,7 +1656,7 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
     raw = copymod.deepcopy(minimal_cfg_dict)
     raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
     raw["trace"]["blob_root"] = str(tmp_path / "blobs")
-    manifest = cli.load_benchmark_manifest()
+    manifest = cli.load_benchmark_manifest(SimpleNamespace(benchmark=SimpleNamespace(version=None)))
     resident, bench_leaf = _PooledDispatcher(128), _PooledDispatcher(2)
 
     class _Orchestra:

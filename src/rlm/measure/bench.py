@@ -66,6 +66,19 @@ if TYPE_CHECKING:                       # pragma: no cover - typing only
 #: the consumer's site-packages. See `rlm.config.find_repo_root`.
 REPO_ROOT = find_repo_root()
 
+
+def bench_manifest_path(version: str | None) -> Path:
+    """§8's freeze, per version. v1 keeps its historical filename.
+
+    Builds a `Path` only -- it must NOT import `bench` (the AST check in
+    `checks/test_bench.py` bans importing `bench` from anywhere in this file,
+    lazy imports included), which is why this tiny function lives here rather
+    than in `bench/manifest.py` where the rest of the manifest logic sits.
+    """
+    if version in (None, "v1"):
+        return REPO_ROOT / "bench" / "manifest.json"
+    return REPO_ROOT / "bench" / f"manifest.{version}.json"
+
 #: §8's pre-registered within-block order. RLM and B2 run on the resident
 #: topology; B1 and B3 share the one `bench_leaf` relaunch, on their own slots
 #: (the v0.2.6 correction: two documents on one slot is R13's smallest repro).
@@ -801,6 +814,7 @@ __all__ = [
     "Block",
     "assert_manifest_pinned",
     "bench_extra",
+    "bench_manifest_path",
     "build_blocks",
     "run_bench",
     "run_block",

@@ -1046,6 +1046,42 @@ def test_v1_manifest_still_needs_plus_three(six_task_manifest_factory):
     assert v.pairs["b1"].beats is False and v.pairs["b2"].beats is True
 
 
+def test_a_v2_verdict_renders_a_cost_scorecard_over_its_own_baselines(
+        six_task_manifest_factory):
+    """Task 6's carried finding: the cost-scorecard table and the arm
+    ordering it shares with the rest of the report used to read the module
+    constants `ARMS`/`BASELINES` regardless of the manifest, so a v2 run
+    (baselines `rlm-nosubcalls`, `b2`) would render a scorecard over b1/b2/b3
+    -- two arms that never ran, one real baseline never mentioned. It must
+    render over `final.rules.baselines` instead."""
+    m = six_task_manifest_factory(rules={"baselines": ["rlm-nosubcalls", "b2"],
+                                         "margin": 2, "escalation_band": [1, 2]})
+    grid = grid_with_passes(rlm=6, **{"rlm-nosubcalls": 4, "b2": 3})
+    v = decide(grid, m)
+
+    def cost(arm, tokens, wall):
+        return ArmCost(arm=arm, n_tasks=6, n_episodes=6, median_tokens=tokens,
+                       median_wall_s=wall, median_energy_j=None,
+                       median_power_w=None, total_tokens=tokens * 6)
+
+    scorecard = Scorecard(
+        run_id="run-1", episodes=(), tasks={},
+        arms={"rlm": cost("rlm", 100.0, 10.0),
+              "rlm-nosubcalls": cost("rlm-nosubcalls", 50.0, 5.0),
+              "b2": cost("b2", 40.0, 4.0)})
+
+    text = render_report(v, scorecard, {})
+    scorecard_section = text.split("## Cost scorecard", 1)[1]
+
+    assert "×wall vs RLM-NOSUBCALLS | ×wall vs B2 |" in scorecard_section
+    assert "×wall vs B1" not in scorecard_section
+    assert "×wall vs B3" not in scorecard_section
+    assert "| rlm-nosubcalls | 6 | 6 |" in scorecard_section
+    # 10.0 / 5.0 = 2x -- RLM's wall-clock cost as a multiple of rlm-nosubcalls'.
+    assert "| rlm | 6 | 6 | 100 | 10.0 | null | null | 2.00x | 2.50x |" in \
+        scorecard_section
+
+
 def test_needs_escalation_takes_the_band_from_rules():
     from rlm.measure.stats import needs_escalation
     assert needs_escalation(3) and not needs_escalation(3, band=(1, 2))

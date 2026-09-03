@@ -63,6 +63,7 @@ from rlm.measure.bench import (
     BenchLedger,
     Block,
     assert_manifest_pinned,
+    bench_manifest_path,
     build_blocks,
     run_bench,
     seeded_config,
@@ -105,6 +106,7 @@ from rlm.measure.verdict import (
     PairResult,
     Verdict,
     VerdictError,
+    _rules_for,
     cost_scorecard,
     decide,
     leak_report,
@@ -1323,14 +1325,20 @@ def _raw_config(path: Path) -> dict:
     return raw
 
 
-def load_benchmark_manifest():
-    """The frozen manifest -- imported LAZILY, and that is load-bearing.
+def load_benchmark_manifest(cfg: Config):
+    """The frozen manifest for `cfg.benchmark.version` -- imported LAZILY, and
+    that is load-bearing.
 
     `bench/` is the benchmark artifact, not part of the shipped wheel, and
     nothing under `rlm/` may import it at module scope: `import rlm.cli` would
     then fail outright on an installed wheel, for the four verbs that have
     nothing to do with §8. So the import happens inside the one verb that needs
     it, and its absence is a refusal with a sentence rather than a traceback.
+
+    ONE MANIFEST PER VERSION (`bench_manifest_path`): v1 keeps its historical
+    `bench/manifest.json`, and every later version gets its own file beside
+    it, so a v2 run cannot start against a v1 freeze -- or the reverse -- by a
+    missing `benchmark.version`.
     """
     try:
         from bench.manifest import BenchmarkManifest
@@ -1339,7 +1347,7 @@ def load_benchmark_manifest():
             f"the benchmark package `bench/` is not importable ({exc}). It is "
             f"the benchmark ARTIFACT and is deliberately not shipped in the "
             f"wheel; `rlm bench` runs from a checkout of the repository") from exc
-    path = Path(BENCH_MANIFEST_PATH)
+    path = bench_manifest_path(cfg.benchmark.version)
     try:
         return BenchmarkManifest.load(path)
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -1366,6 +1374,16 @@ def smoke_task_ids(manifest) -> list[str]:
         seen.add(entry.category)
         ids.append(entry.task_id)
     return ids
+
+
+def default_task_ids(manifest, task_ids: list[str] | None) -> list[str]:
+    """`--tasks` may name ANY task in the manifest (held-out included -- the
+    S6 gate will need it). The DEFAULT, when `--tasks` names nothing, is the
+    manifest's SCORED stream (`manifest.scored_tasks()`), never every task --
+    so a v2 grid run cannot spend the held-out stream by accident. A v1
+    manifest carries no `rules` block, so `scored_tasks()` returns every task
+    and nothing about a v1 run changes."""
+    return task_ids or [t.task_id for t in manifest.scored_tasks()]
 
 
 def blocks_for(manifest, task_ids, seeds: list[int], *, offset: int = 0) -> list[Block]:
@@ -1742,7 +1760,7 @@ async def run_escalation(ctx: BenchCtx, verdict, *, seeds: list[int],
     than by a second implementation of it here.
     """
     records: list[dict] = []
-    for baseline in BASELINES:
+    for baseline in _rules_for(ctx.manifest).baselines:
         tasks = verdict.escalation_plan.get(baseline) or ()
         if not tasks:
             continue
@@ -1814,6 +1832,7 @@ async def _open_trace(cfg: Config, lifecycle) -> TraceLogger:
 
 async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
                   out, err) -> int:
+    rules = _rules_for(manifest)
     arms = tuple(_csv(args.arm) or ARM_ORDER)
     unknown_arms = [a for a in arms if a not in ARM_ORDER]
     if unknown_arms:
@@ -1841,7 +1860,7 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
         # seed answers it no better while costing another full pass.
         seeds = seeds[:1]
         task_ids = task_ids or smoke_task_ids(manifest)
-    task_ids = task_ids or [t.task_id for t in manifest.tasks]
+    task_ids = default_task_ids(manifest, task_ids)
     unknown_tasks = sorted(set(task_ids) - {t.task_id for t in manifest.tasks})
     if unknown_tasks:
         raise ConfigError(
@@ -1885,7 +1904,7 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
         return BenchCtx(
             raw_cfg=raw_cfg, cfg=cfg, run_id=run_id, manifest=manifest,
             ledger=ledger, trace=trace, lifecycle=lifecycle,
-            store=trace.monitor(), sampler=sampler,
+            store=trace.monitor(), sampler=sampler, rules=rules,
             arm_runners=bench_arm_runners(
                 raw_cfg, trace=trace, lifecycle=lifecycle, orchestra=orchestra,
                 registry=registry, rlm_dispatcher=rlm_dispatcher,
@@ -1995,8 +2014,16 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
                 await trace.aclose()
 
         # -- phase 2: the verdict, on the CLOSED store ------------------- #
+        # `rules.abstentions` (arm -> categories) and each task's category
+        # together mark a declared abstention as excused rather than missing
+        # -- see `load_grid`'s docstring. Both are the manifest's, not the
+        # grid's, which is why they are built here rather than inferred from
+        # what happened to run.
+        task_categories = {t.task_id: t.category for t in manifest.tasks}
         verdict = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds,
-                                    escalation_seeds=esc_seeds), manifest)
+                                    escalation_seeds=esc_seeds,
+                                    abstentions=rules.abstentions,
+                                    categories=task_categories), manifest)
 
         # -- phase 3: escalation, only where §8 owes it ------------------ #
         escalated = None
@@ -2019,7 +2046,9 @@ async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
             # permitted"). `render_report` refuses a pair that is not this
             # run's, or one computed on a grid carrying no escalation seeds.
             escalated = decide(load_grid(cfg.trace.db_path, run_id, seeds=seeds,
-                                          escalation_seeds=esc_seeds), manifest)
+                                          escalation_seeds=esc_seeds,
+                                          abstentions=rules.abstentions,
+                                          categories=task_categories), manifest)
 
         scorecard = cost_scorecard(cfg.trace.db_path, run_id)
         leaks = leak_report(cfg.trace.db_path, run_id)
@@ -2065,7 +2094,7 @@ def cmd_bench(args) -> int:
                 f"replays wearing the benchmark's name. `load_grid` refuses "
                 f"dry-run episodes at scoring time, so this refusal only moves "
                 f"the same answer 39 hours earlier")
-        manifest = load_benchmark_manifest()
+        manifest = load_benchmark_manifest(cfg)
         # Checked here for a good error surface, and AGAIN inside `run_bench`
         # where it cannot be bypassed by wiring.
         assert_manifest_pinned(manifest, cfg)
