@@ -1386,6 +1386,30 @@ def default_task_ids(manifest, task_ids: list[str] | None) -> list[str]:
     return task_ids or [t.task_id for t in manifest.scored_tasks()]
 
 
+def default_arms(manifest) -> tuple[str, ...]:
+    """The arm set `rlm bench` runs when `--arm` names nothing.
+
+    Defect 2 (2026-09-02 smoke): the old default was ALWAYS `ARM_ORDER`, v1's
+    hardcoded six arms -- so a v2 operator who omitted `--arm` silently ran
+    `rlm-restricted`, `b1` and `b3`, three arms that do not exist in v2's
+    rules, and missed nothing but wasted hours.
+
+    The fix reads `manifest.rules`, not `BenchmarkRules.for_manifest(manifest)`
+    directly: `for_manifest` FILLS IN v1's constants for a manifest with no
+    `rules` block at all (so every other caller, e.g. `default_task_ids`'s
+    sibling `_rules_for`, never has to special-case v1) -- and v1's constants
+    are `baselines=("b1","b2","b3")`, which is only FOUR arms, not the six of
+    `ARM_ORDER` (`rlm-restricted` and `rlm-nosubcalls` are not baselines,
+    they are additional scored arms v1 also runs by default). So the v1
+    fallback has to be `manifest.rules is None`, checked BEFORE
+    `for_manifest` manufactures an answer that looks plausible and is wrong.
+    """
+    if manifest.rules is None:
+        return ARM_ORDER
+    from bench.rules import BenchmarkRules
+    return BenchmarkRules.for_manifest(manifest).arms
+
+
 def blocks_for(manifest, task_ids, seeds: list[int], *, offset: int = 0) -> list[Block]:
     """§8's blocked schedule, restricted to `task_ids`.
 
@@ -1403,6 +1427,23 @@ def blocks_for(manifest, task_ids, seeds: list[int], *, offset: int = 0) -> list
     return [Block(task_entry=b.task_entry, seed=b.seed, idx=b.idx + offset)
             for b in build_blocks(manifest, seeds)
             if b.task_entry.task_id in wanted]
+
+
+#: The category benchmark v2 §14 built `env`/`InteractiveIndex` for. A task in
+#: this category carries `context: ""` (`bench/build_v2.py`) and expects its
+#: corpus to be reachable only through `env` -- which `run_episode` withholds
+#: only when its `interactive` flag is set (`episode.py` around line 1069).
+INTERACTIVE_CATEGORY = "interactive"
+
+
+def _task_is_interactive(task) -> bool:
+    """Defect 3 (2026-09-02 smoke): NOTHING ever passed `interactive=True`, so
+    an interactive-category task ran as an oversized linear-semantic task --
+    `context`/`chunks` full instead of empty, zero `env` calls, Tasks 10-12
+    unreachable in production. This is the one place that decides it, so
+    every arm runner that can receive an interactive task asks it the same
+    way rather than re-deriving the category string."""
+    return task.category == INTERACTIVE_CATEGORY
 
 
 def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
@@ -1462,7 +1503,8 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
                 process_manager=orchestra.episode_process_manager(),
                 scaffold_instance_id=scaffold_instance_id,
                 scaffold_git_sha=scaffold_git_sha,
-                benchmark_version=benchmark_version)
+                benchmark_version=benchmark_version,
+                interactive=_task_is_interactive(task))
         finally:
             reset_dispatcher_steps(rlm_dispatcher)
 
@@ -1571,7 +1613,8 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
                 scaffold_instance_id=scaffold_instance_id,
                 scaffold_git_sha=scaffold_git_sha,
                 benchmark_version=benchmark_version,
-                restrict_chunks=True)
+                restrict_chunks=True,
+                interactive=_task_is_interactive(task))
         finally:
             reset_dispatcher_steps(rlm_dispatcher)
 
@@ -1589,7 +1632,8 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
                 scaffold_instance_id=scaffold_instance_id,
                 scaffold_git_sha=scaffold_git_sha,
                 benchmark_version=benchmark_version,
-                no_subcalls=True)
+                no_subcalls=True,
+                interactive=_task_is_interactive(task))
         finally:
             reset_dispatcher_steps(rlm_dispatcher)
 
@@ -1848,7 +1892,7 @@ async def _open_trace(cfg: Config, lifecycle) -> TraceLogger:
 async def _bench(args, cfg: Config, raw_cfg: dict, manifest, lifecycle, *,
                   out, err) -> int:
     rules = _rules_for(manifest)
-    arms = tuple(_csv(args.arm) or ARM_ORDER)
+    arms = tuple(_csv(args.arm) or default_arms(manifest))
     unknown_arms = [a for a in arms if a not in ARM_ORDER]
     if unknown_arms:
         raise ConfigError(f"unknown arm(s) {unknown_arms}; §8's arms are "

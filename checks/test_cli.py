@@ -973,6 +973,53 @@ def test_v1_default_task_set_is_unchanged():
     assert set(ids) == {t.task_id for t in manifest.tasks}
 
 
+# --------------------------------------------------------------------------- #
+# Defect 2 (2026-09-02 smoke): `rlm bench`'s default `--arm` must come from
+# the manifest's own rules, not v1's hardcoded `ARM_ORDER` -- else a v2
+# operator who omits `--arm` silently runs `rlm-restricted`/`b1`/`b3`, three
+# arms that do not exist in v2's rules.
+# --------------------------------------------------------------------------- #
+
+
+def test_default_arms_follows_manifest_rules():
+    """A manifest that DOES declare `rules` (v2-shaped) gets `rlm_arm` plus
+    `rules.baselines`, in that order -- exactly `BenchmarkRules.arms` -- not
+    v1's six-arm `ARM_ORDER`."""
+    manifest = _two_stream_manifest()
+    manifest.rules = {"baselines": ["rlm-nosubcalls", "b2"], "margin": 2,
+                      "escalation_band": [1, 2]}
+
+    assert cli.default_arms(manifest) == ("rlm", "rlm-nosubcalls", "b2")
+
+
+def test_v1_default_arms_is_unchanged():
+    """A v1 manifest carries no `rules` block at all (`manifest.rules is
+    None`), and `BenchmarkRules.for_manifest` would happily fill in v1's
+    CONSTANTS for it -- `baselines=("b1","b2","b3")`, only four arms, not the
+    six `ARM_ORDER` names (`rlm-restricted` and `rlm-nosubcalls` are scored
+    arms too, not baselines). So the fallback has to trigger on the absent
+    `rules` block itself, not on what `for_manifest` manufactures from it --
+    this is the test that would catch using `rules.arms` unconditionally."""
+    from rlm.measure.bench import ARM_ORDER
+
+    manifest = cli.load_benchmark_manifest(
+        SimpleNamespace(benchmark=SimpleNamespace(version=None)))
+    assert manifest.rules is None
+    assert cli.default_arms(manifest) == ARM_ORDER
+
+
+def test_default_arms_lets_an_explicit_arm_flag_override(
+        valid_config_file, tmp_path, fake_orchestra, monkeypatch):
+    """`--arm` still wins over the manifest default -- the smoke's own
+    workaround (`--arm rlm,rlm-nosubcalls,b2`) must keep working."""
+    arms = _ArmRecorder().patch(monkeypatch)
+    main(["bench", "--config", str(valid_config_file),
+         "--ledger", str(tmp_path / "ledger.jsonl"),
+         "--report", str(tmp_path / "RESULTS.md"),
+         "--smoke", "--tasks", "needle-02", "--arm", "rlm,b2"])
+    assert set(arms.order()) == {"rlm", "b2"}
+
+
 def _grid_and_verdict(manifest, *, arms_passes: dict):
     """A `Grid` over `manifest`'s tasks, each named arm passing the first `n`
     of them, decided against `manifest`'s own rules. Mirrors
@@ -1541,6 +1588,134 @@ def test_the_arm_runners_hand_every_arm_the_blocks_own_seed(
     # …and at least one of those is NOT the config's shipped value, or this
     # test would pass against a scaffold that never re-seeded anything.
     assert {c["leaf_seed"] for c in arms.calls} - {shipped}
+
+
+# --------------------------------------------------------------------------- #
+# Defect 3 (2026-09-02 smoke): the `interactive` category never engaged
+# `env`, because nothing ever passed `run_episode(..., interactive=True)`.
+# `int-01-train`'s snapshot came back `interactive: False`, `env_actions: 0`,
+# and the episode's first cell printed nonzero `len(context), len(chunks)`
+# instead of the design's `0 0`.
+# --------------------------------------------------------------------------- #
+
+
+class _RotatingDispatcher:
+    """Just enough of `LLMDispatcher` for `_virgin_resident_pool`
+    (`rlm_restricted_arm` calls it before every episode): `rotating()` is a
+    no-op context manager, `rotate_pool()` does nothing, and the pool is
+    never reported drained -- so the helper falls straight through to the
+    (mocked) `run_episode` call this test is actually about."""
+    steps: list = []
+
+    def rotate_pool(self):
+        pass
+
+    @property
+    def restart_required(self):
+        return False
+
+    def rotating(self):
+        import contextlib
+
+        @contextlib.asynccontextmanager
+        async def _cm():
+            yield
+
+        return _cm()
+
+
+class _FakeManager:
+    async def restart(self):
+        pass
+
+
+class _FakeOrchestraForArmRunners:
+    def episode_process_manager(self):
+        return _FakeManager()
+
+    def b2_process_manager(self):
+        return _FakeManager()
+
+
+def _build_arm_runners(monkeypatch, *, run_episode_fn):
+    """`cli.bench_arm_runners`, wired with the lightest doubles that let its
+    `rlm`/`rlm-restricted`/`rlm-nosubcalls` closures run: none of the three
+    touch `raw_cfg`, `registry`, `leaf_dispatcher` or `root_client` before
+    calling (the patched) `run_episode`, so those are just placeholders."""
+    monkeypatch.setattr(cli, "run_episode", run_episode_fn)
+    return cli.bench_arm_runners(
+        {}, trace=None, lifecycle=None, orchestra=_FakeOrchestraForArmRunners(),
+        registry=object(), rlm_dispatcher=_RotatingDispatcher(),
+        leaf_dispatcher=object(), root_client=object(),
+        scaffold_instance_id="scaffold-x", scaffold_git_sha="sha-y",
+        benchmark_version="v2")
+
+
+def test_every_rlm_family_arm_passes_interactive_true_for_the_interactive_category(monkeypatch):
+    """The wiring fix: `rlm`, `rlm-restricted` and `rlm-nosubcalls` are ALL
+    reachable with an interactive-category task (only `b2` is declared
+    abstaining in the manifest, and `b1`/`b3` are not in v2's arm set at
+    all), so all three must derive `interactive` from `task.category` rather
+    than defaulting it away."""
+    from rlm.episode import Task
+
+    captured: list[dict] = []
+
+    async def fake_run_episode(task, cfg, **kw):
+        captured.append(kw)
+        return SimpleNamespace(episode_id="e", outcome=Outcome.SUCCESS,
+                               reason=None, answer=None, final_answer=None)
+
+    runners = _build_arm_runners(monkeypatch, run_episode_fn=fake_run_episode)
+    task = Task(task_id="int-01-train", text="q", context="", category="interactive")
+
+    for arm in ("rlm", "rlm-restricted", "rlm-nosubcalls"):
+        captured.clear()
+        asyncio.run(runners[arm](task, SimpleNamespace(), bench_extra={"seed": 1}))
+        assert captured[-1]["interactive"] is True, arm
+
+
+def test_a_non_interactive_task_still_gets_interactive_false(monkeypatch):
+    """The control: the fix must not blanket every task with
+    `interactive=True` -- only the `interactive` category does, and every
+    other category (needle, aggregation, synthesis, code_qa, linear_semantic,
+    code_solvable...) keeps `context`/`chunks` populated exactly as before."""
+    from rlm.episode import Task
+
+    captured: list[dict] = []
+
+    async def fake_run_episode(task, cfg, **kw):
+        captured.append(kw)
+        return SimpleNamespace(episode_id="e", outcome=Outcome.SUCCESS,
+                               reason=None, answer=None, final_answer=None)
+
+    runners = _build_arm_runners(monkeypatch, run_episode_fn=fake_run_episode)
+    task = Task(task_id="needle-02", text="q", context="ctx", category="needle")
+
+    asyncio.run(runners["rlm"](task, SimpleNamespace(), bench_extra={"seed": 1}))
+    assert captured[-1]["interactive"] is False
+
+
+async def test_an_interactive_task_run_through_the_cli_wiring_keeps_context_and_chunks_empty(
+        episode_env, mock_server, interactive_task):
+    """The other half of Defect 3: it is not enough for the flag to reach
+    `run_episode` -- the episode it opens must actually show `0 0` for
+    `len(context), len(chunks)` (the smoke's own symptom: `int-01-train` came
+    back `629279 431`). `episode_env` calls `run_episode` exactly as
+    `cli.bench_arm_runners`'s closures now do, `interactive` computed by the
+    SAME helper (`cli._task_is_interactive`) the wiring fix added -- so this
+    is the CLI's own category-to-flag rule, exercised against a real
+    episode, not a hand-picked `True`."""
+    env = episode_env(root_script=[
+        "```repl\nprint(len(context), len(chunks))\n```",
+        "```repl\nfinal_answer('42')\n```",
+    ], answer="42", task=interactive_task,
+        leaf_port=mock_server.port, dispatcher=mock_server.dispatcher(),
+        interactive=cli._task_is_interactive(interactive_task))
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    assert env.observation(step=0).startswith("[stdout]\n0 0\n")
+    assert env.snapshot()["interactive"] is True
 
 
 def test_the_sampler_is_stopped_even_when_teardown_raises(
