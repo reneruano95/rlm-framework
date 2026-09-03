@@ -66,6 +66,35 @@ def nosubcalls_cfg(minimal_cfg_dict: dict) -> Config:
     return Config.model_validate(d)
 
 
+def loadable_nosubcalls_cfg(minimal_cfg_dict: dict, tmp_path: Path, *,
+                             categories: tuple[str, ...] = ("default", "needle")) -> Config:
+    """A `rlm-nosubcalls` config that actually LOADS: `root_nosubcalls` points
+    at the real `root-nosubcalls.v1.md` (landed 2026-09-02), and each of
+    `categories` gets a throwaway 3-line strategy block written under
+    `tmp_path` -- deliberately NOT `src/rlm/_data/prompts/strat-*-nosubcalls.
+    v1.md`, which is Task 20's file to author, with real category-specific
+    content this fixture has no business inventing.
+
+    Kept separate from the `nosubcalls_cfg` fixture above: that fixture's
+    whole point is to reproduce the ConfigError `test_render_root_no_subcalls_
+    uses_the_nosubcalls_body_and_block` is xfailed on, and pointing it at
+    files that exist would silently XPASS that mark.
+    """
+    d = copy.deepcopy(minimal_cfg_dict)
+    prompts = d["scaffold"]["prompts"]
+    prompts["root_nosubcalls"] = {"path": "prompts/root-nosubcalls.v1.md", "sha256": None}
+    blocks = {}
+    for cat in categories:
+        p = tmp_path / f"strat-{cat.replace('_', '-')}-nosubcalls.v1.md"
+        p.write_text(
+            f"# Strategy: {cat}\n\nSolve this in code over `context` and "
+            "`chunks` -- no other tool is available.\n",
+            encoding="utf-8")
+        blocks[cat] = {"path": str(p), "sha256": None}
+    prompts["strategy_templates_nosubcalls"] = blocks
+    return Config.model_validate(d)
+
+
 @pytest.fixture
 def leaf_prefix() -> str:
     """The pinned registry leaf prefix (`leaf_prefix_text()` as a fixture)."""
@@ -991,6 +1020,26 @@ class _EpisodeEnv:
     def steps(self) -> list[dict]:
         return self._steps
 
+    def snapshot(self) -> dict:
+        """The episode's `config_snapshot`, decoded (Task 9: `no_subcalls`
+        lives here, top-level, next to `restrict_chunks`'s task-nested spot)."""
+        return self.episode_row()["config_snapshot"]
+
+    def observation(self, *, step: int) -> str:
+        """The `observation_view` text the root actually saw for the `step`-th
+        `repl_exec` turn (0-based), i.e. what its own `print()`s produced."""
+        execs = [s for s in self._steps if s["action_type"] == "repl_exec"]
+        return execs[step]["observation_view"]
+
+    def root_system_prompt(self) -> str:
+        """The system message `/apply-template` actually received -- the
+        rendered prompt the root read, not the config that named it."""
+        kwargs = self.server.last_template_kwargs or {}
+        messages = kwargs.get("messages") or []
+        assert messages and messages[0].get("role") == "system", \
+            "no system message was sent -- call await env.run() first"
+        return messages[0]["content"]
+
     def blob(self, rel: str) -> bytes:
         return (Path(self.cfg.trace.blob_root) / rel).read_bytes()
 
@@ -1011,25 +1060,32 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
                 max_wall_clock_s=None, max_subcalls=None, max_total_tokens=None,
                 max_turns=None, leaf_fixtures=None, dispatcher=None,
                 leaf_port=None, process_manager=None, leaf_seed=None,
-                history_mode=None):
+                history_mode=None, cfg=None, no_subcalls=False):
         server = FakeRootServer(minimal_cfg_dict, script=root_script)
-        raw = _episode_cfg_dict(minimal_cfg_dict, tmp_path=tmp_path,
+        # `cfg`, when given (Task 9: `nosubcalls_cfg`), REPLACES the shipped
+        # config as the base -- its prompts are what the test wants rendered
+        # -- but still goes through `_episode_cfg_dict`'s overrides, so it
+        # gets the same fake root port and tmp trace store as every other
+        # `episode_env` run rather than the real ones from `config.yaml`.
+        base = cfg.model_dump(mode="json") if cfg is not None else minimal_cfg_dict
+        raw = _episode_cfg_dict(base, tmp_path=tmp_path,
                                  root_port=server.port, truncation_cap=truncation_cap,
                                  max_wall_clock_s=max_wall_clock_s,
                                  max_subcalls=max_subcalls,
                                  max_total_tokens=max_total_tokens,
                                  leaf_port=leaf_port, leaf_seed=leaf_seed,
                                  history_mode=history_mode)
-        cfg = Config.model_validate(raw)
+        validated_cfg = Config.model_validate(raw)
         task = Task(task_id="fixture-task", text=task_text, context=context,
                     category=category, answer=answer)
         env = _EpisodeEnv(
-            cfg=cfg, task=task,
+            cfg=validated_cfg, task=task,
             dispatcher=dispatcher or CannedDispatcher(
-                leaf_fixtures, parallel=cfg.scaffold.dispatch_concurrency),
+                leaf_fixtures, parallel=validated_cfg.scaffold.dispatch_concurrency),
             server=server,
             run_kwargs={"max_turns": max_turns,
-                        "process_manager": process_manager},
+                        "process_manager": process_manager,
+                        "no_subcalls": no_subcalls},
         )
         built.append(env)
         return env

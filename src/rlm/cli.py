@@ -1576,14 +1576,22 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
             reset_dispatcher_steps(rlm_dispatcher)
 
     async def rlm_nosubcalls_arm(task, cfg, *, bench_extra):
-        """Placeholder: the name is registered so `--arm rlm-nosubcalls`
-        resolves, but the ablation itself -- `run_episode(..., no_subcalls=True)`
-        refusing `llm_query` scaffold-side with a prompt that never mentions
-        it -- lands in Task 9. Raising here, rather than silently falling back
-        to `rlm_arm`, is deliberate: nobody should be able to run this arm and
-        get a real cell before its behaviour exists.
-        """
-        raise ConfigError("rlm-nosubcalls lands in Task 9")
+        """`rlm` with the sub-model removed: the paper's "RLM, no sub-calls"
+        ablation as a named arm (spec 2026-08-25-benchmark-v2-design.md §6).
+        Same dispatcher, same profile, readable `chunks`; `llm_query` is refused
+        scaffold-side and the prompt never mentions it. No `_virgin_resident_pool`:
+        this arm cannot touch the leaf."""
+        try:
+            return await run_episode(
+                task, cfg, dispatcher=rlm_dispatcher, trace=trace,
+                lifecycle=lifecycle, snapshot_extra={"bench": bench_extra},
+                process_manager=orchestra.episode_process_manager(),
+                scaffold_instance_id=scaffold_instance_id,
+                scaffold_git_sha=scaffold_git_sha,
+                benchmark_version=benchmark_version,
+                no_subcalls=True)
+        finally:
+            reset_dispatcher_steps(rlm_dispatcher)
 
     return {"rlm": rlm_arm, "rlm-restricted": rlm_restricted_arm,
             "rlm-nosubcalls": rlm_nosubcalls_arm,

@@ -222,6 +222,35 @@ async def test_a_non_string_chunk_is_refused_scaffold_side(episode_env):
     assert not [s for s in env.steps() if s["action_type"] == "llm_call"]
 
 
+@pytest.fixture
+def nosubcalls_cfg(minimal_cfg_dict, tmp_path):
+    """Local override of `conftest.py`'s `nosubcalls_cfg` (Task 7's probe for
+    the still-xfailed prompts test, deliberately unloadable): this one loads,
+    with throwaway strategy blocks under `tmp_path`. See
+    `checks/test_delegation_arm.py`'s twin fixture and
+    `conftest.loadable_nosubcalls_cfg`."""
+    from conftest import loadable_nosubcalls_cfg
+    return loadable_nosubcalls_cfg(minimal_cfg_dict, tmp_path)
+
+
+async def test_no_subcalls_refuses_before_admission_even_at_max_subcalls_zero(
+        episode_env, mock_server, nosubcalls_cfg):
+    """§5 C4's admission order, from the budget side of test_delegation_arm's
+    end-to-end refusal test: `max_subcalls=0` fails an ORDINARY call at
+    `admit()` with a BUDGET_KILL. Here the call never reaches `admit()` --
+    the refusal is raised first -- so a budget that could not admit even one
+    call still lets the episode reach `final_answer` and succeed."""
+    env = episode_env(root_script=[
+        "```repl\ntry:\n    await llm_query('Q?')\n"
+        "except Exception:\n    pass\nfinal_answer('done')\n```",
+    ], cfg=nosubcalls_cfg, no_subcalls=True, max_subcalls=0,
+       leaf_port=mock_server.port)
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert [s["status"] for s in calls] == ["rejected"]
+
+
 async def test_a_leaf_step_stores_its_rendered_request_like_a_root_turn(
         episode_env, mock_server):
     """§6's state-rule instrument, applied to the leaf. A gate-(a) failure is

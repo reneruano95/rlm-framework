@@ -111,6 +111,17 @@ SLOT_POOL_EXHAUSTED = "slot_pool_exhausted"
 #: C4 forbids, and the distinction that made rotation permissible at all.
 SLOT_POOL_ERROR_DRAINED = "slot_pool_error_drained"
 
+#: The `rlm-nosubcalls` arm's refusal message (spec 2026-08-25-benchmark-v2-
+#: design.md §6): raised BEFORE `count_tokens`/`admit`, so nothing is charged
+#: to `max_subcalls` -- the call never dispatched, so there is nothing for
+#: `max_subcalls` to have priced. The attempt is still on the record as a
+#: `rejected` step (C4's pre-flight-rejection shape), and the message is what
+#: the root sees in its own traceback -- it names the arm and the way out
+#: (`context`/`chunks` are still readable) rather than reading like a bug.
+NO_SUBCALLS_REFUSED = (
+    "llm_query is not available in this arm (rlm-nosubcalls): there is no "
+    "sub-model; solve in code over `context` and `chunks`")
+
 #: Termination guard on the rotate-and-retry loop for ONE call. A rotation
 #: frees a whole pool (`--parallel` slots), so a single call needs a second one
 #: only when other calls in the same wave took every slot first; needing 16 of
@@ -430,7 +441,8 @@ class _EpisodeRun:
                  benchmark_version: str | None,
                  process_manager: Any = None,
                  snapshot_extra: dict | None = None,
-                 restrict_chunks: bool = False) -> None:
+                 restrict_chunks: bool = False,
+                 no_subcalls: bool = False) -> None:
         self.task = task
         self.cfg = cfg
         #: Delegation arm: hand the sandbox opaque handles instead of chunk
@@ -438,6 +450,11 @@ class _EpisodeRun:
         #: this same runner serves S1 and S3, and the arm must be inert unless
         #: the bench asks for it.
         self.restrict_chunks = restrict_chunks
+        #: The `rlm-nosubcalls` arm: `llm_query` is refused scaffold-side
+        #: before admission, and the root's prompt never taught it the tool.
+        #: Defaults OFF for the same reason `restrict_chunks` does -- this
+        #: runner also serves S1 and S3, which must see no change at all.
+        self.no_subcalls = no_subcalls
         self._chunks: list[str] = []
         self.dispatcher = dispatcher
         # Who owns the leaf PROCESS (rlm.serve.serverproc.ProcessManager), or None
@@ -549,6 +566,20 @@ class _EpisodeRun:
         """
         payload = payload or {}
         question = payload.get("question")
+        # The rlm-nosubcalls arm: refused BEFORE `count_tokens`/`admit`, so
+        # nothing is charged to `max_subcalls` -- the call never dispatched.
+        # The attempt is still on the record as a `rejected` step (C4's
+        # pre-flight-rejection shape), and the message is what reaches the
+        # root's own traceback.
+        if self.no_subcalls:
+            idx = self._alloc()
+            self._put({"step_idx": idx, "parent_step_idx": self._parent_idx,
+                       "depth": 1, "actor": Actor.LEAF,
+                       "action_type": ActionType.LLM_CALL,
+                       "status": StepStatus.REJECTED, "call_id": str(uuid.uuid4()),
+                       "retry_idx": 0, "action_payload": question or "",
+                       "error_detail": NO_SUBCALLS_REFUSED})
+            raise RlmError(NO_SUBCALLS_REFUSED)
         chunk = payload.get("chunk")
         # Delegation arm: the cell passed a handle, so the text is resolved
         # HERE and never existed on the sandbox side.
@@ -973,7 +1004,8 @@ class _EpisodeRun:
             conv = RootConversation(root, cfg,
                                      system=self.registry.render_root(
                                          self.task.category,
-                                         restricted=self.restrict_chunks))
+                                         restricted=self.restrict_chunks,
+                                         no_subcalls=self.no_subcalls))
             # The clock is already running (it started before C2 chunking); the
             # watchdog is what makes it enforceable against a cell that never
             # returns.
@@ -1196,6 +1228,11 @@ class _EpisodeRun:
             "props": self.props,
             "chat_template_sha256": hashlib.sha256(
                 template.encode("utf-8")).hexdigest(),
+            # R11 for the rlm-nosubcalls arm, same argument as restrict_chunks:
+            # an arm invisible to the snapshot is an arm §8 cannot score. Kept
+            # top-level (not under "task") because it changes what PROMPT the
+            # root reads, not a fact about the task itself.
+            "no_subcalls": self.no_subcalls,
             "task": {
                 "task_id": self.task.task_id,
                 "text": self.task.text,
@@ -1307,7 +1344,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                        benchmark_version: str | None = None,
                        process_manager: Any = None,
                        snapshot_extra: dict | None = None,
-                       restrict_chunks: bool = False) -> EpisodeResult:
+                       restrict_chunks: bool = False,
+                       no_subcalls: bool = False) -> EpisodeResult:
     """Run ONE episode end to end and return its §6 outcome.
 
     `dispatcher`, `trace` and `lifecycle` are injected because their lifetimes
@@ -1351,7 +1389,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                            benchmark_version=benchmark_version,
                            process_manager=process_manager,
                            snapshot_extra=snapshot_extra,
-                           restrict_chunks=restrict_chunks)
+                           restrict_chunks=restrict_chunks,
+                           no_subcalls=no_subcalls)
         try:
             return await run.execute(manager, root)
         except asyncio.CancelledError:

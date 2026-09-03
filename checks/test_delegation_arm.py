@@ -15,10 +15,13 @@ import sys
 
 import pytest
 
+from rlm.errors import Outcome
 from rlm.measure.bench import ARM_ORDER, ARM_PROFILE, RESIDENT_PROFILE
 from rlm.episode import run_episode
 
 pytestmark_win = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+
+FINAL = "```repl\nfinal_answer('42')\n```"
 
 
 # --------------------------------------------------------------------------- #
@@ -233,3 +236,54 @@ def test_the_shared_wall_clock_is_untouched(valid_cfg):
     """rlm/b1/b2/b3 keep the pre-registered threshold; only the new arm differs,
     which is exactly why the difference has to be stated beside its margins."""
     assert valid_cfg.scaffold.budgets.max_wall_clock_s == 1300
+
+
+# --------------------------------------------------------------------------- #
+# Task 9: the rlm-nosubcalls arm -- llm_query refused before admission
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def nosubcalls_cfg(minimal_cfg_dict, tmp_path):
+    """Shadows `conftest.py`'s `nosubcalls_cfg` (Task 7's still-broken probe
+    for the xfailed prompts test) with one that actually LOADS: `default` and
+    `needle` get throwaway strategy blocks under `tmp_path` rather than Task
+    20's not-yet-authored files. See `conftest.loadable_nosubcalls_cfg`."""
+    from conftest import loadable_nosubcalls_cfg
+    return loadable_nosubcalls_cfg(minimal_cfg_dict, tmp_path)
+
+
+NOSUB_CELL = ("```repl\n"
+              "try:\n"
+              "    print(await llm_query('Q?', chunk=chunks[0]))\n"
+              "except Exception as e:\n"
+              "    print('REFUSED', type(e).__name__, str(e)[:60])\n"
+              "print(len(chunks), chunks[0][:20])\n"
+              "```")
+
+
+async def test_no_subcalls_refuses_llm_query_and_leaves_chunks_readable(
+        episode_env, mock_server, nosubcalls_cfg):
+    env = episode_env(root_script=[NOSUB_CELL, FINAL], answer="42",
+                      context="alpha beta gamma delta",
+                      leaf_port=mock_server.port, cfg=nosubcalls_cfg,
+                      dispatcher=mock_server.dispatcher(parallel=2, slot_pool=2),
+                      no_subcalls=True)
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    obs = env.observation(step=0)
+    assert "REFUSED RemoteError RlmError: llm_query is not available in this arm" in obs
+    assert mock_server.completion_count == 0            # nothing reached the leaf
+    calls = [s for s in env.steps() if s["action_type"] == "llm_call"]
+    assert [s["status"] for s in calls] == ["rejected"]
+    assert "not available in this arm" in calls[0]["error_detail"]
+    assert env.snapshot()["no_subcalls"] is True
+    assert env.episode_row()["outcome_reason"] is None    # no budget breach, nothing charged
+
+
+async def test_no_subcalls_renders_the_nosubcalls_prompt(
+        episode_env, mock_server, nosubcalls_cfg):
+    env = episode_env(root_script=[FINAL], answer="42", leaf_port=mock_server.port,
+                      cfg=nosubcalls_cfg, dispatcher=mock_server.dispatcher(), no_subcalls=True)
+    await env.run()
+    system = env.root_system_prompt()
+    assert "llm_query" not in system and "# Strategy" in system
