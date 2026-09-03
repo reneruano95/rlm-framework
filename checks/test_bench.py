@@ -21,6 +21,7 @@ from bench.manifest import BenchmarkManifest, TaskEntry
 
 from rlm.measure.bench import (
     ARM_ORDER,
+    ARM_PROFILE,
     BENCH_PROFILE,
     CONFIG_REFUSED,
     RESIDENT_PROFILE,
@@ -357,9 +358,9 @@ async def test_within_block_arm_order_is_pre_registered(tmp_path, bench_cfg_dict
     arms = FakeArms()
     ctx = _ctx(tmp_path, bench_cfg_dict, arms=arms)
     await run_block(build_blocks(ctx.manifest, [1])[0],
-                    ["b3", "b1", "rlm", "rlm-restricted", "b2"], ctx)
-    assert arms.order() == ["rlm", "rlm-restricted", "b2", "b1", "b3"]
-    assert ARM_ORDER == ("rlm", "rlm-restricted", "b2", "b1", "b3")
+                    ["b3", "b1", "rlm", "rlm-restricted", "rlm-nosubcalls", "b2"], ctx)
+    assert arms.order() == ["rlm", "rlm-restricted", "rlm-nosubcalls", "b2", "b1", "b3"]
+    assert ARM_ORDER == ("rlm", "rlm-restricted", "rlm-nosubcalls", "b2", "b1", "b3")
 
 
 async def test_requested_arms_are_filtered_and_keep_the_registered_order(
@@ -390,11 +391,12 @@ async def test_a_full_block_relaunches_the_leaf_at_most_twice(tmp_path, bench_cf
     assert swaps == [BENCH_PROFILE, RESIDENT_PROFILE, BENCH_PROFILE]
     assert len(swaps) <= 2 * len(blocks)
     # …and every arm ran under its own profile, both blocks.
-    # Three resident handshakes now, because `rlm-restricted` joined `rlm` and
-    # `b2` on that profile -- and the swap list above is UNCHANGED, which is the
-    # point: a resident arm costs a handshake, never a relaunch.
+    # Four resident handshakes now, because `rlm-restricted` and
+    # `rlm-nosubcalls` joined `rlm` and `b2` on that profile -- and the swap
+    # list above is UNCHANGED, which is the point: a resident arm costs a
+    # handshake, never a relaunch.
     assert hooks.kinds("handshake") == [RESIDENT_PROFILE, RESIDENT_PROFILE,
-                                        RESIDENT_PROFILE,
+                                        RESIDENT_PROFILE, RESIDENT_PROFILE,
                                         BENCH_PROFILE, BENCH_PROFILE] * 2
 
 
@@ -447,6 +449,11 @@ def test_only_the_rlm_arm_carries_its_own_arm_key():
     assert bench_extra("r", 3, 2, "b1") == {"run_id": "r", "block": 3, "seed": 2}
     assert bench_extra("r", 3, 2, "rlm") == {"run_id": "r", "block": 3, "seed": 2,
                                              "arm": "rlm"}
+
+
+def test_the_nosubcalls_arm_is_resident_and_stamps_its_own_arm_key():
+    assert ARM_PROFILE["rlm-nosubcalls"] == RESIDENT_PROFILE
+    assert bench_extra("r", 0, 1, "rlm-nosubcalls")["arm"] == "rlm-nosubcalls"
 
 
 async def test_each_episode_runs_under_its_own_seeded_config(tmp_path, bench_cfg_dict):
@@ -629,8 +636,9 @@ async def test_resume_skips_tuples_already_decided(tmp_path, bench_cfg_dict):
     ctx3 = _ctx(tmp_path, bench_cfg_dict, arms=third, ledger=ledger,
                 manifest=frozen_manifest())
     await run_bench(ctx3, arms=list(ARM_ORDER), blocks=blocks)
-    assert third.order() == ["rlm-restricted", "b1", "b3",
-                             "rlm-restricted", "b1", "b3"]  # only the new arms
+    assert third.order() == ["rlm-restricted", "rlm-nosubcalls", "b1", "b3",
+                             "rlm-restricted", "rlm-nosubcalls", "b1", "b3"
+                             ]  # only the new arms
 
 
 async def test_resume_runs_the_rerun_a_crashed_run_still_owed(tmp_path, bench_cfg_dict):
@@ -1537,8 +1545,9 @@ async def test_the_ledger_records_the_relaunch_each_cell_paid_for(
     ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), hooks=hooks)
     records = await run_block(build_blocks(ctx.manifest, [1])[0],
                               list(ARM_ORDER), ctx)
-    assert [r["arm"] for r in records] == ["rlm", "rlm-restricted", "b2", "b1", "b3"]
-    assert [r["relaunch_s"] for r in records] == [0.0, 0.0, 0.0, 7.25, 0.0]
+    assert [r["arm"] for r in records] == ["rlm", "rlm-restricted",
+                                           "rlm-nosubcalls", "b2", "b1", "b3"]
+    assert [r["relaunch_s"] for r in records] == [0.0, 0.0, 0.0, 0.0, 7.25, 0.0]
 
 
 async def test_a_hook_that_returns_nothing_still_ledgers_a_number(

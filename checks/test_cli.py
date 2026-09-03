@@ -1632,6 +1632,7 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
                               update_episode_metrics=lambda *a, **k: None),
         arm_runners={"rlm": _runner("rlm", resident),
                      "rlm-restricted": _runner("rlm-restricted", resident),
+                     "rlm-nosubcalls": _runner("rlm-nosubcalls", resident),
                      "b2": _runner("b2", resident),
                      "b1": _runner("b1", bench_leaf),
                      "b3": _runner("b3", bench_leaf)},
@@ -1645,12 +1646,13 @@ async def test_a_relaunched_bench_leaf_gets_a_virgin_slot_pool(tmp_path,
     for block in build_blocks(manifest, [1])[:2]:
         records += await run_block(block, list(ARM_ORDER), ctx)
 
-    assert len(records) == 10
+    assert len(records) == 12
     assert all(str(r["outcome"]) == "success" for r in records), \
         [(r["arm"], r["outcome"], r["reason"]) for r in records]
     # Block 2's B1/B3 are the cells the defect killed.
-    assert [(r["arm"], str(r["outcome"])) for r in records[5:]] == [
-        ("rlm", "success"), ("rlm-restricted", "success"), ("b2", "success"),
+    assert [(r["arm"], str(r["outcome"])) for r in records[6:]] == [
+        ("rlm", "success"), ("rlm-restricted", "success"),
+        ("rlm-nosubcalls", "success"), ("b2", "success"),
         ("b1", "success"), ("b3", "success")]
     # …and each rotation followed a real swap, in both directions.
     assert orchestra.swaps == ["bench", "resident", "bench"]

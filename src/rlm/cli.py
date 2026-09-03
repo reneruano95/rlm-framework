@@ -1557,7 +1557,18 @@ def bench_arm_runners(raw_cfg: dict, *, trace, lifecycle, orchestra, registry,
         finally:
             reset_dispatcher_steps(rlm_dispatcher)
 
+    async def rlm_nosubcalls_arm(task, cfg, *, bench_extra):
+        """Placeholder: the name is registered so `--arm rlm-nosubcalls`
+        resolves, but the ablation itself -- `run_episode(..., no_subcalls=True)`
+        refusing `llm_query` scaffold-side with a prompt that never mentions
+        it -- lands in Task 9. Raising here, rather than silently falling back
+        to `rlm_arm`, is deliberate: nobody should be able to run this arm and
+        get a real cell before its behaviour exists.
+        """
+        raise ConfigError("rlm-nosubcalls lands in Task 9")
+
     return {"rlm": rlm_arm, "rlm-restricted": rlm_restricted_arm,
+            "rlm-nosubcalls": rlm_nosubcalls_arm,
             "b2": b2_arm, "b1": b1_arm, "b3": b3_arm}
 
 
@@ -2184,8 +2195,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     b = common(sub.add_parser("bench", help="run §8's benchmark grid and score it"))
     b.add_argument("--arm", default=None,
-                   help="comma-separated subset of rlm,rlm-restricted,b1,b2,b3 (default: all "
-                        "five, always in §8's pre-registered within-block order)")
+                   help="comma-separated subset of "
+                        "rlm,rlm-restricted,rlm-nosubcalls,b1,b2,b3 (default: all "
+                        "six, always in §8's pre-registered within-block order)")
     b.add_argument("--seeds", default=None,
                    help="comma-separated base seeds (default: benchmark.seeds)")
     b.add_argument("--tasks", default=None,

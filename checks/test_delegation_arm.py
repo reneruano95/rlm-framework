@@ -29,7 +29,7 @@ pytestmark_win = pytest.mark.skipif(sys.platform != "win32", reason="Windows onl
 def test_the_restricted_arm_is_registered_next_to_rlm():
     """Adjacency is not cosmetic: both run on the RESIDENT profile, so placing
     them together is what keeps §8's two-relaunch-per-block bound intact."""
-    assert ARM_ORDER == ("rlm", "rlm-restricted", "b2", "b1", "b3")
+    assert ARM_ORDER == ("rlm", "rlm-restricted", "rlm-nosubcalls", "b2", "b1", "b3")
     assert ARM_PROFILE["rlm-restricted"] == RESIDENT_PROFILE
     assert ARM_PROFILE["rlm-restricted"] == ARM_PROFILE["rlm"]
 

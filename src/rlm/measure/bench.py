@@ -69,10 +69,14 @@ REPO_ROOT = find_repo_root()
 #: §8's pre-registered within-block order. RLM and B2 run on the resident
 #: topology; B1 and B3 share the one `bench_leaf` relaunch, on their own slots
 #: (the v0.2.6 correction: two documents on one slot is R13's smallest repro).
-#: `rlm-restricted` sits next to `rlm` deliberately: it runs on the RESIDENT
-#: profile too, so adding it costs no extra relaunch and §8's two-per-block
-#: bound is unchanged.
-ARM_ORDER: tuple[str, ...] = ("rlm", "rlm-restricted", "b2", "b1", "b3")
+#: `rlm-restricted` and `rlm-nosubcalls` sit next to `rlm` deliberately: both
+#: run on the RESIDENT profile too, so adding them costs no extra relaunch and
+#: §8's two-per-block bound is unchanged. `rlm-nosubcalls` is the paper's
+#: "RLM, no sub-calls" ablation: same dispatcher, same resident profile,
+#: readable `chunks`, but `llm_query` refused scaffold-side. Its runner lands
+#: in Task 9 -- this module only registers the name.
+ARM_ORDER: tuple[str, ...] = ("rlm", "rlm-restricted", "rlm-nosubcalls",
+                              "b2", "b1", "b3")
 
 #: The two server profiles a block moves between. Names, not configs: which
 #: flags each one launches with belongs to whoever owns the process (Task 10),
@@ -81,6 +85,7 @@ RESIDENT_PROFILE = "resident"
 BENCH_PROFILE = "bench"
 ARM_PROFILE: dict[str, str] = {"rlm": RESIDENT_PROFILE,
                                "rlm-restricted": RESIDENT_PROFILE,
+                               "rlm-nosubcalls": RESIDENT_PROFILE,
                                "b2": RESIDENT_PROFILE,
                                "b1": BENCH_PROFILE, "b3": BENCH_PROFILE}
 
@@ -216,13 +221,15 @@ def bench_extra(run_id: str, block: int, seed: int, arm: str) -> dict[str, Any]:
     """The identity this episode is scored by, as it lands in
     `config_snapshot["bench"]`.
 
-    `arm` is added for the RLM arm ONLY. `ArmEpisode.snapshot` writes
-    `{"arm": self.arm, **bench_extra}` itself, so a baseline that also carried
-    one would be asserting a fact the arm already owns; `run_episode` has no
-    arm concept at all, so the RLM arm's has to come from here.
+    `arm` is added for the arms that run through `run_episode`
+    (`rlm`, `rlm-restricted`, `rlm-nosubcalls`) ONLY. `ArmEpisode.snapshot`
+    writes `{"arm": self.arm, **bench_extra}` itself, so a baseline that also
+    carried one would be asserting a fact the arm already owns; `run_episode`
+    has no arm concept at all, so each of these arms' identity has to come
+    from here.
     """
     extra: dict[str, Any] = {"run_id": run_id, "block": block, "seed": seed}
-    if arm in ("rlm", "rlm-restricted"):
+    if arm in ("rlm", "rlm-restricted", "rlm-nosubcalls"):
         extra["arm"] = arm
     return extra
 
