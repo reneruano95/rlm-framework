@@ -10,3 +10,9 @@
 bench/corpora/** -text
 bench/tasks/** text eol=lf
 bench/manifest.json text eol=lf
+
+# Task 13: the vendored TREC label source. `bench.corpus_v2.load_trec()` refuses
+# if `trec_train.jsonl`'s sha256 drifts from the pinned `trec_train.sha256` --
+# same reasoning as bench/corpora/** above, so the same -text treatment.
+bench/sources/trec/trec_train.jsonl -text
+bench/sources/trec/trec_train.sha256 -text
