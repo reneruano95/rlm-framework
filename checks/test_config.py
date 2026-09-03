@@ -742,3 +742,22 @@ def test_history_mode_ships_raw_and_defaults_to_the_old_rule(minimal_cfg_dict):
     raw = copy.deepcopy(minimal_cfg_dict)
     del raw["scaffold"]["root"]["history_mode"]           # every pre-v0.3.16 snapshot
     assert Config.model_validate(raw).scaffold.root.history_mode == "prefix_plus_raw"
+
+
+def test_config_v2_pins_the_v2_prompts_and_names_the_v2_benchmark():
+    """config.v2.yaml (Task 21, spec D-B7): root and leaf are the SAME model, so
+    v2's comparison is not confounded by the cross-model split v1 shipped with.
+    This also checks the v2 prompts are the ones actually pinned (root.v4,
+    root-nosubcalls.v1, the three v2 strategy categories in both the ordinary
+    and nosubcalls sets) and that every pinned prompt's sha256 still matches the
+    file on disk."""
+    REPO = Path(__file__).resolve().parents[1]
+    cfg = load_config(REPO / "config.v2.yaml")
+    assert cfg.benchmark.version == "v2"
+    assert cfg.scaffold.prompts.root.path.name == "root.v4.md"
+    assert cfg.scaffold.prompts.root_nosubcalls.path.name == "root-nosubcalls.v1.md"
+    assert set(cfg.scaffold.prompts.strategy_templates) >= {"linear_semantic", "interactive", "code_solvable", "default"}
+    assert set(cfg.scaffold.prompts.strategy_templates_nosubcalls) == {"linear_semantic", "interactive", "code_solvable"}
+    assert cfg.servers.root.model == cfg.servers.leaf.model == cfg.servers.bench_leaf.model   # D-B7
+    for path, pin in cfg.pinned_prompt_hashes().items():
+        assert hashlib.sha256(resolve_prompt_path(Path(path)).read_bytes()).hexdigest() == pin
