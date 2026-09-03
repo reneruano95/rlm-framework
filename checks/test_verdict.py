@@ -24,6 +24,7 @@ from rlm.trace import TraceLogger
 from rlm.measure.verdict import (
     MARGIN_GATE,
     NARRATIVE_MARKER,
+    Grid,
     VerdictError,
     cost_scorecard,
     decide,
@@ -985,3 +986,64 @@ async def test_the_findings_section_names_every_finding(tmp_path):
     text = render_report(v, None, {})
     assert "pivot" in text.lower()
     assert "B2" in text
+
+
+# --------------------------------------------------------------------------- #
+# Task 3: `decide` reads its rules from the manifest (v1 unchanged)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def six_task_manifest_factory():
+    """`manifest_for(SIX_CATEGORIES)`, plus whatever `rules` block the test
+    wants -- a manifest with none is v1, exactly as `BenchmarkRules.for_manifest`
+    treats it."""
+    def factory(*, rules=None):
+        m = manifest_for(SIX_CATEGORIES)
+        m.rules = rules
+        return m
+    return factory
+
+
+def grid_with_passes(*, run_id: str = "run-1", seeds=(1, 2, 3),
+                      **arm_passes: int) -> Grid:
+    """A `Grid` built directly, no store: SIX_CATEGORIES' six tasks, and each
+    named arm passing the FIRST `n` of them (every seed True or False alike,
+    so `task_passes`'s >=2/3 rule reads the intended pass/fail cleanly)."""
+    task_ids = tuple(SIX_CATEGORIES)
+    cells: dict[tuple[str, str], tuple[bool, ...]] = {}
+    cell_seeds: dict[tuple[str, str], tuple[int, ...]] = {}
+    for arm, n_pass in arm_passes.items():
+        for i, t in enumerate(task_ids):
+            cells[(t, arm)] = tuple([i < n_pass] * len(seeds))
+            cell_seeds[(t, arm)] = tuple(seeds)
+    return Grid(run_id=run_id, task_ids=task_ids, arms=tuple(arm_passes),
+                seeds=tuple(seeds), required_seeds=tuple(seeds),
+                chunk_sizes=(32768,), cells=cells, cell_seeds=cell_seeds,
+                episode_ids={})
+
+
+def test_a_v2_manifest_scores_under_its_own_margin_and_baselines(six_task_manifest_factory):
+    """Same grid, two manifests: v1 rules need +3 against b1/b2/b3; a manifest
+    whose rules say margin 2 against rlm-nosubcalls and b2 passes at +2."""
+    m = six_task_manifest_factory(rules={"baselines": ["rlm-nosubcalls", "b2"],
+                                         "margin": 2, "escalation_band": [1, 2]})
+    grid = grid_with_passes(rlm=6, **{"rlm-nosubcalls": 4, "b2": 3})  # +2 and +3
+    v = decide(grid, m)
+    assert all(p.beats for p in v.pairs.values())
+    assert v.gate_pass is True
+    text = render_report(v, None, {})
+    assert "+2" in text and "+3-task threshold" not in text
+
+
+def test_v1_manifest_still_needs_plus_three(six_task_manifest_factory):
+    m = six_task_manifest_factory(rules=None)
+    grid = grid_with_passes(rlm=6, b1=4, b2=3, b3=3)   # +2, +3, +3
+    v = decide(grid, m)
+    assert v.pairs["b1"].beats is False and v.pairs["b2"].beats is True
+
+
+def test_needs_escalation_takes_the_band_from_rules():
+    from rlm.measure.stats import needs_escalation
+    assert needs_escalation(3) and not needs_escalation(3, band=(1, 2))
+    assert needs_escalation(2, band=(1, 2))

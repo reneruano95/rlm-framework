@@ -108,6 +108,14 @@ class VerdictError(RuntimeError):
     """The grid is not scoreable, or the record contradicts itself."""
 
 
+def _rules_for(manifest):
+    """§8's rules for THIS manifest. Lazy import: `bench` is the artifact, not
+    the package, and this module must not import it at module scope (`bench/`
+    is not in the shipped wheel -- see the module docstring)."""
+    from bench.rules import BenchmarkRules
+    return BenchmarkRules.for_manifest(manifest)
+
+
 # --------------------------------------------------------------------------- #
 # the grid
 # --------------------------------------------------------------------------- #
@@ -390,6 +398,11 @@ class Verdict:
     clean_pass: bool
     chunk_sizes: tuple[int, ...]
     escalated: bool
+    #: This verdict's `BenchmarkRules` (v1: the module defaults). `None` only
+    #: for a `Verdict` built by hand outside `decide` (e.g. `escalation.py`'s
+    #: rebuild-from-JSON path, which never stands in as `render_report`'s
+    #: `final`).
+    rules: Any = None
 
     @property
     def chunk_size(self) -> int | None:
@@ -413,6 +426,7 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
     manifest does not know is refused -- it is not in the frozen benchmark, so
     there is no category to score it under and no pre-registration covering it.
     """
+    rules = _rules_for(manifest)
     categories: dict[str, str] = {t.task_id: t.category for t in manifest.tasks}
     order = [t.task_id for t in manifest.tasks]
 
@@ -444,14 +458,14 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
     pairs: dict[str, PairResult] = {}
     plan: dict[str, tuple[str, ...]] = {}
 
-    rlm_present = RLM_ARM in grid.arms
+    rlm_present = rules.rlm_arm in grid.arms
     if not rlm_present:
         findings.append(Finding(
             "missing_arm", "the RLM arm did not run in this grid — there is no "
             "subject to decide, and the gate cannot pass"))
 
-    rlm_set = set(passes.get(RLM_ARM, ()))
-    for baseline in BASELINES:
+    rlm_set = set(passes.get(rules.rlm_arm, ()))
+    for baseline in rules.baselines:
         if baseline not in grid.arms:
             findings.append(Finding(
                 "missing_arm",
@@ -470,16 +484,16 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
         losses = tuple(t for t in tasks if t in base_set and t not in rlm_set)
         discordant = tuple(t for t in tasks if (t in rlm_set) != (t in base_set))
         margin = len(rlm_set) - len(base_set)
-        deltas = [scores[(RLM_ARM, t)] - scores[(baseline, t)] for t in tasks] \
+        deltas = [scores[(rules.rlm_arm, t)] - scores[(baseline, t)] for t in tasks] \
             if rlm_present else []
-        escalates = needs_escalation(margin)
+        escalates = needs_escalation(margin, band=rules.escalation_band)
         pairs[baseline] = PairResult(
             baseline=baseline, present=True, rlm_passes=len(rlm_set),
             baseline_passes=len(base_set), margin=margin,
             wins=len(wins), losses=len(losses), discordant=discordant,
             p=sign_test_p(len(wins), len(losses)), ci=_ci(deltas),
             mean_delta=(statistics.fmean(deltas) if deltas else None),
-            escalates=escalates, beats=margin >= MARGIN_GATE)
+            escalates=escalates, beats=margin >= rules.margin)
         # §8 escalates ONCE ("the sign test and bootstrap are recomputed once
         # on the final grid ... No other recomputation is permitted"), so a
         # grid that already carries seeds {4,5} plans nothing, however its
@@ -514,8 +528,8 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
                    for arm in grid.arms}
         rows.append(CategoryRow(category=cat, n_tasks=len(members),
                                  passes=per_arm))
-        rlm_score = per_arm.get(RLM_ARM, 0)
-        floored = [b for b in BASELINES if per_arm.get(b, 0) >= 3]
+        rlm_score = per_arm.get(rules.rlm_arm, 0)
+        floored = [b for b in rules.baselines if per_arm.get(b, 0) >= rules.tripwire_floor]
         if rlm_present and rlm_score == 0 and floored:
             findings.append(Finding(
                 "category_regression",
@@ -530,9 +544,9 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
         findings.append(Finding(
             "partial_grid",
             f"this grid scores {len(tasks)} of the manifest's "
-            f"{len(manifest.tasks)} tasks; the +{MARGIN_GATE}-task threshold is "
-            f"pre-registered at N=30, so a margin over a smaller N is not the "
-            f"pre-registered decision"))
+            f"{len(manifest.tasks)} tasks; the +{rules.margin}-task threshold is "
+            f"pre-registered at N={rules.n_tasks or len(manifest.tasks)}, so a "
+            f"margin over a smaller N is not the pre-registered decision"))
 
     if len(grid.chunk_sizes) != 1:
         findings.append(Finding(
@@ -541,7 +555,7 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
             f"{list(grid.chunk_sizes)}. S4 runs RLM, B2 and B3 at ONE untouched "
             f"config default, and a mixed grid compares arms tuned differently"))
 
-    gate = bool(rlm_present and all(pairs[b].beats for b in BASELINES))
+    gate = bool(rlm_present and all(pairs[b].beats for b in rules.baselines))
     clean = gate and not any(f.kind == "category_regression" for f in findings)
 
     return Verdict(
@@ -551,7 +565,7 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
         categories=tuple(rows), findings=tuple(findings),
         escalation_plan=plan, gate_pass=gate, clean_pass=clean,
         chunk_sizes=grid.chunk_sizes,
-        escalated=bool(grid.escalated_tasks))
+        escalated=bool(grid.escalated_tasks), rules=rules)
 
 
 # --------------------------------------------------------------------------- #
@@ -857,6 +871,10 @@ def _fmt_num(v: float | None, *, digits: int = 1, unit: str = "") -> str:
     return "null" if v is None else f"{v:,.{digits}f}{unit}"
 
 
+def _fmt_band(band: Sequence[int]) -> str:
+    return "{" + ", ".join(f"+{x}" for x in band) + "}"
+
+
 def _fmt_mult(v: float | None) -> str:
     return "n/a" if v is None else f"{v:.2f}x"
 
@@ -960,7 +978,7 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
           f" · {clean}{provisional}.", ""]
     # §8: "the S4 verdict states the p-value and CI next to the margin" -- so a
     # margin never appears alone, not even in the summary line.
-    for b in BASELINES:
+    for b in final.rules.baselines:
         pair = final.pairs.get(b)
         if pair is None:
             continue
@@ -974,7 +992,7 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
           "| pair | RLM tasks | baseline tasks | margin | sign test | "
           "bootstrap CI (95%) | discordant (w/l) | escalation band |",
           "|---|---|---|---|---|---|---|---|"]
-    for b in BASELINES:
+    for b in final.rules.baselines:
         pair = final.pairs.get(b)
         if pair is None:
             continue
@@ -986,7 +1004,7 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
             f"{'yes' if pair.escalates else 'no'} |")
     L.append("")
 
-    for b in BASELINES:
+    for b in final.rules.baselines:
         pair = final.pairs.get(b)
         if pair is None or not pair.present or pair.margin is None:
             continue
@@ -995,13 +1013,14 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
                      f"({_fmt_p(pair.p)}, {_fmt_ci(pair.ci)}) at "
                      f"{_cost_clause(scorecard, b)} vs {b.upper()}.")
         elif pair.margin > 0:
-            # §8 DEFINES "beats" as a margin of +3 at N=30. A smaller positive
-            # margin is a lead and nothing more -- calling it a win in prose
-            # while the gate calls it a failure is how a report ends up
-            # arguing with its own verdict.
+            # §8 DEFINES "beats" as a margin of +3 at N=30 (a manifest's own
+            # rules may set a different one). A smaller positive margin is a
+            # lead and nothing more -- calling it a win in prose while the
+            # gate calls it a failure is how a report ends up arguing with its
+            # own verdict.
             L.append(f"RLM leads {b.upper()} by {_fmt_margin(pair.margin)} tasks "
                      f"({_fmt_p(pair.p)}, {_fmt_ci(pair.ci)}) — **below the "
-                     f"+{MARGIN_GATE} threshold, so it does not beat "
+                     f"+{final.rules.margin} threshold, so it does not beat "
                      f"{b.upper()}** — at {_cost_clause(scorecard, b)} vs "
                      f"{b.upper()}.")
         elif pair.margin == 0:
@@ -1103,7 +1122,7 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
               "other recomputation is permitted.", "",
               "| pair | pre-escalation margin | pre p / CI | post-escalation "
               "margin | post p / CI |", "|---|---|---|---|---|"]
-        for b in BASELINES:
+        for b in escalated.rules.baselines:
             pre, post = verdict.pairs.get(b), escalated.pairs.get(b)
             if pre is None or post is None:
                 continue
@@ -1117,9 +1136,10 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
               f"final decision; the pre-escalation figures above are reported "
               f"because §8 requires both, not because either may be chosen.", ""]
     elif verdict.escalation_plan:
-        L += ["The net margin lands in the {+1, +2, +3} band against the "
-              "pair(s) below, so §8 owes seeds **{4, 5}** on **those pairs' "
-              "discordant tasks only**, re-decided at ≥3/5:", ""]
+        L += [f"The net margin lands in the "
+              f"{_fmt_band(verdict.rules.escalation_band)} band against the "
+              f"pair(s) below, so §8 owes seeds **{{4, 5}}** on **those pairs' "
+              f"discordant tasks only**, re-decided at ≥3/5:", ""]
         for b, tasks in verdict.escalation_plan.items():
             L.append(f"- **RLM vs {b.upper()}** "
                      f"({_fmt_margin(verdict.pairs[b].margin)}): "
@@ -1133,8 +1153,9 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
               "and permits no second recomputation, whatever the recomputed "
               "margins above land on.", ""]
     else:
-        L += ["No pair's margin lands in the {+1, +2, +3} band; no escalation "
-              "is owed and none may be run.", ""]
+        L += [f"No pair's margin lands in the "
+              f"{_fmt_band(final.rules.escalation_band)} band; no escalation "
+              f"is owed and none may be run.", ""]
 
     L += [NARRATIVE_MARKER, ""]
     return "\n".join(L)

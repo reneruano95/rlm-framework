@@ -43,6 +43,7 @@ def fractional_score(seed_results: Sequence[bool]) -> float:
     return sum(seed_results) / len(seed_results)
 
 
-def needs_escalation(margin: int) -> bool:
-    """Escalate iff the net margin lands in {+1,+2,+3} (ARCHITECTURE.md:343)."""
-    return margin in (1, 2, 3)
+def needs_escalation(margin: int, band: tuple[int, ...] = (1, 2, 3)) -> bool:
+    """Escalate iff the net margin lands in the pre-registered band (v1: {+1,+2,+3};
+    read from the manifest's rules since v2)."""
+    return margin in band
