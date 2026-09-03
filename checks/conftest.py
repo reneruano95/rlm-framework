@@ -169,6 +169,24 @@ async def session(manager, cfg: Config):
         yield s
 
 
+@pytest.fixture
+async def session_with_env_recorder(manager, cfg: Config):
+    """A session whose `env` handler records every `(kind, payload)` it was
+    asked and answers `[]` to all of them -- enough for the child-side tests
+    to assert what crossed the bridge, without building Task 12's real
+    `InteractiveIndex`."""
+    seen: list[tuple[str, dict]] = []
+
+    async def handler(payload: dict):
+        seen.append(("env", payload))
+        return []
+
+    async with manager.session("child-tests-env", cfg) as s:
+        s.on_llm_query(mock_llm_query)
+        s.on_env(handler)
+        yield s, seen
+
+
 # --------------------------------------------------------------------------- #
 # C4 dispatcher fixtures: `mock_server` is a REAL loopback HTTP server
 # (stdlib http.server, threaded) speaking the /tokenize + /completion (SSE)

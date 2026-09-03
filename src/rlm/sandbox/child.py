@@ -92,6 +92,8 @@ request is this module's message kind.
 
     child -> parent   handshake {"pid": int}      (the FIRST frame; D23)
                       llm_query {"prompt","role",...} -> reply is the answer
+                      env {"op":"search","term"} | {"op":"open","doc_id"} |
+                          {"op":"window","doc_id","i"} -> reply is the result
                       final_answer {"value": ...}
                       bye {}                       (last frame before _exit)
     parent -> child   setvar {"name","value"}
@@ -385,8 +387,9 @@ def _install_asyncio_stubs() -> None:
 # (Not the entire surface it can REACH: see ENFORCEMENT LAYERING in the module
 # docstring. This narrows one route; it does not close the class.)
 #
-# The two templates below are NEVER injected as written. `_build_injected()`
-# rebuilds them with `types.FunctionType` over a MINIMAL globals dict, because
+# The templates below (llm_query, final_answer, and env's three calls) are
+# NEVER injected as written. `_build_injected()` rebuilds them with
+# `types.FunctionType` over a MINIMAL globals dict, because
 # `f.__globals__` is readable and writable from any cell: injected as-is,
 # `final_answer.__globals__["_RESERVED"]["final_answer"] = ...` captures the
 # terminal channel and `..["llm_query"] = ..` intercepts the sub-call plumbing --
@@ -446,6 +449,22 @@ def _final_answer_template(value):
     return None
 
 
+async def _env_search_template(term):
+    """Locate. Returns hits -- document id, window index, offset -- never text.
+    The corpus behind `env` lives scaffold-side; this is the only way in."""
+    return await BRIDGE.request("env", {"op": "search", "term": term})
+
+
+async def _env_open_template(doc_id):
+    """Structure and length of one document -- window count, chars -- not content."""
+    return await BRIDGE.request("env", {"op": "open", "doc_id": doc_id})
+
+
+async def _env_window_template(doc_id, i):
+    """One bounded slice of one document. Capped scaffold-side like any observation."""
+    return await BRIDGE.request("env", {"op": "window", "doc_id": doc_id, "i": i})
+
+
 def _rebuild(template, name: str, namespace: dict):
     fn = types.FunctionType(template.__code__, namespace, name,
                             template.__defaults__, template.__closure__)
@@ -457,14 +476,18 @@ def _rebuild(template, name: str, namespace: dict):
 
 
 def _build_injected() -> tuple:
-    """(llm_query, final_answer) over a namespace that cannot reach this module."""
+    """(llm_query, final_answer, env) over a namespace that cannot reach this module."""
     ns = {"__builtins__": builtins, "__name__": "rlm_sandbox",
           "BRIDGE": BRIDGE, "LOOP": LOOP}
+    env = types.SimpleNamespace(
+        search=_rebuild(_env_search_template, "search", ns),
+        open=_rebuild(_env_open_template, "open", ns),
+        window=_rebuild(_env_window_template, "window", ns))
     return (_rebuild(_llm_query_template, "llm_query", ns),
-            _rebuild(_final_answer_template, "final_answer", ns))
+            _rebuild(_final_answer_template, "final_answer", ns), env)
 
 
-llm_query, final_answer = _build_injected()
+llm_query, final_answer, env = _build_injected()
 
 
 class AnswerGuard(dict):
@@ -552,6 +575,7 @@ _RESERVED: dict = {
     "llm_query": llm_query,
     "final_answer": final_answer,
     "answer": AnswerGuard(),
+    "env": env,
 }
 # Only these may be replaced by a parent `setvar`; the plumbing names cannot.
 _SETTABLE_RESERVED = frozenset({"context", "chunks"})

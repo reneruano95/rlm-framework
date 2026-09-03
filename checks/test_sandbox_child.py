@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from rlm.errors import SandboxError
+
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -239,3 +241,34 @@ async def test_gather_fanout_exits_cleanly(session):
     assert out.stdout.strip() == "8"
     code = await session.close()
     assert code == 0
+
+
+async def test_env_sends_closed_payloads_over_the_bridge(session_with_env_recorder):
+    s, seen = session_with_env_recorder      # handler records (kind, payload) and answers []
+    await s.exec_cell("print(await env.search('tithe'))\n"
+                      "print(await env.open('d-01'))\n"
+                      "print(await env.window('d-01', 3))\n")
+    assert seen == [("env", {"op": "search", "term": "tithe"}),
+                    ("env", {"op": "open", "doc_id": "d-01"}),
+                    ("env", {"op": "window", "doc_id": "d-01", "i": 3})]
+
+
+async def test_env_callables_reach_only_bridge_and_loop(session):
+    s = session
+    out = await s.exec_cell("print(sorted(k for k in env.search.__globals__ if not k.startswith('__')))")
+    assert out.stdout.strip() == "['BRIDGE', 'LOOP']"
+
+
+async def test_env_is_reserved_plumbing_and_reinjected(session):
+    s = session
+    await s.exec_cell("env = 'hijacked'")
+    out = await s.exec_cell("print(type(env).__name__)")
+    assert out.stdout.strip() == "SimpleNamespace"
+    with pytest.raises(SandboxError, match="plumbing"):
+        await s.setvar("env", 1)
+
+
+async def test_env_takes_no_extra_keywords(session):
+    s = session
+    out = await s.exec_cell("await env.search('x', limit=5)")
+    assert "TypeError" in out.traceback

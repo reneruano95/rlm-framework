@@ -88,6 +88,8 @@ async def test_frames_before_the_handshake_are_refused():
         await gate("llm_query", {"prompt": "sneak"})
     with pytest.raises(SandboxError, match="before the handshake"):
         await gate("final_answer", {"value": "sneak"})
+    with pytest.raises(SandboxError, match="before the handshake"):
+        await gate("env", {"op": "open", "doc_id": "d"})
     assert served == []
 
     assert await gate("handshake", {"pid": 1234}) is None

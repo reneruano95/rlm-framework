@@ -156,6 +156,7 @@ def _sandbox_cfg(cfg):
 
 LlmQueryHandler = Callable[[dict], Awaitable[object]]
 FinalAnswerHandler = Callable[[object], Awaitable[None]]
+EnvHandler = Callable[[dict], Awaitable[object]]
 
 
 class SandboxSession:
@@ -183,6 +184,7 @@ class SandboxSession:
         self._dead: SandboxError | None = None
         self._llm_query_handler: LlmQueryHandler | None = None
         self._final_answer_handler: FinalAnswerHandler | None = None
+        self._env_handler: EnvHandler | None = None
 
     # -- handler registration --------------------------------------------- #
 
@@ -195,6 +197,14 @@ class SandboxSession:
 
     def on_final_answer(self, handler: FinalAnswerHandler) -> None:
         self._final_answer_handler = handler
+
+    def on_env(self, handler: EnvHandler) -> None:
+        """`handler(payload) -> awaitable result` for the `env` verb's three
+        calls (`op` in `payload` is `search`/`open`/`window`). Task 12 owns the
+        real handler (`InteractiveIndex` + `_on_env`); this registration slot
+        and the `_serve` dispatch below are the minimal plumbing this task
+        needs so the child-side tests can exercise the frame end to end."""
+        self._env_handler = handler
 
     # -- the two things the scaffold pushes in ----------------------------- #
 
@@ -313,6 +323,11 @@ class SandboxSession:
                 raise SandboxError(
                     "no llm_query handler registered for this episode")
             return await self._llm_query_handler(payload)
+        if kind == "env":
+            if self._env_handler is None:
+                raise SandboxError(
+                    "no env handler registered for this episode")
+            return await self._env_handler(payload)
         if kind == "final_answer":
             value = (payload or {}).get("value")
             self.final_answers.append(value)
