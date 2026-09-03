@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from bench._cue_vocab import LABEL_NOUNS, WH_OPENERS, is_verb
+from bench._cue_vocab import LABEL_NOUNS, WH_OPENERS, cue_pattern, is_verb
 from bench.vocab import SYL_A, organisation
 
 TREC_LABELS = ("ABBR", "ENTY", "DESC", "HUM", "LOC", "NUM")
@@ -148,22 +148,18 @@ def _redact_cues(text: str) -> str:
     return re.sub(r"\s+", " ", _CUE_RE.sub("", text)).strip()
 
 
-# WORD-BOUNDED (fix round 2/5, overruling round 1's unbounded version).
-# Round 1 dropped the \b anchors so `_redact_cues` would mirror
-# `adversary._label_lexicon`'s loose substring counting exactly -- but that
-# also mangled unrelated words: "candidate" -> "candi", "mountainous" ->
-# "ous", "birthdate" -> "birth". The ruling: Task 18's `build_v2` already
-# REJECTS and reseeds any task whose parser adversary beats chance -- that
-# is a designed part of the pipeline, not a failure mode to route around by
-# degrading every corpus's text quality. Restoring word boundaries lets the
-# rare bad seed (~1.3% by measurement, see the fix-round-2 report) get
-# thrown away by the builder instead of every seed getting its prose
-# mangled to rescue that 1.3%.
-_CUE_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(w) for w in
-                        sorted({w for kws in LABEL_NOUNS.values() for w in kws},
-                              key=len, reverse=True)) + r")\b",
-    re.IGNORECASE)
+# WORD-BOUNDED, MORPHOLOGY-AWARE (fix round 3/5, building on round 2).
+# Round 1 dropped word boundaries entirely so `_redact_cues` would mirror
+# `adversary._label_lexicon`'s loose substring counting -- but that also
+# mangled unrelated words: "candidate" -> "candi", "mountainous" -> "ous",
+# "birthdate" -> "birth". Round 2 restored `\b` anchoring, which fixed that
+# but also stopped matching a cue word's own regular plural ("mountain"
+# inside "mountains") -- collateral, not the point of round 2's fix, and a
+# genuinely surviving cue: `_label_lexicon` has always counted "disease"
+# inside "diseases" with no boundary check of its own. `cue_pattern()`
+# (`bench/_cue_vocab.py`) completes the SAME entries' regular plural forms
+# and keeps the `\b` anchors -- no new nouns, no boundary dropped.
+_CUE_RE = cue_pattern()
 
 # Fixed, seeded template set (brief's exact wording) -- never random per call,
 # so the same seed always produces the same paraphrase for the same item.

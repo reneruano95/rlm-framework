@@ -30,6 +30,8 @@ head noun STARTS). One boundary, two readers.
 """
 from __future__ import annotations
 
+import re
+
 # --------------------------------------------------------------------------- #
 # Per-label keyword/phrase vocabulary -- what `_label_lexicon` scores
 # against, and what the register's cue-redaction pass removes.
@@ -50,6 +52,56 @@ LABEL_NOUNS: dict[str, tuple[str, ...]] = {
             "define", "meaning of", "what happens", "cause of"),
     "ABBR": ("abbreviation", "stand for", "acronym", "short for"),
 }
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 3: `_label_lexicon` scores by plain substring counting
+# (`ql.count(kw)`), which has always found "disease" inside "diseases" with
+# no boundary check at all -- a plural is not a new concept, it's the SAME
+# cue word the attacker already sees. Round 2 restored word-boundary
+# anchoring on the DEFENDER's side (`_redact_cues`) to stop matching a cue
+# substring inside an unrelated word ("date" inside "birthdate"), which
+# also stopped it matching a cue's own regular plural ("mountain" inside
+# "mountains") -- collateral, not the point of that fix. This completes the
+# existing entries' regular English forms (trailing "s", or "es" after
+# s/x/z/ch/sh, or "ies" after a consonant+y) so the redaction can still
+# find them WITH the boundary kept -- no new nouns, no boundary dropped.
+# --------------------------------------------------------------------------- #
+
+def _plural(word: str) -> str:
+    if word.endswith(("s", "x", "z", "ch", "sh")):
+        return word + "es"
+    if len(word) > 1 and word[-1] == "y" and word[-2].lower() not in "aeiou":
+        return word[:-1] + "ies"
+    return word + "s"
+
+
+def cue_words() -> frozenset[str]:
+    """Every `LABEL_NOUNS` entry, plus the regular English plural of each
+    single-word entry (a multi-word phrase like "how many" has no
+    singular/plural form to complete, so it's left as-is). Not a widened
+    vocabulary -- the same concepts `LABEL_NOUNS` already names, with their
+    existing forms completed."""
+    words: set[str] = set()
+    for kws in LABEL_NOUNS.values():
+        for w in kws:
+            words.add(w)
+            if " " not in w and w.isalpha():
+                words.add(_plural(w))
+    return frozenset(words)
+
+
+def cue_pattern() -> re.Pattern[str]:
+    """A single word-bounded, case-insensitive regex over `cue_words()` --
+    the one matcher both `corpus_v2._redact_cues` (removes a match) and any
+    future morphology-aware adversary strategy would consult, so the two
+    sides can't drift on WHAT counts as a match the way `LABEL_NOUNS` alone
+    already guarantees they can't drift on WHICH words are cues."""
+    return re.compile(
+        r"\b(?:" + "|".join(re.escape(w) for w in
+                            sorted(cue_words(), key=len, reverse=True)) + r")\b",
+        re.IGNORECASE)
+
 
 # --------------------------------------------------------------------------- #
 # Wh-openers. `_WH_RE` in `corpus_v2.py` builds the LEADING-position regex
@@ -110,5 +162,6 @@ def is_verb(word: str) -> bool:
     return bare.endswith("ed") and len(bare) > 3
 
 
-__all__ = ["LABEL_NOUNS", "WH_OPENERS", "AUX_WORDS", "IRREGULAR_PAST_VERBS",
-          "PRESENT_TENSE_VERBS", "is_verb"]
+__all__ = ["LABEL_NOUNS", "cue_words", "cue_pattern", "WH_OPENERS",
+          "AUX_WORDS", "IRREGULAR_PAST_VERBS", "PRESENT_TENSE_VERBS",
+          "is_verb"]
