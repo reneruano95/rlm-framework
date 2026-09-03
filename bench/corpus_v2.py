@@ -517,7 +517,14 @@ def build_interactive(seed: int, target_tokens: int,
     rng = random.Random(seed)
     paraphrase = True  # interactive tasks defend the same cue surface as the register (Task 16)
 
-    doc_ids = [f"d-{i + 1:02d}" for i in range(n_docs)]
+    # Zero-padded to the width `n_docs` itself needs (minimum 2, matching
+    # Task 12's own "d-NN" examples) -- NOT a fixed ":02d" -- so lexicographic
+    # order over `doc_ids` always agrees with numeric order, which is what
+    # `which_doc_has_most`'s `min()` tie-break below relies on. A fixed
+    # 2-digit pad would silently misorder past `n_docs=99` (d-100 sorts
+    # before d-11 lexicographically).
+    _id_width = max(2, len(str(n_docs)))
+    doc_ids = [f"d-{i + 1:0{_id_width}d}" for i in range(n_docs)]
     titles = [organisation(rng) for _ in range(n_docs)]
     headers = [f"=== DOCUMENT {d}: {t} ===\n" for d, t in zip(doc_ids, titles)]
     sep = "\n\n"
@@ -530,6 +537,11 @@ def build_interactive(seed: int, target_tokens: int,
         raise ValueError(f"unknown interactive question_kind: {question_kind!r}")
 
     question = _interactive_question_text(question_kind, target, n_docs)
+    # One `sep` reserved per header (`n_docs`), but `sep.join(blocks)` only
+    # ever emits `n_docs - 1` of them between bodies -- one token's worth of
+    # over-reservation per corpus, always safe (it can only under-fill the
+    # budget, never overflow it), so it is left as the simpler expression
+    # rather than threading a `- 1` through the sum.
     reserved = count(question + sep) + sum(count(h) + count(sep) for h in headers)
     record_budget_total = target_tokens - reserved
     if record_budget_total <= 0:

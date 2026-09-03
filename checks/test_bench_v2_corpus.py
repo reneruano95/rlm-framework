@@ -97,3 +97,25 @@ def test_pairs_question_is_quadratic_in_documents():
     maj = {d: Counter(i.label for i in c.items_by_doc[d]).most_common(1)[0][0] for d in c.doc_ids}
     pairs = sum(1 for a in range(6) for b in range(a + 1, 6) if maj[c.doc_ids[a]] == maj[c.doc_ids[b]])
     assert c.answer == str(pairs)
+
+
+def test_which_doc_has_most_answers_the_doc_id_with_the_highest_count():
+    c = build_interactive(9203, 40_000, approx_tokens, "approx-offline",
+                          question_kind="which_doc_has_most", items=load_trec(), n_docs=8)
+    per_doc_count = {d: sum(1 for i in c.items_by_doc[d] if i.label == c.target[0]) for d in c.doc_ids}
+    assert c.answer == min(d for d in c.doc_ids if per_doc_count[d] == max(per_doc_count.values()))
+    assert c.checker == "name_exact"
+
+
+def test_which_doc_has_most_breaks_a_tie_to_the_lowest_doc_id():
+    # A known seed/scale where three of four documents tie for the max count
+    # of the target label (verified offline: {'d-01': 2, 'd-02': 7, 'd-03':
+    # 7, 'd-04': 7}) -- the deterministic tie-break's only witness, since
+    # every other test scale happened not to produce a tie.
+    c = build_interactive(9200, 6_000, approx_tokens, "approx-offline",
+                          question_kind="which_doc_has_most", items=load_trec(), n_docs=4)
+    per_doc_count = {d: sum(1 for i in c.items_by_doc[d] if i.label == c.target[0]) for d in c.doc_ids}
+    top = max(per_doc_count.values())
+    tied = [d for d in c.doc_ids if per_doc_count[d] == top]
+    assert len(tied) > 1, "fixture drifted: seed 9200 no longer ties -- pick a new seed"
+    assert c.answer == min(tied)
