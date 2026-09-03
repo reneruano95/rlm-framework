@@ -1,10 +1,15 @@
 import pytest
 
 from pathlib import Path
-from bench.corpus_v2 import load_trec, TREC_LABELS, build_linear_semantic
+from bench.corpus_v2 import build_interactive, load_trec, TREC_LABELS, build_linear_semantic
 from bench.tokens import approx_tokens
+from rlm.context.chunker import ChunkConfig
+from rlm.context.interactive import InteractiveIndex
 
 REPO = Path(__file__).resolve().parents[1]
+
+CFG = ChunkConfig(size_tokens=640, overhead_tokens=1920, snap_to_boundary=True,
+                  snap_tolerance=0.10, stride_tokens=480)
 
 
 def test_the_vendored_label_source_is_pinned_and_shaped():
@@ -73,3 +78,22 @@ def test_most_common_label_fails_clearly_when_no_record_fits():
     items = load_trec()
     with pytest.raises(ValueError, match="too small to fit even one record"):
         build_linear_semantic(1, 75, approx_tokens, "approx-offline", question_kind="most_common_label", items=items)
+
+
+def test_interactive_corpus_is_many_documents_and_the_answer_needs_most_of_them():
+    c = build_interactive(9201, 40_000, approx_tokens, "approx-offline",
+                          question_kind="count_label_across_docs", items=load_trec(), n_docs=8)
+    assert len(c.doc_ids) == 8 and c.text.count("=== DOCUMENT ") == 8
+    ix = InteractiveIndex.from_text(c.text, CFG, approx_tokens)
+    assert set(ix.docs) == set(c.doc_ids)
+    assert c.answer == str(sum(1 for d in c.doc_ids for i in c.items_by_doc[d] if i.label == c.target[0]))
+    assert c.reference_actions >= 8 + 8                # at least one open and one window per doc
+
+
+def test_pairs_question_is_quadratic_in_documents():
+    c = build_interactive(9202, 40_000, approx_tokens, "approx-offline",
+                          question_kind="pairs_docs_sharing_label_majority", items=load_trec(), n_docs=6)
+    from collections import Counter
+    maj = {d: Counter(i.label for i in c.items_by_doc[d]).most_common(1)[0][0] for d in c.doc_ids}
+    pairs = sum(1 for a in range(6) for b in range(a + 1, 6) if maj[c.doc_ids[a]] == maj[c.doc_ids[b]])
+    assert c.answer == str(pairs)

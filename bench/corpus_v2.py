@@ -397,3 +397,217 @@ def build_linear_semantic(seed: int, target_tokens: int,
         question_kind=question_kind, target=target, answer=answer,
         checker=checker, seed=seed, measured_tokens=count(full_text),
         counter_name=counter_name, retries=retries)
+
+
+# --------------------------------------------------------------------------- #
+# `interactive`: many documents behind the `env` verb (spec §14). `context`
+# and `chunks` stay empty in the sandbox; the root navigates via `env.search`
+# / `env.open` / `env.window`, served by `rlm.context.interactive.
+# InteractiveIndex` (Task 12) scaffold-side. This builder emits `.text` in
+# that module's exact `=== DOCUMENT d-NN: <title> ===` grammar (`DOC_DELIM`
+# / `_HEADER`) and records `reference_actions`, the optimal navigator's `env`
+# op count, so the run has a yardstick to score against.
+#
+# `bench/corpus_v2.py` stays free of any `src/rlm` import at module scope
+# (matching the rest of `bench/` -- `bench.rules` carries none, and this
+# module itself never has) -- `ChunkConfig`/`split` are imported LOCALLY,
+# inside `build_interactive`, only to size `reference_actions`.
+# --------------------------------------------------------------------------- #
+
+#: The chunk geometry `reference_actions` is measured against -- the same
+#: values `checks/test_adversary.py`'s `CFG` and `checks/test_chunker.py`'s
+#: `PRODUCTION` use, i.e. the production `scaffold.chunk` shape (Task 15's
+#: helper measures the same corpus against the same numbers).
+_INTERACTIVE_CHUNK_CFG_ARGS = dict(
+    size_tokens=640, overhead_tokens=1920, snap_to_boundary=True,
+    snap_tolerance=0.10, stride_tokens=480)
+
+
+@dataclass
+class InteractiveCorpus:
+    text: str                      # "=== DOCUMENT d-NN: <coined title> ===" blocks
+    doc_ids: list[str]
+    items_by_doc: dict[str, list[Item]]
+    question_kind: str             # "count_label_across_docs" | "which_doc_has_most" | "pairs_docs_sharing_label_majority"
+    target: tuple[str, ...]
+    answer: str
+    checker: str
+    reference_actions: int         # optimal env ops: open(d) + window(d, i) per necessary window + search(title) per doc
+    seed: int
+    measured_tokens: int
+    counter_name: str
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+
+
+def _interactive_question_text(question_kind: str, target: tuple[str, ...], n_docs: int) -> str:
+    preamble = (f"This corpus is a set of {n_docs} registers, each behind its "
+                f"own document id. Each record in every register files one "
+                f"Query. ")
+    if question_kind == "which_doc_has_most":
+        return (preamble + f"Which register's document id has the most records "
+                f"whose Query asks about a {LABEL_DESCRIPTION[target[0]]}? "
+                f"Reply with the document id only, nothing else.")
+    if question_kind == "pairs_docs_sharing_label_majority":
+        return (preamble + "Each register's most-common kind of Query is that "
+                "register's majority kind. How many pairs of registers have "
+                "the same most-common kind of Query? Reply with the integer "
+                "only, nothing else.")
+    return (preamble + f"Count, across ALL registers together, the records "
+            f"whose Query asks about a {LABEL_DESCRIPTION[target[0]]}. Reply "
+            f"with the integer only, nothing else.")
+
+
+def _sample_document(rng: random.Random, seed: int, pool: list[Item], cursor: int,
+                     budget: int, count: Callable[[str], int], *,
+                     paraphrase: bool) -> tuple[str, list[Item], list[str], int]:
+    """One document's worth of records, grown from `pool` starting at
+    `cursor` (without replacement, continuing where the previous document
+    left off) until the next record would overshoot `budget` -- the same
+    grow-then-drop shape as `_sample_register`, just fed from a shared
+    cursor instead of the whole pool, so record indices (and therefore
+    `ref` ids) stay unique across every document in the corpus."""
+    parts: list[str] = []
+    sampled: list[Item] = []
+    record_ids: list[str] = []
+    running = 0
+    while cursor < len(pool):
+        item = pool[cursor]
+        rec = "\n" + _record(rng, seed, cursor, item, paraphrase=paraphrase)
+        n = count(rec)
+        if running + n > budget:
+            break
+        parts.append(rec)
+        sampled.append(item)
+        record_ids.append(f"ENT-5{seed % 10:01d}{cursor:05d}")
+        running += n
+        cursor += 1
+    body = "".join(parts).lstrip("\n")
+    while parts and count(body) > budget:
+        parts.pop()
+        sampled.pop()
+        record_ids.pop()
+        body = "".join(parts).lstrip("\n")
+    return body, sampled, record_ids, cursor
+
+
+def build_interactive(seed: int, target_tokens: int,
+                      count: Callable[[str], int], counter_name: str,
+                      *, question_kind: str, items: list[Item],
+                      n_docs: int = 12) -> InteractiveCorpus:
+    """A corpus of `n_docs` independent registers, each its own document
+    behind `env.open`/`env.search`/`env.window` (Task 12's `InteractiveIndex`).
+    Every document is guaranteed non-empty, so every question -- summing a
+    label across all registers, picking the register with the most of a
+    label, or counting pairs of registers sharing a majority label -- needs
+    at least one record from every document: no shortcut through a subset
+    exists. `reference_actions` is the optimal navigator's op count: one
+    `open` and one `search` per document, plus one `window` per window that
+    holds a necessary record (computed with the real C2 chunker per
+    document, the same technique Task 15's `self_read_adversary` uses).
+
+    THE BUDGET IS STRUCTURAL, same discipline as `build_linear_semantic`:
+    the question text and every document's header are reserved up front
+    (`count` is monotone and ceil-subadditive), and each document is then
+    grown against its own even share of what remains -- so no corpus this
+    function returns can be reported over `target_tokens`.
+    """
+    rng = random.Random(seed)
+    paraphrase = True  # interactive tasks defend the same cue surface as the register (Task 16)
+
+    doc_ids = [f"d-{i + 1:02d}" for i in range(n_docs)]
+    titles = [organisation(rng) for _ in range(n_docs)]
+    headers = [f"=== DOCUMENT {d}: {t} ===\n" for d, t in zip(doc_ids, titles)]
+    sep = "\n\n"
+
+    if question_kind in ("count_label_across_docs", "which_doc_has_most"):
+        target: tuple[str, ...] = (rng.choice(TREC_LABELS),)
+    elif question_kind == "pairs_docs_sharing_label_majority":
+        target = ()
+    else:
+        raise ValueError(f"unknown interactive question_kind: {question_kind!r}")
+
+    question = _interactive_question_text(question_kind, target, n_docs)
+    reserved = count(question + sep) + sum(count(h) + count(sep) for h in headers)
+    record_budget_total = target_tokens - reserved
+    if record_budget_total <= 0:
+        raise ValueError(
+            f"target_tokens={target_tokens} cannot fit the {question_kind!r} "
+            f"question and {n_docs} document headers alone ({reserved} "
+            f"tokens reserved for them)")
+    per_doc_budget = record_budget_total // n_docs
+    if per_doc_budget <= 0:
+        raise ValueError(
+            f"target_tokens={target_tokens} leaves {record_budget_total} "
+            f"tokens for {n_docs} documents, too few for even one record "
+            f"per document")
+
+    pool = rng.sample(items, k=len(items))
+    cursor = 0
+    bodies: list[str] = []
+    items_by_doc: dict[str, list[Item]] = {}
+    record_ids_by_doc: dict[str, list[str]] = {}
+    for d in doc_ids:
+        body, sampled, record_ids, cursor = _sample_document(
+            rng, seed, pool, cursor, per_doc_budget, count, paraphrase=paraphrase)
+        if not sampled:
+            raise ValueError(
+                f"document {d!r} got no records out of a {per_doc_budget}-token "
+                f"budget -- target_tokens={target_tokens} is too small for "
+                f"n_docs={n_docs}, or the item pool ran out")
+        bodies.append(body)
+        items_by_doc[d] = sampled
+        record_ids_by_doc[d] = record_ids
+
+    blocks = [headers[i] + bodies[i] for i in range(n_docs)]
+    text = question + sep + sep.join(blocks)
+
+    if question_kind == "count_label_across_docs":
+        answer = str(sum(1 for d in doc_ids for i in items_by_doc[d] if i.label == target[0]))
+        checker = "int_exact"
+    elif question_kind == "which_doc_has_most":
+        per_doc_count = {d: sum(1 for i in items_by_doc[d] if i.label == target[0]) for d in doc_ids}
+        top = max(per_doc_count.values())
+        # Deterministic tie-break: the lowest doc_id among the docs tied for
+        # the max, since `doc_ids` is already generated in a fixed d-01..
+        # d-NN order -- not a re-sample loop like `most_common_label`'s,
+        # because re-sampling here would also have to re-derive every other
+        # document's data.
+        answer = min(d for d in doc_ids if per_doc_count[d] == top)
+        checker = "name_exact"
+    else:  # pairs_docs_sharing_label_majority
+        # Per-document majority label, tie broken by first-appearance order
+        # within that document -- `Counter.most_common(1)[0][0]`'s own
+        # stable behaviour, not a second, label-alphabetical rule that would
+        # only coincidentally agree with it. Kept exactly this way (rather
+        # than picking, say, the alphabetically-first label on a tie) so the
+        # answer is reproducible from `items_by_doc` alone, by the same
+        # expression, forever -- which is also what the test computes
+        # independently to check against.
+        majority = {d: Counter(i.label for i in items_by_doc[d]).most_common(1)[0][0]
+                    for d in doc_ids}
+        answer = str(sum(1 for a in range(n_docs) for b in range(a + 1, n_docs)
+                         if majority[doc_ids[a]] == majority[doc_ids[b]]))
+        checker = "int_exact"
+
+    from rlm.context.chunker import ChunkConfig, split  # local: no src/rlm import at module scope
+    chunk_cfg = ChunkConfig(**_INTERACTIVE_CHUNK_CFG_ARGS)
+    bodies_by_doc = dict(zip(doc_ids, bodies))
+    necessary_windows = 0
+    for d in doc_ids:
+        windows = split(bodies_by_doc[d], chunk_cfg, count)
+        necessary: set[int] = set()
+        for rid in record_ids_by_doc[d]:
+            for i, w in enumerate(windows):
+                if w.find(rid) != -1:
+                    necessary.add(i)
+        necessary_windows += len(necessary)
+    reference_actions = n_docs + necessary_windows + n_docs  # opens + windows + searches
+
+    return InteractiveCorpus(
+        text=text, doc_ids=doc_ids, items_by_doc=items_by_doc,
+        question_kind=question_kind, target=target, answer=answer,
+        checker=checker, reference_actions=reference_actions, seed=seed,
+        measured_tokens=count(text), counter_name=counter_name)
