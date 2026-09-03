@@ -279,6 +279,47 @@ async def test_an_env_call_step_round_trips_through_the_store(tmp_path):
         await tl.aclose()
 
 
+# --------------------------------------------------------------------------- #
+# Task 12: `close_episode`'s `config_snapshot` -- `env_actions` is only known
+# once the episode is over, so it has to be re-written at close, not left as
+# the 0 `open_episode` recorded.
+# --------------------------------------------------------------------------- #
+
+
+async def test_close_episode_updates_config_snapshot_when_supplied(tmp_path):
+    ep = str(uuid.uuid4())
+    tl = TraceLogger(tmp_path / "t.duckdb", tmp_path / "blobs")
+    await tl.start()
+    try:
+        tl.open_episode(_episode_row(ep, config_snapshot={"env_actions": 0}))
+        tl.close_episode(ep, Outcome.SUCCESS, None, None,
+                          config_snapshot={"env_actions": 2, "interactive": True})
+        await tl.drain()
+        row = tl.monitor().execute(
+            "SELECT config_snapshot FROM episodes WHERE episode_id = ?", [ep]).fetchone()
+        assert json.loads(row[0]) == {"env_actions": 2, "interactive": True}
+    finally:
+        await tl.aclose()
+
+
+async def test_close_episode_leaves_config_snapshot_alone_by_default(tmp_path):
+    """Every OTHER `close_episode` caller passes no `config_snapshot` at all
+    -- the column must come back exactly as `open_episode` wrote it, the same
+    "supplied columns only" contract `update_episode_metrics` already has."""
+    ep = str(uuid.uuid4())
+    tl = TraceLogger(tmp_path / "t.duckdb", tmp_path / "blobs")
+    await tl.start()
+    try:
+        tl.open_episode(_episode_row(ep, config_snapshot={"untouched": True}))
+        tl.close_episode(ep, Outcome.SUCCESS, None, None)
+        await tl.drain()
+        row = tl.monitor().execute(
+            "SELECT config_snapshot FROM episodes WHERE episode_id = ?", [ep]).fetchone()
+        assert json.loads(row[0]) == {"untouched": True}
+    finally:
+        await tl.aclose()
+
+
 @pytest.fixture
 def v1_store_path(tmp_path):
     """A store built from the schema as it stood before the env_call migration

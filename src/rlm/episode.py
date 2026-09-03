@@ -53,7 +53,7 @@ import json
 import os
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +78,8 @@ from rlm.errors import (
 )
 from rlm.serve.rootclient import RootConversation
 from rlm.sandbox.manager import SandboxManager
-from rlm.context.truncate import observation_view
+from rlm.context.truncate import observation_view, truncate_view
+from rlm.context.interactive import InteractiveIndex
 
 # The kill code every scaffold-initiated TerminateJobObject carries. D10: an
 # exit code is not an outcome channel -- `outcome_reason` comes from the kill
@@ -442,9 +443,27 @@ class _EpisodeRun:
                  process_manager: Any = None,
                  snapshot_extra: dict | None = None,
                  restrict_chunks: bool = False,
-                 no_subcalls: bool = False) -> None:
+                 no_subcalls: bool = False,
+                 interactive: bool = False) -> None:
         self.task = task
         self.cfg = cfg
+        #: The `interactive` category (benchmark v2 §14): `context` and
+        #: `chunks` stay empty in the sandbox and the corpus lives behind
+        #: `self._index` instead, reached only through `env.search`/`open`/
+        #: `window` (`_on_env`, below). Defaults OFF for the reason every
+        #: other arm flag does -- this runner also serves every category that
+        #: is not interactive, and it must see no change at all.
+        self.interactive = interactive
+        #: Built in `execute()`, once the corpus is loaded -- `None` until
+        #: then and for every non-interactive episode, which is exactly what
+        #: `_on_env` checks to refuse the verb outside this category.
+        self._index: InteractiveIndex | None = None
+        #: One count per accepted `env` call (search/open/window), independent
+        #: of `max_subcalls` -- `env` never dispatches to a leaf, so C5's
+        #: sub-call budget has nothing to do with it. Recorded in the snapshot
+        #: so a scoring query can see how much an interactive episode actually
+        #: explored.
+        self._env_actions = 0
         #: Delegation arm: hand the sandbox opaque handles instead of chunk
         #: text, so `llm_query` is the only route to content. Defaults OFF --
         #: this same runner serves S1 and S3, and the arm must be inert unless
@@ -505,6 +524,16 @@ class _EpisodeRun:
         # the terminal `final` step can name its parent's already-written blob.
         self._turn_meta: dict[int, dict[str, str]] = {}
         self._finished = asyncio.Event()
+        # Cached at the end of C2 (`execute()`) so `_close()`/`record_abort()`
+        # can re-derive a FINAL `config_snapshot` -- `env_actions` is the one
+        # field that changes after `open_episode` already wrote a snapshot,
+        # and re-running `_snapshot()` is the only way the row ends up
+        # carrying the count the episode actually made rather than the 0 it
+        # had before its first turn. `None` until C2 runs, which is also
+        # exactly when there is no open episode row yet to update.
+        self._snapshot_context_text: str | None = None
+        self._snapshot_chunks: list[str] | None = None
+        self._snapshot_chunk_ms: float = 0.0
 
     # -- step bookkeeping ---------------------------------------------------- #
 
@@ -892,6 +921,100 @@ class _EpisodeRun:
                 blobs["observation_full_ref"] = answer.encode("utf-8", "replace")
             self._put(row, blobs or None)
 
+    async def _on_env(self, payload: dict) -> object:
+        """The `env` verb's three calls (search/open/window), served entirely
+        HERE, over `self._index` (I1/I2): the corpus behind an interactive
+        episode never crosses into the sandbox, and every value that DOES
+        cross is truncated scaffold-side exactly like any other observation
+        (`cfg.scaffold.truncation_cap_chars`), the same C3 the REPL's own
+        output goes through.
+
+        Every call -- accepted or refused -- writes exactly one `ENV_CALL`
+        step (`actor=root, depth=0`, parented to the `repl_exec` that is
+        running), matching `_on_llm_query`'s scaffold-side validation pattern
+        (`episode.py`, above): types are checked here, not discovered as a
+        `TypeError` inside the index, so the message reaches the emitting
+        cell rather than reading like a scaffold bug.
+        """
+        payload = payload or {}
+        idx = self._alloc()
+        cap = self.cfg.scaffold.truncation_cap_chars
+
+        def _write_error(exc: Exception) -> None:
+            self._put({"step_idx": idx, "parent_step_idx": self._parent_idx,
+                       "depth": 0, "actor": Actor.ROOT,
+                       "action_type": ActionType.ENV_CALL,
+                       "status": StepStatus.ERROR,
+                       "action_payload": json.dumps(payload),
+                       "observation_view": truncate_view(str(exc), cap),
+                       "error_detail": str(exc)})
+
+        if self._index is None:
+            exc = RlmError("env is not available for this task")
+            _write_error(exc)
+            raise exc
+
+        op = payload.get("op")
+        try:
+            if op == "search":
+                term = payload.get("term")
+                if not isinstance(term, str):
+                    raise RlmError(
+                        f"env.search(term=...) must be a string, got "
+                        f"{type(term).__name__}")
+                result: object = [asdict(h) for h in self._index.search(term)]
+                text = json.dumps(result)
+            elif op == "open":
+                doc_id = payload.get("doc_id")
+                if not isinstance(doc_id, str):
+                    raise RlmError(
+                        f"env.open(doc_id=...) must be a string, got "
+                        f"{type(doc_id).__name__}")
+                result = self._index.open(doc_id)
+                text = json.dumps(result)
+            elif op == "window":
+                doc_id = payload.get("doc_id")
+                i = payload.get("i")
+                if not isinstance(doc_id, str):
+                    raise RlmError(
+                        f"env.window(doc_id=...) must be a string, got "
+                        f"{type(doc_id).__name__}")
+                if not isinstance(i, int) or isinstance(i, bool):
+                    raise RlmError(
+                        f"env.window(i=...) must be an integer, got "
+                        f"{type(i).__name__}")
+                text = self._index.window(doc_id, i)
+                result = text
+            else:
+                raise RlmError(
+                    f"env(op={op!r}) is not a known operation; expected "
+                    "search, open, or window")
+        except (KeyError, IndexError) as exc:
+            wrapped = RlmError(f"env({op}): {exc}")
+            _write_error(wrapped)
+            raise wrapped from exc
+        except RlmError as exc:
+            _write_error(exc)
+            raise
+
+        view = truncate_view(text, cap)
+        self._put({"step_idx": idx, "parent_step_idx": self._parent_idx,
+                   "depth": 0, "actor": Actor.ROOT,
+                   "action_type": ActionType.ENV_CALL, "status": StepStatus.OK,
+                   "action_payload": json.dumps(payload), "observation_view": view})
+        self._env_actions += 1
+        # `window` is the one call that carries corpus TEXT, so the value the
+        # cell receives is the SAME capped string the trace just recorded --
+        # a root that reads `len(await env.window(...))` sees the real
+        # bound. `search`/`open` are already small and bounded on their own
+        # (`max_hits`, four short fields); re-deriving their return value
+        # from the truncated log text would make an ordinary search corrupt
+        # into invalid JSON the moment its hit count pushed the cap, so they
+        # return the untruncated structured `result` -- the cap still
+        # governs what the TRACE stores about the call, just not what the
+        # cell receives back for these two.
+        return view if op == "window" else result
+
     async def _on_final_answer(self, value: Any) -> None:
         """THE ONLY PLACE AN ANSWER IS EVER ACCEPTED.
 
@@ -943,7 +1066,16 @@ class _EpisodeRun:
                                  # `context` remains the only non-repeating
                                  # view of the corpus.
                                  stride_tokens=cfg.scaffold.chunk.stride_tokens)
-        chunks = await asyncio.to_thread(split, context_text, chunk_cfg, counter)
+        if self.interactive:
+            # I2: the interactive category keeps its corpus scaffold-side --
+            # `self._index` windows each document with the SAME C2 chunker
+            # `chunks` would use, but `chunks` itself stays empty (below);
+            # the root reaches the corpus only through `env` (`_on_env`).
+            self._index = await asyncio.to_thread(
+                InteractiveIndex.from_text, context_text, chunk_cfg, counter)
+            chunks: list[str] = []
+        else:
+            chunks = await asyncio.to_thread(split, context_text, chunk_cfg, counter)
         # R13 detection (§5 C4): C4 holds the corpus so it can run the
         # foreign-string check on every leaf answer -- an identifier absent
         # from the chunk that was sent and present in another chunk is a leak,
@@ -960,6 +1092,9 @@ class _EpisodeRun:
         # allow-listed lifecycle kind covers it, and inventing one would make
         # the log the second source of truth it exists not to be.
         chunk_ms = round((time.perf_counter() - t_chunk) * 1000, 1)
+        self._snapshot_context_text = context_text
+        self._snapshot_chunks = chunks
+        self._snapshot_chunk_ms = chunk_ms
 
         async with manager.session(self.episode_id, cfg) as session:
             self.session = session
@@ -987,14 +1122,26 @@ class _EpisodeRun:
 
             session.on_llm_query(self._on_llm_query)
             session.on_final_answer(self._on_final_answer)
+            # Registered unconditionally -- `_on_env` itself refuses the verb
+            # outside an interactive task (`self._index is None`), which is
+            # what makes `env is not available for this task` the message a
+            # non-interactive cell actually sees, rather than manager.py's
+            # generic "no env handler registered" (that branch exists only
+            # for a session nobody ever wires up at all).
+            session.on_env(self._on_env)
 
             # I2: the corpus crosses into the sandbox HERE and nowhere else.
             # In the delegation arm it does not cross at all: `chunks` becomes a
             # count the child turns into opaque handles, and `context` is
             # withheld, because leaving the whole corpus readable would make the
             # handles decorative. `llm_query` is then the only route to content,
-            # which is the thing that arm exists to price.
-            if self.restrict_chunks:
+            # which is the thing that arm exists to price. The interactive
+            # category withholds it the same way, for the same reason: `env`
+            # is then the only route to it, through `self._index`.
+            if self.interactive:
+                await session.setvar("context", "")
+                await session.setvar("chunks", [])
+            elif self.restrict_chunks:
                 await session.setvar("context", "")
                 await session.setvar("chunks", {"__opaque_chunks__": len(chunks)})
             else:
@@ -1233,6 +1380,13 @@ class _EpisodeRun:
             # top-level (not under "task") because it changes what PROMPT the
             # root reads, not a fact about the task itself.
             "no_subcalls": self.no_subcalls,
+            # Task 12: an arm invisible to the snapshot is an arm §8 cannot
+            # score. `env_actions` is meaningful even when `interactive` is
+            # False (it stays 0), which is exactly the "no change at all"
+            # every other arm flag promises the categories that don't ask
+            # for it.
+            "interactive": self.interactive,
+            "env_actions": self._env_actions,
             "task": {
                 "task_id": self.task.task_id,
                 "text": self.task.text,
@@ -1258,6 +1412,17 @@ class _EpisodeRun:
             base_extra.update(extra)
         return config_snapshot(self.cfg, base_extra)
 
+    def _final_snapshot(self) -> dict | None:
+        """Re-derive `config_snapshot` at episode end, so `env_actions`
+        reflects what the episode actually did rather than the 0 it had
+        before its first turn. `None` when C2 never ran (a cancellation
+        strictly before `execute()`'s chunking step) -- there is then no open
+        episode row for `close_episode`'s UPDATE to reach anyway."""
+        if self._snapshot_context_text is None:
+            return None
+        return self._snapshot(self._snapshot_context_text,
+                              self._snapshot_chunks or [], self._snapshot_chunk_ms)
+
     def record_abort(self, reason: str) -> None:
         """Terminal attribution for the operator-abort path, SYNCHRONOUSLY.
 
@@ -1276,12 +1441,14 @@ class _EpisodeRun:
             self._breach = _Breach(Outcome.BUDGET_KILL, reason, kill_reason=reason)
             self._finished.set()
         outcome, why = self._outcome()
-        self.trace.close_episode(self.episode_id, outcome, why, self._final_ref)
+        self.trace.close_episode(self.episode_id, outcome, why, self._final_ref,
+                                 config_snapshot=self._final_snapshot())
 
     async def _close(self) -> EpisodeResult:
         outcome, reason = self._outcome()
         self.trace.close_episode(self.episode_id, outcome, reason,
-                                  getattr(self, "_final_ref", None))
+                                  getattr(self, "_final_ref", None),
+                                  config_snapshot=self._final_snapshot())
         # D22's tail: drain so the partial trace is durable before anything
         # else runs. `aclose()` belongs to whoever owns the TraceLogger -- one
         # logger serves a whole `rlm bench` run, and closing it here would end
@@ -1345,7 +1512,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                        process_manager: Any = None,
                        snapshot_extra: dict | None = None,
                        restrict_chunks: bool = False,
-                       no_subcalls: bool = False) -> EpisodeResult:
+                       no_subcalls: bool = False,
+                       interactive: bool = False) -> EpisodeResult:
     """Run ONE episode end to end and return its §6 outcome.
 
     `dispatcher`, `trace` and `lifecycle` are injected because their lifetimes
@@ -1390,7 +1558,8 @@ async def run_episode(task: Task, cfg: Config, *, dispatcher, trace, lifecycle,
                            process_manager=process_manager,
                            snapshot_extra=snapshot_extra,
                            restrict_chunks=restrict_chunks,
-                           no_subcalls=no_subcalls)
+                           no_subcalls=no_subcalls,
+                           interactive=interactive)
         try:
             return await run.execute(manager, root)
         except asyncio.CancelledError:

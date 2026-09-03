@@ -200,6 +200,13 @@ class _CloseMsg:
     outcome_reason: Any
     final_answer_ref: Any
     ended_at: dt.datetime
+    #: Task 12: an interactive episode's `env_actions` is only known once the
+    #: episode is over, unlike every other `config_snapshot` field (chosen
+    #: upfront, at `open_episode`). `None` (every OTHER caller) leaves the
+    #: column exactly as `open_episode` wrote it -- the same "supplied
+    #: columns only" convention `update_episode_metrics`/`_commit_metrics`
+    #: already uses for the two timestamps that straddle an episode's life.
+    config_snapshot: Any = None
 
 
 @dataclass(slots=True)
@@ -278,9 +285,11 @@ class TraceLogger:
         self.queue.put_nowait(_StepMsg(dict(step), dict(blobs or {})))
 
     def close_episode(self, episode_id: Any, outcome: Any,
-                       outcome_reason: Any = None, final_answer_ref: Any = None) -> None:
+                       outcome_reason: Any = None, final_answer_ref: Any = None,
+                       config_snapshot: Any = None) -> None:
         self.queue.put_nowait(
-            _CloseMsg(episode_id, outcome, outcome_reason, final_answer_ref, utc_now()))
+            _CloseMsg(episode_id, outcome, outcome_reason, final_answer_ref,
+                      utc_now(), config_snapshot))
 
     def update_episode_metrics(self, episode_id: Any, *, pkg_temp_c_start: float | None = None,
                                 pkg_temp_c_end: float | None = None,
@@ -477,11 +486,15 @@ class TraceLogger:
     def _commit_close(self, con: duckdb.DuckDBPyConnection, msg: _CloseMsg) -> None:
         con.execute("BEGIN TRANSACTION")
         try:
+            sets = ["ended_at=?", "outcome=?", "outcome_reason=?", "final_answer_ref=?"]
+            params: list[Any] = [msg.ended_at, msg.outcome, safe_text(msg.outcome_reason),
+                                 msg.final_answer_ref]
+            if msg.config_snapshot is not None:
+                sets.append("config_snapshot=?")
+                params.append(safe_json(msg.config_snapshot))
             con.execute(
-                "UPDATE episodes SET ended_at=?, outcome=?, outcome_reason=?, "
-                "final_answer_ref=? WHERE episode_id=?",
-                [msg.ended_at, msg.outcome, safe_text(msg.outcome_reason),
-                 msg.final_answer_ref, msg.episode_id])
+                f"UPDATE episodes SET {', '.join(sets)} WHERE episode_id=?",
+                [*params, msg.episode_id])
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")

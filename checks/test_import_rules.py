@@ -30,6 +30,10 @@ ISOLATED = [
     "context/truncate.py",
     "context/chunker.py",
     "context/loader.py",
+    # Task 12: the `interactive` category's corpus index. Windows each
+    # document with the SAME `context/chunker.py` this list already isolates,
+    # and takes its token counter injected -- same rule, same reason.
+    "context/interactive.py",
     "budget.py",
     "trace/store.py",
     # R13's foreign-string detector: C4 calls it on every leaf answer, but it

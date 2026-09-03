@@ -1,5 +1,6 @@
 # checks/test_episode.py
 import asyncio
+import json
 import sys
 
 import pytest
@@ -1122,3 +1123,49 @@ async def test_a_render_that_is_not_a_prefix_extension_is_logged_once(episode_en
     res = await new.run()
     assert res.outcome == Outcome.SUCCESS
     assert not [e for e in new.lifecycle_events() if e.get("kind") == "root_history"]
+
+
+# --------------------------------------------------------------------------- #
+# Task 12: interactive episodes -- the corpus stays scaffold-side, and the
+# root reaches it only through `env.search`/`env.open`/`env.window`.
+# --------------------------------------------------------------------------- #
+
+ENV_CELL = ("```repl\n"
+            "print(len(context), len(chunks))\n"
+            "hits = await env.search('tithe')\n"
+            "print(hits[0]['doc_id'], hits[0]['window'])\n"
+            "print((await env.window(hits[0]['doc_id'], hits[0]['window']))[:12])\n"
+            "```")
+
+
+async def test_interactive_episode_keeps_the_corpus_scaffold_side(episode_env, mock_server, interactive_task):
+    env = episode_env(root_script=[ENV_CELL, FINAL], answer="42", task=interactive_task,
+                      leaf_port=mock_server.port, dispatcher=mock_server.dispatcher(),
+                      interactive=True)
+    res = await env.run()
+    assert res.outcome == Outcome.SUCCESS
+    obs = env.observation(step=0)
+    # `[stdout]\n` is `build_view`'s standing label for every repl_exec step
+    # (see e.g. test_delegation_arm.py) -- "0 0" (len(context), len(chunks))
+    # is still the first thing the cell printed.
+    assert obs.startswith("[stdout]\n0 0\n")             # context and chunks are empty
+    assert "d-02 " in obs and "beta tithe" in obs
+    steps = [s for s in env.steps() if s["action_type"] == "env_call"]
+    assert [json.loads(s["action_payload"])["op"] for s in steps] == ["search", "window"]
+    assert all(s["status"] == "ok" and s["actor"] == "root" for s in steps)
+    assert env.snapshot()["env_actions"] == 2
+
+
+async def test_env_is_refused_outside_an_interactive_task(episode_env, mock_server):
+    env = episode_env(root_script=["```repl\nawait env.open('d-01')\n```", FINAL], answer="42",
+                      leaf_port=mock_server.port, dispatcher=mock_server.dispatcher())
+    await env.run()
+    assert "env is not available for this task" in env.observation(step=0)
+
+
+async def test_an_env_window_result_is_capped_scaffold_side(episode_env, mock_server, interactive_task, small_cap_cfg):
+    env = episode_env(root_script=["```repl\nw = await env.window('d-01', 0)\nprint(len(w))\n```", FINAL],
+                      answer="42", task=interactive_task, cfg=small_cap_cfg,
+                      leaf_port=mock_server.port, dispatcher=mock_server.dispatcher(), interactive=True)
+    await env.run()
+    assert int(env.observation(step=0).split()[-1]) <= small_cap_cfg.scaffold.truncation_cap_chars

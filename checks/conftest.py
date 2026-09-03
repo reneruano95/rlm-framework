@@ -945,6 +945,14 @@ def _episode_cfg_dict(base: dict, *, tmp_path: Path, root_port: int, **over) -> 
         prompts["leaf_envelope"]["path"] = str(resolve_prompt_path(Path(prompts["leaf_envelope"]["path"])))
     for ref in prompts["strategy_templates"].values():
         ref["path"] = str(REPO_ROOT / ref["path"])
+    # Task 12: every `episode_env` config declares an `interactive` strategy
+    # category (unpinned -- `sha256: None` skips the pin check), pointed at
+    # any existing block. `PromptRegistry.render_root` refuses an undeclared
+    # category (I1), and this is the one category no shipped config carries
+    # yet -- adding it here, once, is cheaper than every interactive test
+    # re-deriving the same override.
+    prompts["strategy_templates"]["interactive"] = {
+        "path": str(REPO_ROOT / "prompts/strat-default.v1.md"), "sha256": None}
     for ref in (prompts.get("baselines") or {}).values():
         ref["path"] = str(REPO_ROOT / ref["path"])
     raw["trace"]["db_path"] = str(tmp_path / "rlm.duckdb")
@@ -1065,6 +1073,38 @@ class _EpisodeEnv:
         self.server.shutdown()
 
 
+#: Task 12: a two-document interactive corpus, header-delimited exactly like
+#: `checks/test_interactive_index.py`'s `TEXT` -- "tithe" appears only in
+#: d-02, so `env.search('tithe')` has a deterministic first hit.
+_INTERACTIVE_TEXT = (
+    "=== DOCUMENT d-01: Alpha register ===\n" + "alpha " * 300 + "\n\n"
+    "=== DOCUMENT d-02: Beta register ===\n" + "beta tithe barn " * 200)
+
+
+@pytest.fixture
+def interactive_task():
+    """A `Task` whose category is `interactive` and whose context is a
+    multi-document corpus -- built directly rather than via `context_path`,
+    since `episode_env`'s `task=` override needs a `Task` object, not a file
+    on disk."""
+    from rlm.episode import Task
+
+    return Task(task_id="interactive-fixture", text="Where is the tithe recorded?",
+               context=_INTERACTIVE_TEXT, category="interactive", answer="42")
+
+
+@pytest.fixture
+def small_cap_cfg(minimal_cfg_dict: dict) -> Config:
+    """`scaffold.truncation_cap_chars` at the validator's floor
+    (`rlm.context.truncate.MIN_MARKER_CAP`, `config.py:655-661`): the
+    smallest cap `Config.model_validate` still accepts."""
+    from rlm.context.truncate import MIN_MARKER_CAP
+
+    d = copy.deepcopy(minimal_cfg_dict)
+    d["scaffold"]["truncation_cap_chars"] = MIN_MARKER_CAP
+    return Config.model_validate(d)
+
+
 @pytest.fixture
 def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
     """Factory: `episode_env(root_script=[...]) -> env`, then `await env.run()`."""
@@ -1078,7 +1118,8 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
                 max_wall_clock_s=None, max_subcalls=None, max_total_tokens=None,
                 max_turns=None, leaf_fixtures=None, dispatcher=None,
                 leaf_port=None, process_manager=None, leaf_seed=None,
-                history_mode=None, cfg=None, no_subcalls=False):
+                history_mode=None, cfg=None, no_subcalls=False,
+                task=None, interactive=False):
         server = FakeRootServer(minimal_cfg_dict, script=root_script)
         # `cfg`, when given (Task 9: `nosubcalls_cfg`), REPLACES the shipped
         # config as the base -- its prompts are what the test wants rendered
@@ -1094,8 +1135,12 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
                                  leaf_port=leaf_port, leaf_seed=leaf_seed,
                                  history_mode=history_mode)
         validated_cfg = Config.model_validate(raw)
-        task = Task(task_id="fixture-task", text=task_text, context=context,
-                    category=category, answer=answer)
+        # `task`, when given (Task 12: `interactive_task`), REPLACES the task
+        # this factory would otherwise build from `task_text`/`context`/
+        # `category`/`answer` -- an interactive corpus needs the `=== DOCUMENT
+        # ... ===` header shape those params have no business inventing.
+        task = task or Task(task_id="fixture-task", text=task_text, context=context,
+                            category=category, answer=answer)
         env = _EpisodeEnv(
             cfg=validated_cfg, task=task,
             dispatcher=dispatcher or CannedDispatcher(
@@ -1103,7 +1148,8 @@ def episode_env(minimal_cfg_dict: dict, tmp_path: Path, bootstrap_dir: Path):
             server=server,
             run_kwargs={"max_turns": max_turns,
                         "process_manager": process_manager,
-                        "no_subcalls": no_subcalls},
+                        "no_subcalls": no_subcalls,
+                        "interactive": interactive},
         )
         built.append(env)
         return env

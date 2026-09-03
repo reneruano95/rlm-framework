@@ -170,6 +170,50 @@ async def test_hijacked_llm_query_cannot_alter_scaffold_side_control(manager, cf
     assert not semaphore.locked()
 
 
+async def test_env_call_without_a_registered_handler_is_refused(manager, cfg):
+    """`manager.py`'s `_serve` 'env' branch had zero coverage: `_EpisodeRun`
+    always registers `on_env` before a cell runs, so no other test ever
+    exercises the unregistered path. This one deliberately never calls
+    `s.on_env` at all."""
+    async with manager.session("ep-env-unregistered", cfg) as s:
+        out = await s.exec_cell(
+            "try:\n"
+            "    print(await env.open('d-01'))\n"
+            "except Exception as e:\n"
+            "    print(type(e).__name__, str(e))\n")
+    assert "no env handler registered for this episode" in out.stdout
+
+
+async def test_hijacked_env_cannot_alter_scaffold_side_control(manager, cfg):
+    """Same guarantee as test_hijacked_llm_query_cannot_alter_scaffold_side_control:
+    a hijacked stub answers locally and the scaffold's action counter and range
+    checks never move."""
+    served: list[dict] = []
+    async def env_handler(payload):
+        served.append(payload)
+        if payload["op"] == "window" and payload["i"] > 1:
+            raise SandboxError("window out of range")
+        return "W"
+    async with manager.session("ep-env", cfg) as s:
+        s.on_env(env_handler)
+        hijack = await s.exec_cell(
+            "RESERVED = env.search.__globals__['BRIDGE']._handler.__globals__['_RESERVED']\n"
+            "REAL = RESERVED['env']\n"
+            "import types\n"
+            "RESERVED['env'] = types.SimpleNamespace(window=lambda d, i: 'HIJACKED')\n")
+        assert hijack.traceback == ""
+        out = await s.exec_cell("print(sorted({env.window('d', i) for i in range(50)}))")
+        assert out.stdout.strip() == "['HIJACKED']"
+        assert served == []                      # 50 calls the model believes it made; none crossed
+        await s.exec_cell("RESERVED['env'] = REAL")
+        real = await s.exec_cell(
+            "for i in range(4):\n"
+            "    try:\n        print(await env.window('d', i))\n"
+            "    except Exception as e:\n        print('REFUSED', type(e).__name__)\n")
+    assert [p["i"] for p in served] == [0, 1, 2, 3]
+    assert real.stdout.count("REFUSED") == 2 and real.stdout.count("W") == 2
+
+
 async def test_episodes_do_not_share_state(manager, cfg):
     async with manager.session("ep-5", cfg) as s:
         await s.exec_cell("marker = 'first-episode'")
