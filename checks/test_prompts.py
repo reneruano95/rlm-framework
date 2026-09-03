@@ -251,18 +251,12 @@ def test_config_pins_match_the_files_on_disk():
         assert actual == pinned, f"{path} drifted from its config pin"
 
 
-# CONTROLLER RULING (Task 20): Task 7/8 wrote this test and the
-# `nosubcalls_cfg` fixture against "needle" -- one of config.yaml's five v1
-# categories -- as an arbitrary stand-in, before benchmark v2's category set
-# was finalised. §14/the amended v2 spec settled on exactly THREE v2-only
-# categories (`linear_semantic`, `interactive`, `code_solvable`; see
-# task-14/15/17/18 briefs), and the `rlm-nosubcalls` root arm only ever runs
-# against those -- config.yaml's v1 categories never run under it. Task 20's
-# actual deliverable is therefore a nosubcalls twin per V2 category, not per
-# v1 category; `nosubcalls_cfg` (checks/conftest.py) has been updated to
-# build `strategy_templates_nosubcalls` over the three v2 categories rather
-# than over `prompts["strategy_templates"]`'s five v1 keys, and this test now
-# exercises `linear_semantic` rather than `needle`. The xfail mark is removed:
+# CONTROLLER RULING (Task 20, 2026-09-03): retargeted from v1's five
+# categories to v2's three (linear_semantic, interactive, code_solvable).
+# "needle" was Task 7's arbitrary pick to exercise the mechanism, made
+# before v2's category set existed; no brief requires nosubcalls twins for
+# v1 categories, and authoring five unused prompt files to satisfy a stale
+# fixture would be waste. See task-20-report.md. The xfail mark is removed:
 # the six files it was blocked on are landed and this passes on its merits.
 def test_render_root_no_subcalls_uses_the_nosubcalls_body_and_block(nosubcalls_cfg):
     reg = nosubcalls_cfg.prompt_registry().load()

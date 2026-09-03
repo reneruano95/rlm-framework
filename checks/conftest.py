@@ -49,16 +49,12 @@ def nosubcalls_cfg(minimal_cfg_dict: dict) -> Config:
     """A config with the `rlm-nosubcalls` arm's own root + strategy blocks
     declared, pointed at Task 20's real files.
 
-    CONTROLLER RULING (Task 20): originally built over
-    `prompts["strategy_templates"]` -- config.yaml's five v1 categories
-    (needle, aggregation, synthesis, code_qa, default) -- as a stand-in
-    chosen before benchmark v2's category set was finalised. The
-    `rlm-nosubcalls` root arm only ever runs against benchmark v2's three
-    categories (`linear_semantic`, `interactive`, `code_solvable`; spec §14),
-    never against a v1 category, so those are the categories whose nosubcalls
-    twin actually needs to exist. Hardcoded here rather than derived from
-    `prompts["strategy_templates"]`, since that dict's keys are the v1
-    categories and have no bearing on which nosubcalls files Task 20 ships.
+    CONTROLLER RULING (Task 20, 2026-09-03): retargeted from v1's five
+    categories to v2's three (linear_semantic, interactive, code_solvable).
+    "needle" was Task 7's arbitrary pick to exercise the mechanism, made
+    before v2's category set existed; no brief requires nosubcalls twins for
+    v1 categories, and authoring five unused prompt files to satisfy a stale
+    fixture would be waste. See task-20-report.md.
     """
     d = copy.deepcopy(minimal_cfg_dict)
     prompts = d["scaffold"]["prompts"]
