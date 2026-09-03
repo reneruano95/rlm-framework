@@ -358,6 +358,13 @@ class BenchLedger:
             record the crash as the arm's answer;
           * a refusal (no `episode_id`): nothing ran, so there is nothing to
             score. Fix the config, resume, and the cell fills.
+
+        A DECLARED abstention (`outcome == "abstained"`) is the one exception
+        to the third rule: it has no episode either, but the rules said this
+        arm never runs this cell — there is no config to fix and nothing a
+        resume could produce, so it counts as decided the same as a scored
+        episode. `_by_cell` (episodes only) drops it exactly like a refusal,
+        so it is picked up here, separately, off the raw records.
         """
         done: dict[tuple, dict] = {}
         for cell, rows in self._by_cell(run_id, store).items():
@@ -370,6 +377,12 @@ class BenchLedger:
             if str(final.get("outcome")) == str(Outcome.ERROR) and len(rows) < 2:
                 continue
             done[cell] = final
+        for row in self.records(run_id, store=store):
+            if row.get("episode_id") or row.get("outcome") != "abstained":
+                continue
+            if row.get("task_id") is None or row.get("seed") is None or not row.get("arm"):
+                continue
+            done[_key(row)] = row
         return done
 
     def open_errors(self, run_id: str, *, store: Any = None) -> dict[tuple, dict]:
@@ -447,6 +460,23 @@ def _no_task_loader(path: Any) -> Any:
         "not import (the dependency rule)")
 
 
+class _NoAbstentions:
+    """The v1 default for `BenchCtx.rules`: nothing is ever abstained.
+
+    `test_bench_imports_neither_c4_nor_the_benchmark_package` bans importing
+    `bench` from ANYWHERE in this file -- module scope or a function body, a
+    `from bench.rules import BenchmarkRules` inside a `default_factory` is
+    still an import statement in this file's AST. So the default is this
+    tiny stand-in, duck-typed to the one method `run_block` calls
+    (`.abstains(arm, category)`), rather than the real `BenchmarkRules`.
+    `cli._bench` (Task 6) sets `.rules` to the manifest's actual
+    `BenchmarkRules` from OUTSIDE this module, where importing `bench` is
+    allowed; every test double before that gets v1's answer -- never."""
+
+    def abstains(self, arm: str, category: str) -> bool:
+        return False
+
+
 @dataclass
 class BenchCtx:
     """One bench run's long-lived state plus every injected seam.
@@ -474,6 +504,12 @@ class BenchCtx:
     run_id: str
     manifest: "BenchmarkManifest"
     ledger: BenchLedger
+    #: §8's scoring rules for THIS manifest (`BenchmarkRules`, `bench/rules.py`)
+    #: -- `run_block` reads `.abstains(arm, category)` off it before running a
+    #: cell. `cli._bench` sets this from the manifest; the default below is
+    #: v1's constants, for every double and hand-built `BenchCtx` that never
+    #: had a v2 manifest to read one from.
+    rules: Any = field(default_factory=_NoAbstentions)
     trace: Any = None
     lifecycle: Any = None
     store: Any = None
@@ -598,6 +634,22 @@ def _refusal(ctx: BenchCtx, block: Block, arm: str, exc: Exception,
         "superseded_by": None, "ts": None})
 
 
+def _abstention(ctx: BenchCtx, block: Block, arm: str) -> dict[str, Any]:
+    """A cell the rules say this arm does not run. No episode, one ledger row,
+    so a resume knows it is decided and the verdict knows it is not a hole.
+
+    `"abstained"` is a ledger value only -- it is not one of `Outcome`'s
+    members, the same way `CONFIG_REFUSED` names a reason without being one.
+    """
+    record = {"run_id": ctx.run_id, "block": block.idx,
+             "task_id": block.task_entry.task_id, "seed": block.seed, "arm": arm,
+             "episode_id": None, "outcome": "abstained",
+             "reason": f"abstained:{block.task_entry.category}",
+             "wall_s": 0.0, "relaunch_s": 0.0, "superseded_by": None,
+             "ts": None}
+    return ctx.ledger.append(record)
+
+
 async def _run_cell(ctx: BenchCtx, block: Block, arm: str, task: "Task",
                      cfg: Config) -> dict:
     """One episode: prepare, bracket, run, record.
@@ -682,6 +734,9 @@ async def run_block(block: Block, arms: list[str] | tuple[str, ...], ctx: BenchC
         return [_refusal(ctx, block, arm, exc) for arm in pending]
 
     for arm in pending:
+        if ctx.rules.abstains(arm, entry.category):
+            records.append(_abstention(ctx, block, arm))
+            continue
         cell = (entry.task_id, block.seed, arm)
         prior = prior_errors.get(cell)
         record = await _run_cell(ctx, block, arm, task, cfg)

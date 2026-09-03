@@ -192,6 +192,12 @@ class Grid:
     cells: Mapping[tuple[str, str], tuple[bool, ...]]
     cell_seeds: Mapping[tuple[str, str], tuple[int, ...]]
     episode_ids: Mapping[tuple[str, str, int], str]
+    #: `(task_id, arm)` pairs the RULES declare this arm does not run for this
+    #: task's category -- a DECLARED abstention, not a hole. `decide` excludes
+    #: these from that arm's pair math instead of treating them as missing.
+    #: Empty for every caller that does not pass `abstentions`/`categories` to
+    #: `load_grid` (v1, and any `Grid` built by hand, e.g. `grid_with_passes`).
+    abstained: frozenset[tuple[str, str]] = frozenset()
 
     def cell(self, task_id: str, arm: str) -> list[bool]:
         """This cell's per-seed pass/fail, seed ASCENDING (so an escalated
@@ -224,7 +230,9 @@ class Grid:
 def load_grid(db_path: str | pathlib.Path, run_id: str, *,
               seeds: Sequence[int] | None = None,
               arms: Sequence[str] | None = None,
-              escalation_seeds: Sequence[int] = ESCALATION_SEEDS) -> Grid:
+              escalation_seeds: Sequence[int] = ESCALATION_SEEDS,
+              abstentions: Mapping[str, tuple[str, ...]] | None = None,
+              categories: Mapping[str, str] | None = None) -> Grid:
     """Build §8's grid from the store, refusing anything unscoreable.
 
     `outcome == 'success'` is the ONLY True. `fail`, `budget_kill`,
@@ -240,6 +248,13 @@ def load_grid(db_path: str | pathlib.Path, run_id: str, *,
     {4,5} on the discordant tasks of ONE pair, so the post-escalation grid is
     legitimately ragged and must not be refused for it. Base seeds are required
     in every cell; escalation seeds are optional per cell and simply extend it.
+
+    `abstentions` (arm -> categories) and `categories` (task_id -> category)
+    together mark a `(task, arm)` a DECLARED abstention rather than a missing
+    cell: a v2 baseline that does not run a whole category is not a hole in
+    the grid, and refusing the run over it would refuse the thing the rules
+    themselves say will happen. Both must be given for a cell to be excused --
+    either alone leaves every cell exactly as missing as before.
     """
     rows = _rows(db_path, _EPISODES_SQL, [run_id])
 
@@ -284,8 +299,13 @@ def load_grid(db_path: str | pathlib.Path, run_id: str, *,
     # making every cell fail the completeness check below.
     esc -= set(required)
 
+    def _abstained(task_id: str, arm: str) -> bool:
+        return bool(abstentions and categories
+                    and categories.get(task_id) in abstentions.get(arm, ()))
+
     missing = [(t, a, s) for t in task_ids for a in grid_arms
-               for s in required if (t, s, a) not in by_cell]
+               for s in required
+               if (t, s, a) not in by_cell and not _abstained(t, a)]
     if missing:
         shown = ", ".join(f"{t}/{a}/seed {s}" for t, a, s in missing[:8])
         raise VerdictError(
@@ -334,10 +354,12 @@ def load_grid(db_path: str | pathlib.Path, run_id: str, *,
 
     chunk_sizes = tuple(sorted({int(r["chunk_size"]) for r in rows
                                 if r["chunk_size"] is not None}))
+    abstained = frozenset((t, a) for t in task_ids for a in grid_arms
+                          if _abstained(t, a))
     return Grid(run_id=run_id, task_ids=task_ids, arms=grid_arms,
                 seeds=observed_seeds, required_seeds=required,
                 chunk_sizes=chunk_sizes, cells=cells, cell_seeds=cell_seeds,
-                episode_ids=episode_ids)
+                episode_ids=episode_ids, abstained=abstained)
 
 
 # --------------------------------------------------------------------------- #
@@ -362,6 +384,11 @@ class PairResult:
     mean_delta: float | None
     escalates: bool
     beats: bool
+    #: This pair's denominator: `len(tasks)` for a baseline with no
+    #: abstentions, or the count of tasks it actually ran otherwise. Defaults
+    #: to 0 for a `PairResult` built by hand outside `decide` (a missing arm,
+    #: or a caller that never had reason to say).
+    n_tasks: int = 0
 
 
 @dataclass(frozen=True)
@@ -445,6 +472,12 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
     for arm in grid.arms:
         passed = []
         for t in tasks:
+            if (t, arm) in grid.abstained:
+                # A declared abstention: this arm never ran the task, so there
+                # is no cell to score and no fractional score to record --
+                # NOT a fail, and NOT the "no cell" refusal `grid.cell` raises
+                # for an arm that ran everything else but this one hole.
+                continue
             cell = grid.cell(t, arm)
             scores[(arm, t)] = fractional_score(cell)
             if task_passes(cell):
@@ -479,21 +512,29 @@ def decide(grid: Grid, manifest: "BenchmarkManifest") -> Verdict:
                 escalates=False, beats=False)
             continue
 
+        # A baseline that abstains from some category ran a SMALLER task set
+        # than the grid holds; its pair is computed over the tasks it
+        # actually ran, not the ones it was excused from ("the pair's
+        # denominator is the tasks it ran", not the full N).
+        shared = tuple(t for t in tasks if (t, baseline) not in grid.abstained)
+        rlm_shared = rlm_set & set(shared)
         base_set = set(passes[baseline])
-        wins = tuple(t for t in tasks if t in rlm_set and t not in base_set)
-        losses = tuple(t for t in tasks if t in base_set and t not in rlm_set)
-        discordant = tuple(t for t in tasks if (t in rlm_set) != (t in base_set))
-        margin = len(rlm_set) - len(base_set)
-        deltas = [scores[(rules.rlm_arm, t)] - scores[(baseline, t)] for t in tasks] \
+        wins = tuple(t for t in shared if t in rlm_shared and t not in base_set)
+        losses = tuple(t for t in shared if t in base_set and t not in rlm_shared)
+        discordant = tuple(t for t in shared
+                           if (t in rlm_shared) != (t in base_set))
+        margin = len(rlm_shared) - len(base_set)
+        deltas = [scores[(rules.rlm_arm, t)] - scores[(baseline, t)] for t in shared] \
             if rlm_present else []
         escalates = needs_escalation(margin, band=rules.escalation_band)
         pairs[baseline] = PairResult(
-            baseline=baseline, present=True, rlm_passes=len(rlm_set),
+            baseline=baseline, present=True, rlm_passes=len(rlm_shared),
             baseline_passes=len(base_set), margin=margin,
             wins=len(wins), losses=len(losses), discordant=discordant,
             p=sign_test_p(len(wins), len(losses)), ci=_ci(deltas),
             mean_delta=(statistics.fmean(deltas) if deltas else None),
-            escalates=escalates, beats=margin >= rules.margin)
+            escalates=escalates, beats=margin >= rules.margin,
+            n_tasks=len(shared))
         # §8 escalates ONCE ("the sign test and bootstrap are recomputed once
         # on the final grid ... No other recomputation is permitted"), so a
         # grid that already carries seeds {4,5} plans nothing, however its
@@ -879,6 +920,17 @@ def _fmt_mult(v: float | None) -> str:
     return "n/a" if v is None else f"{v:.2f}x"
 
 
+def _fmt_abstention_note(verdict: Verdict, baseline: str, pair: PairResult) -> str:
+    """Renders as " (over N tasks; abstains from cat1, cat2)" when this pair's
+    denominator is smaller than the grid's -- silence otherwise, so a baseline
+    with no abstentions reads exactly as it always has."""
+    if not pair.present or pair.n_tasks == len(verdict.task_ids):
+        return ""
+    cats = verdict.rules.abstentions.get(baseline, ()) if verdict.rules else ()
+    return (f" (over {pair.n_tasks} tasks; abstains from "
+            f"{', '.join(cats) if cats else 'unrecorded categories'})")
+
+
 def _final(verdict: Verdict, escalated: Verdict | None) -> Verdict:
     """Which verdict decides — and the provenance check that makes the answer
     safe to trust.
@@ -984,7 +1036,8 @@ def render_report(verdict: Verdict, scorecard: Scorecard | None,
             continue
         L.append(f"- margin **{_fmt_margin(pair.margin)}** vs {b.upper()} — "
                  f"{_fmt_p(pair.p)}, {_fmt_ci(pair.ci)}"
-                 + ("" if pair.present else " _(arm absent from this grid)_"))
+                 + ("" if pair.present else " _(arm absent from this grid)_")
+                 + _fmt_abstention_note(final, b, pair))
     L.append("")
 
     # 3. margins with p and CI ---------------------------------------------- #

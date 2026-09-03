@@ -11,6 +11,7 @@ nothing else, which is the property that makes S4 re-scoreable offline.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import uuid
 from pathlib import Path
@@ -1047,3 +1048,59 @@ def test_needs_escalation_takes_the_band_from_rules():
     from rlm.measure.stats import needs_escalation
     assert needs_escalation(3) and not needs_escalation(3, band=(1, 2))
     assert needs_escalation(2, band=(1, 2))
+
+
+# --------------------------------------------------------------------------- #
+# Task 4: an abstained (arm, category) is not a missing cell
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def store_with_grid(tmp_path):
+    """A closed store built from `cells={(task_id, arm): [bool, ...]}` plus a
+    manifest carrying `categories` and `rules` -- the pieces `load_grid` and
+    `decide` need, without hand-writing DuckDB rows (`StoreBuilder` above
+    already does that against the real `TraceLogger`)."""
+    def factory(*, categories: dict[str, str],
+                cells: dict[tuple[str, str], list[bool]],
+                rules: dict | None = None, seeds=(1, 2, 3),
+                run_id: str = "run-1"):
+        spec: dict[str, dict[str, str]] = {}
+        for (task_id, arm), pass_fails in cells.items():
+            pattern = "".join("T" if p else "F" for p in pass_fails)
+            spec.setdefault(task_id, {})[arm] = pattern
+        db = asyncio.run(build_store(tmp_path, spec, seeds=seeds, run_id=run_id))
+        manifest = manifest_for(categories)
+        manifest.rules = rules
+        return db, run_id, manifest
+    return factory
+
+
+def test_an_abstained_arm_is_not_a_missing_cell(store_with_grid):
+    """B2 does not run the interactive category. Its absence there is an
+    abstention declared in the rules, not a hole in the grid."""
+    db, run_id, manifest = store_with_grid(
+        categories={"t1": "linear_semantic", "t2": "interactive"},
+        cells={("t1", "rlm"): [True] * 3, ("t2", "rlm"): [True] * 3,
+               ("t1", "b2"): [False] * 3},          # no ("t2","b2") cells at all
+        rules={"baselines": ["b2"], "margin": 2, "escalation_band": [1, 2],
+               "abstentions": {"b2": ["interactive"]}})
+    grid = load_grid(db, run_id, seeds=[1, 2, 3], escalation_seeds=[4, 5],
+                     abstentions={"b2": ("interactive",)},
+                     categories={"t1": "linear_semantic", "t2": "interactive"})
+    v = decide(grid, manifest)
+    assert v.pairs["b2"].n_tasks == 1          # denominator is the tasks B2 ran
+    assert v.pairs["b2"].margin == 1           # rlm 1/1 vs b2 0/1 on the shared task
+
+
+def test_a_genuinely_missing_cell_is_still_refused(store_with_grid):
+    """No abstention covers B2 here, so its absent `t1` cell is exactly the
+    hole §8 has always refused -- `arms=` forces B2 into the grid the way a
+    v2 caller would (it names its baselines rather than letting `load_grid`
+    infer arms from what happened to run), so the hole is checked at all."""
+    db, run_id, manifest = store_with_grid(
+        categories={"t1": "linear_semantic"},
+        cells={("t1", "rlm"): [True] * 3}, rules={"baselines": ["b2"]})
+    with pytest.raises(VerdictError, match="missing"):
+        load_grid(db, run_id, seeds=[1, 2, 3], escalation_seeds=[4, 5],
+                  arms=("rlm", "b2"), categories={"t1": "linear_semantic"})

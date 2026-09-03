@@ -1548,3 +1548,49 @@ async def test_a_hook_that_returns_nothing_still_ledgers_a_number(
     ctx = _ctx(tmp_path, bench_cfg_dict, arms=FakeArms(), hooks=Hooks())
     records = await run_block(build_blocks(ctx.manifest, [1])[0], ["rlm", "b1"], ctx)
     assert [r["relaunch_s"] for r in records] == [0.0, 0.0]
+
+
+# --------------------------------------------------------------------------- #
+# Task 4: an abstained (arm, category) opens no episode
+# --------------------------------------------------------------------------- #
+
+
+async def test_an_abstained_cell_writes_a_ledger_row_and_opens_no_episode(
+        tmp_path, bench_cfg_dict):
+    from bench.rules import BenchmarkRules
+
+    fake_arms = FakeArms()
+    manifest = _manifest(["int-01"])
+    manifest.tasks[0].category = "interactive"
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=fake_arms, manifest=manifest)
+    ctx.arm_runners = fake_arms.runners(("rlm", "b2"))
+    ctx.rules = BenchmarkRules(abstentions={"b2": ("interactive",)})
+
+    block = build_blocks(ctx.manifest, [1])[0]
+    records = await run_block(block, ("rlm", "b2"), ctx)
+
+    b2 = [r for r in records if r["arm"] == "b2"][0]
+    assert b2["outcome"] == "abstained" and b2["episode_id"] is None
+    assert b2["reason"] == "abstained:interactive"
+    assert [c["arm"] for c in fake_arms.calls] == ["rlm"]   # b2's runner never called
+
+
+async def test_an_abstained_cell_is_completed_without_an_episode(
+        tmp_path, bench_cfg_dict):
+    """`BenchLedger.completed` must count an abstention as decided -- it has no
+    episode, but a resume must not try to run it."""
+    from bench.rules import BenchmarkRules
+
+    fake_arms = FakeArms()
+    manifest = _manifest(["int-01"])
+    manifest.tasks[0].category = "interactive"
+    ledger = BenchLedger(tmp_path / "ledger.jsonl")
+    ctx = _ctx(tmp_path, bench_cfg_dict, arms=fake_arms, manifest=manifest,
+               ledger=ledger)
+    ctx.arm_runners = fake_arms.runners(("rlm", "b2"))
+    ctx.rules = BenchmarkRules(abstentions={"b2": ("interactive",)})
+
+    await run_block(build_blocks(ctx.manifest, [1])[0], ("rlm", "b2"), ctx)
+    done = ledger.completed("run-1")
+    assert ("int-01", 1, "b2") in done
+    assert done[("int-01", 1, "b2")]["outcome"] == "abstained"
