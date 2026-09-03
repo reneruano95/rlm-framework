@@ -10,7 +10,8 @@ PKG_PROMPTS = Path(_rlm.__file__).resolve().parent / "_data" / "prompts"
 
 
 PROMPTS = PKG_PROMPTS
-FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "leaf-prefix.v1.md",
+FILES = ["root.v1.md", "root.v2.md", "root.v3.md", "root.v4.md",
+         "root-nosubcalls.v1.md", "leaf-prefix.v1.md",
          "strat-needle.v1.md", "strat-aggregation.v1.md",
          "strat-aggregation.v2.md",
          "strat-synthesis.v1.md", "strat-codeqa.v1.md", "strat-default.v1.md",
@@ -240,12 +241,80 @@ def test_config_pins_match_the_files_on_disk():
 
 
 @pytest.mark.xfail(
-    strict=False,
-    reason="Task 8 has not yet authored root-nosubcalls.v1.md or the "
-    "strat-*-nosubcalls.v1.md block set the nosubcalls_cfg fixture points "
-    "at; Task 8 removes this mark once those files land.",
+    strict=True,
+    reason="Task 8 status (2026-09-02): root-nosubcalls.v1.md now exists and "
+    "the nosubcalls_cfg fixture's filename guess for it "
+    "('prompts/root-nosubcalls.v1.md') is confirmed correct -- verified by "
+    "running this test with --runxfail: it now fails one step later, past "
+    "loading root_nosubcalls, in PromptRegistry.load()'s strategy_templates_"
+    "nosubcalls loop, with ConfigError: prompt 'strategy_nosubcalls.needle' "
+    "at prompts\\strat-needle-nosubcalls.v1.md could not be read: No such "
+    "file or directory. That file (and its five siblings, one per category) "
+    "is Task 20's deliverable and has not landed yet. strict=True (tightened "
+    "from strict=False) so this mark itself fails loudly, instead of quietly "
+    "XPASSing, the moment Task 20's strat-*-nosubcalls.v1.md set lands -- at "
+    "which point whoever lands it must remove this mark rather than leave it "
+    "standing.",
 )
 def test_render_root_no_subcalls_uses_the_nosubcalls_body_and_block(nosubcalls_cfg):
     reg = nosubcalls_cfg.prompt_registry().load()
     text = reg.render_root("needle", no_subcalls=True)
     assert "llm_query" not in text and "sub-call" not in text.lower()
+
+
+def _body(name):  # header stripped, like the loader
+    from rlm.config import _strip_changelog
+    return _strip_changelog((PROMPTS / name).read_text(encoding="utf-8"))
+
+
+def test_v4_is_v3_with_exactly_line_37_changed():
+    v3, v4 = _body("root.v3.md").splitlines(), _body("root.v4.md").splitlines()
+    assert len(v3) == len(v4)
+    diff = [(a, b) for a, b in zip(v3, v4) if a != b]
+    assert len(diff) == 1
+    old, new = diff[0]
+    assert old.startswith("`llm_query` reaches a small, fast, stateless model.")
+    assert "the same model as you" in new and "no REPL, no memory between calls" in new
+
+
+def test_nosubcalls_body_describes_a_repl_with_no_sub_model():
+    body = _body("root-nosubcalls.v1.md")
+    for banned in ("llm_query", "sub-model", "sub-call", "Sub-call", "delegat", "leaf"):
+        assert banned not in body, banned
+    assert "final_answer(value)" in body and "`chunks: list[str]`" in body
+    assert body.rstrip().endswith(
+        "A strategy block for this task's declared category follows. The scaffold "
+        "selected it from the task's category; you do not choose it, and where it is "
+        "more specific than the tips above, it wins.")
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Task 8 finding: the brief's own Step 3 derivation for "
+    "root-nosubcalls.v1.md mandates two full-paragraph rewrites that are NOT "
+    "renumbered tips -- body line 9 (drop the delegation clause: 'You act by "
+    "writing code that inspects those objects, and by delegating chunk-level "
+    "reading to a cheap sub-model. You are an orchestrator, not a reader.' -> "
+    "'You act by writing code that inspects those objects. You are a "
+    "programmer over the context, not a reader of it.') and the '# Budgets' "
+    "paragraph (line 53, drop the 'Sub-calls,' enumeration item and the "
+    "sub-call-spending sentence). Both are correct per the brief and per "
+    "test_nosubcalls_body_describes_a_repl_with_no_sub_model (which they are "
+    "needed to pass -- 'sub-call'/'delegat' must not appear in the body), but "
+    "this test's invariant ('every line not verbatim in v4 is a renumbered "
+    "tip, matched by comparing text after the first \". \"') only accounts for "
+    "the tip-renumbering case (old tips 7-8 -> 1-2), not these two paragraph "
+    "substitutions -- so a correct root-nosubcalls.v1.md cannot satisfy it. "
+    "Left as strict xfail rather than weakened: strict=True fails loudly if "
+    "a future edit makes it pass, since that would mean the invariant no "
+    "longer describes reality.",
+)
+def test_nosubcalls_body_is_v4_minus_only_the_sub_call_lines():
+    v4 = [l for l in _body("root.v4.md").splitlines() if l.strip()]
+    ns = [l for l in _body("root-nosubcalls.v1.md").splitlines() if l.strip()]
+    kept = [l for l in ns if l in v4]
+    renumbered = [l for l in ns if l not in v4]
+    # everything not in v4 is a renumbered tip (same text after the "N. ")
+    assert all(any(l.split(". ", 1)[1] == k.split(". ", 1)[1] for k in v4 if ". " in k)
+               for l in renumbered if ". " in l), renumbered
+    assert len(kept) + len(renumbered) == len(ns)
