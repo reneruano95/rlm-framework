@@ -299,12 +299,24 @@ def v1_store_path(tmp_path):
 
 
 async def test_opening_a_v1_store_migrates_the_action_enum(v1_store_path):
-    """An operator DB created before env_call exists must accept the new value."""
+    """An operator DB created before env_call exists must accept the new value.
+    Proving `enum_range` contains "env_call" only shows the CREATE TYPE DDL
+    says what it says -- it holds even if the ALTER never touched
+    `steps.action_type`. The load-bearing assertion is that a real env_call
+    ROW can be written to and read back from this pre-existing table."""
     tl = TraceLogger(v1_store_path, v1_store_path.parent / "blobs")
     await tl.start()
     try:
-        types = tl.monitor().execute("select enum_range(null::step_action_v2)").fetchone()[0]
-        assert "env_call" in types
+        ep = str(uuid.uuid4())
+        tl.open_episode(_episode_row(ep))
+        tl.put_step({"episode_id": ep, "step_idx": 0, "actor": Actor.ROOT,
+                     "action_type": ActionType.ENV_CALL, "status": StepStatus.OK,
+                     "action_payload": '{"op":"search","term":"tithe"}',
+                     "observation_view": "[{'doc_id': 'd-03', 'window': 4}]"})
+        await tl.drain()
+        rows = tl.monitor().execute(
+            "select action_type from steps where episode_id = ?", [ep]).fetchall()
+        assert rows == [("env_call",)]
     finally:
         await tl.aclose()
 
@@ -314,7 +326,9 @@ async def test_opening_an_already_migrated_store_a_second_time_does_not_error(v1
     R13's own comment says so at schema.sql:90-93) -- so CREATE TYPE ... IF NOT
     EXISTS and the retyping ALTER must both tolerate a store that already has
     the v2 type, or a second `rlm` invocation against a live operator database
-    would crash on startup."""
+    would crash on startup. The strongest form of "re-opening did not break
+    the column" is a row inserted AFTER the second open, so that's what this
+    asserts -- not just that enum_range still lists the value."""
     tl = TraceLogger(v1_store_path, v1_store_path.parent / "blobs")
     await tl.start()
     await tl.aclose()
@@ -322,7 +336,15 @@ async def test_opening_an_already_migrated_store_a_second_time_does_not_error(v1
     tl2 = TraceLogger(v1_store_path, v1_store_path.parent / "blobs")
     await tl2.start()  # must not raise
     try:
-        types = tl2.monitor().execute("select enum_range(null::step_action_v2)").fetchone()[0]
-        assert "env_call" in types
+        ep = str(uuid.uuid4())
+        tl2.open_episode(_episode_row(ep))
+        tl2.put_step({"episode_id": ep, "step_idx": 0, "actor": Actor.ROOT,
+                      "action_type": ActionType.ENV_CALL, "status": StepStatus.OK,
+                      "action_payload": '{"op":"open"}',
+                      "observation_view": "d-01"})
+        await tl2.drain()
+        rows = tl2.monitor().execute(
+            "select action_type from steps where episode_id = ?", [ep]).fetchall()
+        assert rows == [("env_call",)]
     finally:
         await tl2.aclose()

@@ -100,6 +100,10 @@ ALTER TABLE steps ADD COLUMN IF NOT EXISTS server_rotation INTEGER;
 -- DuckDB accepts ALTER COLUMN ... SET DATA TYPE to a column's own current
 -- type as a no-op, so re-running this against an already-migrated store
 -- (schema.sql is re-applied in full on every TraceLogger.start(), same as
--- the R13 ALTERs above) does not error.
+-- the R13 ALTERs above) does not error. Verified by
+-- checks/test_trace.py::test_opening_an_already_migrated_store_a_second_time_does_not_error
+-- (a row is inserted and read back after the SECOND open, on a store that
+-- was pre-existing before env_call), and the migrated-from-v1 path itself
+-- by test_opening_a_v1_store_migrates_the_action_enum.
 CREATE TYPE IF NOT EXISTS step_action_v2 AS ENUM ('repl_exec','llm_call','final','env_call');
 ALTER TABLE steps ALTER COLUMN action_type SET DATA TYPE step_action_v2;
