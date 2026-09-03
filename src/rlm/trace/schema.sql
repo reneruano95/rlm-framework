@@ -94,3 +94,12 @@ CREATE TABLE IF NOT EXISTS steps (
 ALTER TABLE steps ADD COLUMN IF NOT EXISTS leak_detected BOOLEAN;
 ALTER TABLE steps ADD COLUMN IF NOT EXISTS leak_detail TEXT;
 ALTER TABLE steps ADD COLUMN IF NOT EXISTS server_rotation INTEGER;
+
+-- v2 (2026-09-02): the interactive category's `env` verb is a fourth action.
+-- ENUM evolution per the header: new type, retype the column, idempotent --
+-- DuckDB accepts ALTER COLUMN ... SET DATA TYPE to a column's own current
+-- type as a no-op, so re-running this against an already-migrated store
+-- (schema.sql is re-applied in full on every TraceLogger.start(), same as
+-- the R13 ALTERs above) does not error.
+CREATE TYPE IF NOT EXISTS step_action_v2 AS ENUM ('repl_exec','llm_call','final','env_call');
+ALTER TABLE steps ALTER COLUMN action_type SET DATA TYPE step_action_v2;

@@ -42,6 +42,7 @@ class ActionType(StrEnum):
     REPL_EXEC = "repl_exec"
     LLM_CALL = "llm_call"
     FINAL = "final"
+    ENV_CALL = "env_call"
 
 
 class Actor(StrEnum):

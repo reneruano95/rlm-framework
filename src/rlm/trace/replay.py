@@ -245,8 +245,14 @@ def _render_transcript(cfg: Config, steps: list[dict], out) -> None:
             print(f"[{step['step_idx']}] {actor} llm_call ({step['status']}, "
                   f"parent {step['parent_step_idx']}, retry {step['retry_idx']}, "
                   f"tokens {step['tokens_in']}/{step['tokens_out']})", file=out)
-        else:
+        elif kind == ActionType.ENV_CALL:
+            print(f"\n[{step['step_idx']}] root env_call ({step['status']})", file=out)
+            print(f"  ENV: {step['action_payload']} -> {step['observation_view']}",
+                  file=out)
+        elif kind == ActionType.FINAL:
             print(f"\n[{step['step_idx']}] FINAL: {step['action_payload']!r}", file=out)
+        else:
+            raise ValueError(f"_render_transcript: unhandled action_type {kind!r}")
 
 
 def _first_difference(want: list[dict], got: list[dict]) -> str:

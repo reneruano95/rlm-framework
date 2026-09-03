@@ -255,3 +255,74 @@ async def test_mark_superseded_links_the_rerun(tmp_path):
         assert str(got) == "22222222-2222-2222-2222-222222222222"
     finally:
         await tl.aclose()
+
+
+# --------------------------------------------------------------------------- #
+# Task 10: env_call is a step type
+# --------------------------------------------------------------------------- #
+
+
+async def test_an_env_call_step_round_trips_through_the_store(tmp_path):
+    tl = TraceLogger(tmp_path / "t.duckdb", tmp_path / "blobs")
+    await tl.start()
+    try:
+        ep = str(uuid.uuid4())
+        tl.open_episode(_episode_row(ep))
+        tl.put_step({"episode_id": ep, "step_idx": 0, "actor": Actor.ROOT,
+                     "action_type": ActionType.ENV_CALL, "status": StepStatus.OK,
+                     "action_payload": '{"op":"search","term":"tithe"}',
+                     "observation_view": "[{'doc_id': 'd-03', 'window': 4}]"})
+        await tl.drain()
+        rows = tl.monitor().execute("select action_type from steps").fetchall()
+        assert rows == [("env_call",)]
+    finally:
+        await tl.aclose()
+
+
+@pytest.fixture
+def v1_store_path(tmp_path):
+    """A store built from the schema as it stood before the env_call migration
+    (v2) -- i.e. before step_action gained a fourth ENUM value. Mirrors the R13
+    pre-existing-table tests above (`test_the_leak_columns_are_added_to_a_pre_
+    existing_steps_table`), which split schema.sql on its migration-block
+    marker rather than hand-maintaining a duplicate CREATE TABLE."""
+    import pathlib
+
+    schema = (pathlib.Path(__file__).parents[1] / "src" / "rlm" / "trace" / "schema.sql").read_text()
+    pre_v2 = schema.split("-- v2 (2026-09-02)")[0]
+    assert "step_action_v2" not in pre_v2
+    db = tmp_path / "old.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute(pre_v2)
+    con.close()
+    return db
+
+
+async def test_opening_a_v1_store_migrates_the_action_enum(v1_store_path):
+    """An operator DB created before env_call exists must accept the new value."""
+    tl = TraceLogger(v1_store_path, v1_store_path.parent / "blobs")
+    await tl.start()
+    try:
+        types = tl.monitor().execute("select enum_range(null::step_action_v2)").fetchone()[0]
+        assert "env_call" in types
+    finally:
+        await tl.aclose()
+
+
+async def test_opening_an_already_migrated_store_a_second_time_does_not_error(v1_store_path):
+    """The migration runs on every start() (schema.sql is re-applied in full,
+    R13's own comment says so at schema.sql:90-93) -- so CREATE TYPE ... IF NOT
+    EXISTS and the retyping ALTER must both tolerate a store that already has
+    the v2 type, or a second `rlm` invocation against a live operator database
+    would crash on startup."""
+    tl = TraceLogger(v1_store_path, v1_store_path.parent / "blobs")
+    await tl.start()
+    await tl.aclose()
+
+    tl2 = TraceLogger(v1_store_path, v1_store_path.parent / "blobs")
+    await tl2.start()  # must not raise
+    try:
+        types = tl2.monitor().execute("select enum_range(null::step_action_v2)").fetchone()[0]
+        assert "env_call" in types
+    finally:
+        await tl2.aclose()

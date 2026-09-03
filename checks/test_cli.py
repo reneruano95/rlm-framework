@@ -1483,6 +1483,36 @@ def test_the_transcript_labels_an_llm_call_by_its_actor(valid_config_file):
     assert rendered.count("leaf llm_call") == 1
 
 
+def test_transcript_labels_env_calls_and_never_mislabels_them_final(valid_config_file):
+    """Task 10: env_call is a fourth step type. The old `else:` branch assumed
+    everything that was not repl_exec/llm_call was FINAL -- an env_call step
+    would have silently rendered as a final answer."""
+    cfg = load_config(valid_config_file)
+    steps = [
+        {"step_idx": 0, "actor": "root", "action_type": ActionType.REPL_EXEC,
+         "status": "ok", "action_payload": "1 + 1", "observation_view": "2"},
+        {"step_idx": 1, "actor": "root", "action_type": ActionType.ENV_CALL,
+         "status": "ok", "action_payload": '{"op":"open"}', "observation_view": "d-01"},
+        {"step_idx": 2, "actor": "root", "action_type": ActionType.FINAL,
+         "status": "ok", "action_payload": "42"},
+    ]
+    out = io.StringIO()
+    cli._render_transcript(cfg, steps, out)
+    text = out.getvalue()
+    assert 'ENV: {"op":"open"} -> d-01' in text
+    assert text.count("FINAL:") == 1
+
+
+def test_transcript_raises_on_an_unhandled_action_type(valid_config_file):
+    """The else: branch that used to assume FINAL now fails loudly instead of
+    mislabelling an unrecognized action as a final answer."""
+    cfg = load_config(valid_config_file)
+    steps = [{"step_idx": 0, "actor": "root", "action_type": "some_future_verb",
+              "status": "ok", "action_payload": "", "observation_view": ""}]
+    with pytest.raises(ValueError):
+        cli._render_transcript(cfg, steps, io.StringIO())
+
+
 # =========================================================================== #
 # Review fixes (S4 Task 12, round 1)
 # =========================================================================== #
