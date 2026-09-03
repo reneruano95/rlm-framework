@@ -31,6 +31,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 from rlm.measure.checkers import CHECKERS, near_miss_suite
 
@@ -66,6 +67,14 @@ class TaskEntry:
     regex_at_chance: dict[str, float] | None = None
     # §8 precondition 1, filled by the closed-book probe (needs a GPU).
     closed_book: dict[str, object] | None = None
+    # v2 (2026-09-02). All optional and None-stripped on serialization so the
+    # frozen v1 manifest hashes to the same bytes it did on 2026-08-15.
+    stream: str | None = None            # "train" | "held_out" | "practice"
+    shape_id: str | None = None          # the task shape shared across streams
+    interactive: bool | None = None      # corpus behind `env`, not in `chunks`
+    min_windows: int | None = None       # self-read adversary: minimal necessary window set
+    reference_actions: int | None = None # interactive: optimal-path `env` operation count
+    label_source: str | None = None      # e.g. "CogComp/trec@sha256:<vendored file>"
 
 
 @dataclass
@@ -75,10 +84,22 @@ class BenchmarkManifest:
     token_counter: str              # "approx-offline" or "leaf:/tokenize"
     assumed_training_cutoff: str
     tasks: list[TaskEntry] = field(default_factory=list)
+    rules: dict | None = None
+
+    _OPTIONAL_V2: ClassVar[tuple[str, ...]] = (
+        "stream", "shape_id", "interactive", "min_windows",
+        "reference_actions", "label_source")
 
     # ----------------------------------------------------------------- io --
     def to_json(self) -> str:
-        return json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n"
+        d = asdict(self)
+        if d.get("rules") is None:
+            d.pop("rules", None)
+        for t in d["tasks"]:
+            for k in self._OPTIONAL_V2:
+                if t.get(k) is None:
+                    t.pop(k, None)
+        return json.dumps(d, indent=2, ensure_ascii=False) + "\n"
 
     def write(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +111,14 @@ class BenchmarkManifest:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         tasks = [TaskEntry(**t) for t in raw.pop("tasks", [])]
         return cls(tasks=tasks, **raw)
+
+    def scored_tasks(self) -> list["TaskEntry"]:
+        """The tasks a verdict is computed over: the `rules.scored_stream` when
+        the manifest declares one, otherwise every task (v1)."""
+        stream = (self.rules or {}).get("scored_stream")
+        if stream is None:
+            return list(self.tasks)
+        return [t for t in self.tasks if t.stream == stream]
 
     @property
     def sha256(self) -> str:
