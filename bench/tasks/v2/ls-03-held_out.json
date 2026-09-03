@@ -1,0 +1,8 @@
+{
+  "task_id": "ls-03-held_out",
+  "text": "Each record in this register files one Query. Count the records whose Query asks about a person or group of people. Reply with the integer only, nothing else.",
+  "context_path": "../corpora/ls-03-held_out.txt",
+  "category": "linear_semantic",
+  "answer": "160",
+  "checker": "int_exact"
+}

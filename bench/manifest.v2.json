@@ -1,0 +1,2324 @@
+{
+  "benchmark_version": "v2",
+  "built_at": "2026-09-03",
+  "token_counter": "leaf:/tokenize",
+  "assumed_training_cutoff": "2025-12-31",
+  "tasks": [
+    {
+      "task_id": "ls-01-train",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-01-train.json",
+      "corpus_path": "bench/corpora/v2/ls-01-train.txt",
+      "corpus_sha256": "45350df3a6fb0d880699dbe5f688303226d0be9f5d5865985eb3d577895de61a",
+      "corpus_tokens": 59294,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "2d0209b18b100e37a7127207a43d0e35fbfe44ec3a141b933d3143d2d6f439a5",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2297,
+        "label_lexicon": 0.2282,
+        "wh_noun_rules": 0.2297,
+        "head_noun_rules": 0.2297,
+        "capitalised_tokens": 0.218,
+        "__chance__": 0.2297
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ls-01",
+      "min_windows": 129,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-02-train",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-02-train.json",
+      "corpus_path": "bench/corpora/v2/ls-02-train.txt",
+      "corpus_sha256": "8280f000ebcaa67c404f118c58d367f9156a61706843715823833833d72ac496",
+      "corpus_tokens": 59256,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "1f53226363c3083b3977b87b4cd95f463b65f6ad1287614803c73175d42697c3",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2341,
+        "label_lexicon": 0.2341,
+        "wh_noun_rules": 0.2341,
+        "head_noun_rules": 0.2341,
+        "capitalised_tokens": 0.2341,
+        "__chance__": 0.2341
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ls-02",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-03-train",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-03-train.json",
+      "corpus_path": "bench/corpora/v2/ls-03-train.txt",
+      "corpus_sha256": "37fc7eb24760139ccb72f0f9208699fe4cf0def6ea49a31cbedd907f589e983f",
+      "corpus_tokens": 59289,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "2d0209b18b100e37a7127207a43d0e35fbfe44ec3a141b933d3143d2d6f439a5",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2554,
+        "label_lexicon": 0.2554,
+        "wh_noun_rules": 0.2554,
+        "head_noun_rules": 0.2554,
+        "capitalised_tokens": 0.1951,
+        "__chance__": 0.2554
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ls-03",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-04-train",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-04-train.json",
+      "corpus_path": "bench/corpora/v2/ls-04-train.txt",
+      "corpus_sha256": "f24fc1387898829c1b2ecc1cb1fadce90034d61945485cdee90d34ff39d9299f",
+      "corpus_tokens": 59297,
+      "corpus_date": "2026-09-03",
+      "checker": "name_exact",
+      "question_sha256": "98600df8a84f7e0ec15237252ea21915a0a03be7b0b84efc187210229d3f79da",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2349,
+        "label_lexicon": 0.2363,
+        "wh_noun_rules": 0.2349,
+        "head_noun_rules": 0.2349,
+        "capitalised_tokens": 0.2133,
+        "__chance__": 0.2349
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "person"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ls-04",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-05-train",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-05-train.json",
+      "corpus_path": "bench/corpora/v2/ls-05-train.txt",
+      "corpus_sha256": "e07dafaba56623b1234b5b4467bea37a5f5e799660658953ff9b84cc816b7013",
+      "corpus_tokens": 59249,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "f84b6a2750919e87ecda8810c44d82225a38dd54bd20dacef14489daf09f9d9b",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.241,
+        "label_lexicon": 0.2425,
+        "wh_noun_rules": 0.241,
+        "head_noun_rules": 0.241,
+        "capitalised_tokens": 0.208,
+        "__chance__": 0.241
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ls-05",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-06-train",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-06-train.json",
+      "corpus_path": "bench/corpora/v2/ls-06-train.txt",
+      "corpus_sha256": "8eeacc70b4587fb6a76e6af9122f1a71bc9351686c991e059f2f09eae2b9bbf8",
+      "corpus_tokens": 59251,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "d93b59307d7ca3b8063f935468db0624023293291b1af9588230583e3d6ac00e",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2493,
+        "label_lexicon": 0.2507,
+        "wh_noun_rules": 0.2493,
+        "head_noun_rules": 0.2493,
+        "capitalised_tokens": 0.2159,
+        "__chance__": 0.2493
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ls-06",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-01-train",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-01-train.json",
+      "corpus_path": "bench/corpora/v2/int-01-train.txt",
+      "corpus_sha256": "779abb79a82c96be6d31624c57a500cf12aac14fe788236ab3dac329237d3e1e",
+      "corpus_tokens": 197162,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "db9cf4e0166a3905d8fd9c8d91d786fc3feaef1e7fd801ab253943448f7fc036",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2295,
+        "label_lexicon": 0.23,
+        "wh_noun_rules": 0.2295,
+        "head_noun_rules": 0.2295,
+        "capitalised_tokens": 0.2105,
+        "__chance__": 0.2295
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "int-01",
+      "interactive": true,
+      "min_windows": 431,
+      "reference_actions": 458,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-02-train",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-02-train.json",
+      "corpus_path": "bench/corpora/v2/int-02-train.txt",
+      "corpus_sha256": "c603644e3e70ca1848b21a5094e4b51853cb9095248426608f284bfbc3232178",
+      "corpus_tokens": 197055,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "cfa4e920527b84d06d8d4ec2986b6ce7a4bf3370038618714587024a2592e2f3",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2339,
+        "label_lexicon": 0.2335,
+        "wh_noun_rules": 0.2339,
+        "head_noun_rules": 0.2339,
+        "capitalised_tokens": 0.2184,
+        "__chance__": 0.2339
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "int-02",
+      "interactive": true,
+      "min_windows": 432,
+      "reference_actions": 459,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-03-train",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-03-train.json",
+      "corpus_path": "bench/corpora/v2/int-03-train.txt",
+      "corpus_sha256": "0bb4536dbd833ca955be02931ee1629be2d8dc7102db88cf322ad84048dd5876",
+      "corpus_tokens": 197007,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "7e3a2a53830b2338083ede37171199691703cd518d47793d0c1c4f33dc1f27b4",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2264,
+        "label_lexicon": 0.226,
+        "wh_noun_rules": 0.226,
+        "head_noun_rules": 0.226,
+        "capitalised_tokens": 0.2152,
+        "__chance__": 0.226
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "int-03",
+      "interactive": true,
+      "min_windows": 430,
+      "reference_actions": 456,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-04-train",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-04-train.json",
+      "corpus_path": "bench/corpora/v2/int-04-train.txt",
+      "corpus_sha256": "bc57837726c61d2e03606002c02ac72585c3a4699c28da0feb9398f249f52dc4",
+      "corpus_tokens": 197325,
+      "corpus_date": "2026-09-03",
+      "checker": "name_exact",
+      "question_sha256": "8eb80a3519d24d5410420fa680dc84619f61fd3a9d64f860d58bed4d746ee0e2",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2319,
+        "label_lexicon": 0.2337,
+        "wh_noun_rules": 0.2319,
+        "head_noun_rules": 0.2319,
+        "capitalised_tokens": 0.2084,
+        "__chance__": 0.2319
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "int-04",
+      "interactive": true,
+      "min_windows": 432,
+      "reference_actions": 458,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-05-train",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-05-train.json",
+      "corpus_path": "bench/corpora/v2/int-05-train.txt",
+      "corpus_sha256": "2f3db96879ff5552a413ffde81af224942d3fa87e7e163907e9b8298be1b558c",
+      "corpus_tokens": 197233,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "f27fe9050ecee60cfd823e8c909a90a5ffd14b53eec9f64873b475f84cbc6f35",
+      "adversarial": true,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2411,
+        "label_lexicon": 0.2428,
+        "wh_noun_rules": 0.2415,
+        "head_noun_rules": 0.2415,
+        "capitalised_tokens": 0.2151,
+        "__chance__": 0.2415
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "int-05",
+      "interactive": true,
+      "min_windows": 430,
+      "reference_actions": 457,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-06-train",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-06-train.json",
+      "corpus_path": "bench/corpora/v2/int-06-train.txt",
+      "corpus_sha256": "a66981768208fe374b79a372d0d120b4093d150fe11c9d22861b6301c2d620ce",
+      "corpus_tokens": 197150,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "f27fe9050ecee60cfd823e8c909a90a5ffd14b53eec9f64873b475f84cbc6f35",
+      "adversarial": true,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2292,
+        "label_lexicon": 0.2309,
+        "wh_noun_rules": 0.2288,
+        "head_noun_rules": 0.2288,
+        "capitalised_tokens": 0.2288,
+        "__chance__": 0.2288
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "int-06",
+      "interactive": true,
+      "min_windows": 431,
+      "reference_actions": 456,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-01-train",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-01-train.json",
+      "corpus_path": "bench/corpora/v2/ctl-01-train.txt",
+      "corpus_sha256": "c9756970410d448988fa3bea497947e7720d04da004b61e763b35a98fbb6adb8",
+      "corpus_tokens": 59272,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "36f18ec1973eaf117389cf91b4c836eca2df020817169af7a5dc7ff52bfe5518",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ctl-01",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-02-train",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-02-train.json",
+      "corpus_path": "bench/corpora/v2/ctl-02-train.txt",
+      "corpus_sha256": "4e4e52908aab2f7066d765fad09c15ae25893e0d36ad6e593d7d3c20604dfc04",
+      "corpus_tokens": 59253,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "36f18ec1973eaf117389cf91b4c836eca2df020817169af7a5dc7ff52bfe5518",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ctl-02",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-03-train",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-03-train.json",
+      "corpus_path": "bench/corpora/v2/ctl-03-train.txt",
+      "corpus_sha256": "13a8f9606010b6b968ed3edbf69c4390129c00cc068fa38792d556bcf0637358",
+      "corpus_tokens": 59286,
+      "corpus_date": "2026-09-03",
+      "checker": "uuid_exact",
+      "question_sha256": "bb5e11b2c3da02aea53128153b46f15ef2ded2e02161bae37f522f32e2ee16ea",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ctl-03",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-04-train",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-04-train.json",
+      "corpus_path": "bench/corpora/v2/ctl-04-train.txt",
+      "corpus_sha256": "7479f584d942d9e2315f37965d08b151ccacb15ee58e5999e25cf613d5260bd8",
+      "corpus_tokens": 59255,
+      "corpus_date": "2026-09-03",
+      "checker": "uuid_exact",
+      "question_sha256": "bb5e11b2c3da02aea53128153b46f15ef2ded2e02161bae37f522f32e2ee16ea",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "train",
+      "shape_id": "ctl-04",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-01-held_out",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-01-held_out.json",
+      "corpus_path": "bench/corpora/v2/ls-01-held_out.txt",
+      "corpus_sha256": "c480e65ab434b72f2c24da763493f1bf8e0e92adf08f7d1722ee245bc20f3413",
+      "corpus_tokens": 59233,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "2d0209b18b100e37a7127207a43d0e35fbfe44ec3a141b933d3143d2d6f439a5",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2371,
+        "label_lexicon": 0.2429,
+        "wh_noun_rules": 0.2371,
+        "head_noun_rules": 0.2371,
+        "capitalised_tokens": 0.2243,
+        "__chance__": 0.2371
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ls-01",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-02-held_out",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-02-held_out.json",
+      "corpus_path": "bench/corpora/v2/ls-02-held_out.txt",
+      "corpus_sha256": "e3d48ecdac38226663b6ae3c04a56cac49bb4016e53e5c219676225821a05cba",
+      "corpus_tokens": 59294,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "1f53226363c3083b3977b87b4cd95f463b65f6ad1287614803c73175d42697c3",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2217,
+        "label_lexicon": 0.2232,
+        "wh_noun_rules": 0.2217,
+        "head_noun_rules": 0.2217,
+        "capitalised_tokens": 0.2189,
+        "__chance__": 0.2217
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ls-02",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-03-held_out",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-03-held_out.json",
+      "corpus_path": "bench/corpora/v2/ls-03-held_out.txt",
+      "corpus_sha256": "2526ca4bb52dd227330f778b68b71369d9aeb1810d92abafce554a11668f5d09",
+      "corpus_tokens": 59233,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "2d0209b18b100e37a7127207a43d0e35fbfe44ec3a141b933d3143d2d6f439a5",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2323,
+        "label_lexicon": 0.2338,
+        "wh_noun_rules": 0.2323,
+        "head_noun_rules": 0.2323,
+        "capitalised_tokens": 0.1962,
+        "__chance__": 0.2323
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ls-03",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-04-held_out",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-04-held_out.json",
+      "corpus_path": "bench/corpora/v2/ls-04-held_out.txt",
+      "corpus_sha256": "facb7f0f42d79724996449d13eca13c7f9d75b882f69ed8af6c1fff25dd7e87e",
+      "corpus_tokens": 59267,
+      "corpus_date": "2026-09-03",
+      "checker": "name_exact",
+      "question_sha256": "98600df8a84f7e0ec15237252ea21915a0a03be7b0b84efc187210229d3f79da",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2424,
+        "label_lexicon": 0.2439,
+        "wh_noun_rules": 0.2424,
+        "head_noun_rules": 0.2424,
+        "capitalised_tokens": 0.2049,
+        "__chance__": 0.2424
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "person"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "person"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ls-04",
+      "min_windows": 129,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-05-held_out",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-05-held_out.json",
+      "corpus_path": "bench/corpora/v2/ls-05-held_out.txt",
+      "corpus_sha256": "93ce67ee0be01e3f95780e5add302743a6907b6733918e45b7cbff8df8fd807c",
+      "corpus_tokens": 59243,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "b99c4ac5dc5f71b3f1586de99316a6c9e342547f1834dd07ee6686efa59a540c",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2317,
+        "label_lexicon": 0.236,
+        "wh_noun_rules": 0.2331,
+        "head_noun_rules": 0.2331,
+        "capitalised_tokens": 0.2245,
+        "__chance__": 0.2331
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ls-05",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ls-06-held_out",
+      "category": "linear_semantic",
+      "task_file": "bench/tasks/v2/ls-06-held_out.json",
+      "corpus_path": "bench/corpora/v2/ls-06-held_out.txt",
+      "corpus_sha256": "d11b101dd030b8f06909bf7fe74630082645f12fdc90ea29d200beb4bf2399ce",
+      "corpus_tokens": 59243,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "b99c4ac5dc5f71b3f1586de99316a6c9e342547f1834dd07ee6686efa59a540c",
+      "adversarial": false,
+      "windows": 138,
+      "subcalls": 276,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2464,
+        "label_lexicon": 0.2464,
+        "wh_noun_rules": 0.2435,
+        "head_noun_rules": 0.2435,
+        "capitalised_tokens": 0.2277,
+        "__chance__": 0.2435
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ls-06",
+      "min_windows": 130,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-01-held_out",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-01-held_out.json",
+      "corpus_path": "bench/corpora/v2/int-01-held_out.txt",
+      "corpus_sha256": "4d835a1b57803ccf93b8023800c6f8875fdba5072be26618845b2f990c94a8be",
+      "corpus_tokens": 197077,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "7e3a2a53830b2338083ede37171199691703cd518d47793d0c1c4f33dc1f27b4",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2386,
+        "label_lexicon": 0.2391,
+        "wh_noun_rules": 0.2386,
+        "head_noun_rules": 0.2386,
+        "capitalised_tokens": 0.2074,
+        "__chance__": 0.2386
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "int-01",
+      "interactive": true,
+      "min_windows": 431,
+      "reference_actions": 458,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-02-held_out",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-02-held_out.json",
+      "corpus_path": "bench/corpora/v2/int-02-held_out.txt",
+      "corpus_sha256": "e07bda0681a1ab083eda4a986f97f58c0f8b73a34045013a0e5d5a8c3524f4c9",
+      "corpus_tokens": 197109,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "7e3a2a53830b2338083ede37171199691703cd518d47793d0c1c4f33dc1f27b4",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2294,
+        "label_lexicon": 0.2312,
+        "wh_noun_rules": 0.2286,
+        "head_noun_rules": 0.2286,
+        "capitalised_tokens": 0.2286,
+        "__chance__": 0.2286
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "int-02",
+      "interactive": true,
+      "min_windows": 430,
+      "reference_actions": 458,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-03-held_out",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-03-held_out.json",
+      "corpus_path": "bench/corpora/v2/int-03-held_out.txt",
+      "corpus_sha256": "fae1701c874513cbc6809dd37fb1d48bfe80049dd94090ba8a65c435d3bc0c3d",
+      "corpus_tokens": 197189,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "f393b0d65c8c7aba3acbcd8ed21ed229d7f6c74fe1820f03a4da909665bcd991",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2353,
+        "label_lexicon": 0.2357,
+        "wh_noun_rules": 0.2353,
+        "head_noun_rules": 0.2353,
+        "capitalised_tokens": 0.2149,
+        "__chance__": 0.2353
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "int-03",
+      "interactive": true,
+      "min_windows": 430,
+      "reference_actions": 457,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-04-held_out",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-04-held_out.json",
+      "corpus_path": "bench/corpora/v2/int-04-held_out.txt",
+      "corpus_sha256": "8ab53687485a3427b21dcda40f50957a26b4615fbcdb743789e830a2153e0ff0",
+      "corpus_tokens": 197146,
+      "corpus_date": "2026-09-03",
+      "checker": "name_exact",
+      "question_sha256": "60ce4357dbdcb2feedda6dd30c3a9411bb7169d6a0c2f7ba983a82bef8b2337e",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2332,
+        "label_lexicon": 0.2341,
+        "wh_noun_rules": 0.2332,
+        "head_noun_rules": 0.2332,
+        "capitalised_tokens": 0.2068,
+        "__chance__": 0.2332
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "int-04",
+      "interactive": true,
+      "min_windows": 431,
+      "reference_actions": 458,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-05-held_out",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-05-held_out.json",
+      "corpus_path": "bench/corpora/v2/int-05-held_out.txt",
+      "corpus_sha256": "357b13746bcca0cc2c60020831c4e6e8eef8a208060961bede78655fa1cd12fa",
+      "corpus_tokens": 197048,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "f27fe9050ecee60cfd823e8c909a90a5ffd14b53eec9f64873b475f84cbc6f35",
+      "adversarial": true,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2277,
+        "label_lexicon": 0.2277,
+        "wh_noun_rules": 0.2277,
+        "head_noun_rules": 0.2277,
+        "capitalised_tokens": 0.2164,
+        "__chance__": 0.2277
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "int-05",
+      "interactive": true,
+      "min_windows": 431,
+      "reference_actions": 457,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "int-06-held_out",
+      "category": "interactive",
+      "task_file": "bench/tasks/v2/int-06-held_out.json",
+      "corpus_path": "bench/corpora/v2/int-06-held_out.txt",
+      "corpus_sha256": "5822b38ee9fdb662a4241182dba47259734957e0e8beb59f007a5bd8daeb5e1d",
+      "corpus_tokens": 197019,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "f27fe9050ecee60cfd823e8c909a90a5ffd14b53eec9f64873b475f84cbc6f35",
+      "adversarial": true,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": false,
+      "regex_at_chance": {
+        "wh_word_rules": 0.2324,
+        "label_lexicon": 0.2332,
+        "wh_noun_rules": 0.2319,
+        "head_noun_rules": 0.2319,
+        "capitalised_tokens": 0.212,
+        "__chance__": 0.2319
+      },
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "int-06",
+      "interactive": true,
+      "min_windows": 430,
+      "reference_actions": 457,
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-01-held_out",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-01-held_out.json",
+      "corpus_path": "bench/corpora/v2/ctl-01-held_out.txt",
+      "corpus_sha256": "aaa3aa0d0d4c34202285ba8944e48e3557a2e1abdcb4964d7632a74945b54678",
+      "corpus_tokens": 59284,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "b940e7c37c782b24ca4f5f64d0c9ea08eaea4418e5e56d408b3e8ae2896fe0e1",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ctl-01",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-02-held_out",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-02-held_out.json",
+      "corpus_path": "bench/corpora/v2/ctl-02-held_out.txt",
+      "corpus_sha256": "09bfeafae42ffd467287c1b9a8c6e0647a8b77dcc2eca857a1c17765be81a4be",
+      "corpus_tokens": 59222,
+      "corpus_date": "2026-09-03",
+      "checker": "int_exact",
+      "question_sha256": "83cf9468f9fdeb5dc2689e7c3402fd74c9909b7b14dc81ec181c2f796042ed7d",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ctl-02",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-03-held_out",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-03-held_out.json",
+      "corpus_path": "bench/corpora/v2/ctl-03-held_out.txt",
+      "corpus_sha256": "a8f57b56159df06128d6af8745d7601144bf3c75eebe078f0e2725900c3d13ae",
+      "corpus_tokens": 59253,
+      "corpus_date": "2026-09-03",
+      "checker": "uuid_exact",
+      "question_sha256": "bb5e11b2c3da02aea53128153b46f15ef2ded2e02161bae37f522f32e2ee16ea",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ctl-03",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    },
+    {
+      "task_id": "ctl-04-held_out",
+      "category": "code_solvable",
+      "task_file": "bench/tasks/v2/ctl-04-held_out.json",
+      "corpus_path": "bench/corpora/v2/ctl-04-held_out.txt",
+      "corpus_sha256": "5991ed592144f56c9983ff48dbec2449892c6bd379588d7411dbddbc14c24f10",
+      "corpus_tokens": 59284,
+      "corpus_date": "2026-09-03",
+      "checker": "uuid_exact",
+      "question_sha256": "bb5e11b2c3da02aea53128153b46f15ef2ded2e02161bae37f522f32e2ee16ea",
+      "adversarial": false,
+      "windows": null,
+      "subcalls": null,
+      "regex_solvable": true,
+      "regex_at_chance": null,
+      "closed_book": {
+        "seeds": 3,
+        "models": [
+          "root",
+          "leaf"
+        ],
+        "passed_without_corpus": 0,
+        "detail": [
+          {
+            "role": "root",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "root",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 1,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 2,
+            "passed": false,
+            "answer": "NONE"
+          },
+          {
+            "role": "leaf",
+            "seed": 3,
+            "passed": false,
+            "answer": "NONE"
+          }
+        ]
+      },
+      "stream": "held_out",
+      "shape_id": "ctl-04",
+      "label_source": "CogComp/trec:train@sha256:4dd3f448bb977d36"
+    }
+  ],
+  "rules": {
+    "rlm_arm": "rlm",
+    "baselines": [
+      "rlm-nosubcalls",
+      "b2"
+    ],
+    "margin": 2,
+    "escalation_band": [
+      1,
+      2
+    ],
+    "tripwire_floor": 3,
+    "abstentions": {
+      "b2": [
+        "interactive"
+      ]
+    },
+    "scored_stream": "train",
+    "n_tasks": 16
+  }
+}

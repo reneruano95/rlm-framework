@@ -1,0 +1,8 @@
+{
+  "task_id": "ctl-02-held_out",
+  "text": "Count the records whose Filed line names the month Frayn. Reply with the integer only, nothing else.",
+  "context_path": "../corpora/ctl-02-held_out.txt",
+  "category": "code_solvable",
+  "answer": "51",
+  "checker": "int_exact"
+}

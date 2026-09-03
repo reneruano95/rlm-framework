@@ -104,7 +104,13 @@ RULES = {"rlm_arm": "rlm", "baselines": ["rlm-nosubcalls", "b2"], "margin": 2,
 #: `--seed N` plays the same role as `stream_index`).
 BASE_SEEDS = {
     "ls-01": 9401, "ls-02": 9402, "ls-03": 9403,
-    "ls-04": 9404, "ls-05": 9405, "ls-06": 9406,
+    # ls-04 RESEEDED 2026-09-03 (Task 22 freeze): 9404 -> 9414. The closed-book
+    # probe found ls-04-held_out (seed 9404+1000=10404) answered 6/6 WITHOUT
+    # the corpus -- contamination, not an adversary refusal. Per the runbook's
+    # binding rule the answer is never edited; the shape's seed moves and the
+    # whole build reruns. Original seed retained here in this comment, not the
+    # dict, so a future reader does not accidentally revert it.
+    "ls-04": 9414, "ls-05": 9405, "ls-06": 9406,
     "int-01": 9501, "int-02": 9502, "int-03": 9503,
     "int-04": 9504, "int-05": 9505, "int-06": 9506,
     "ctl-01": 9601, "ctl-02": 9602, "ctl-03": 9603, "ctl-04": 9604,

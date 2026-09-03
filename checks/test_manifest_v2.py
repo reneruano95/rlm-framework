@@ -8,6 +8,7 @@ from bench.manifest import BenchmarkManifest, TaskEntry
 REPO = Path(__file__).resolve().parents[1]
 V1 = REPO / "bench" / "manifest.json"
 V1_PIN = "571918d24bd848b8cb4122b7226882d65b929aa4dff0cb80a578d2eb04603c91"
+V2 = REPO / "bench" / "manifest.v2.json"
 
 pytestmark = pytest.mark.skipif(not V1.exists(), reason="v1 manifest not built")
 
@@ -91,3 +92,31 @@ def test_practice_stream_writes_outside_bench_and_no_manifest(tmp_path):
     rc = build_v2.main(["--practice", "--seed", "7", "--out", str(tmp_path / "p"), "--small"])
     assert rc == 0 and (tmp_path / "p" / "tasks" / "ls-01-practice.json").exists()
     assert not (tmp_path / "p" / "manifest.v2.json").exists()
+
+
+# --------------------------------------------------------------------------- #
+# Task 22: the v2 freeze -- mirrors test_bench_manifest.py's v1
+# `test_the_frozen_benchmark_passes_the_preconditions_that_gate_a_freeze`
+# against the built v2 manifest. Skipped until the artifact exists on disk.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(not V2.exists(), reason="v2 benchmark not built yet "
+                     "(python -m bench.build_v2)")
+def test_the_v2_freeze_passes_every_precondition():
+    """§8's preconditions "must pass before freeze", applied to the v2
+    manifest under §14's rules. This asserts the STRICT form -- the one that
+    refuses a manifest whose closed-book probe has not been run, or any of
+    whose tasks was answered correctly without its corpus.
+
+    A task answerable from memory does not inflate every arm equally: B1 and
+    B3 answer in one call from parametric knowledge while RLM and B2 spend
+    hundreds of leaf calls reading a corpus they did not need, so the
+    benchmark would report the scaffold losing on cost while tying on
+    quality."""
+    m = BenchmarkManifest.load(V2)
+    m.validate(require_closed_book=True)
+    for e in m.tasks:
+        cb = e.closed_book or {}
+        assert cb.get("seeds") == 3 and set(cb.get("models", [])) == {"root", "leaf"}
+        assert cb.get("passed_without_corpus") == 0

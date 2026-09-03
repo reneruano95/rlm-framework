@@ -687,7 +687,7 @@ trace:
 # unchanged; §14 did not re-derive them.
 benchmark:
   version: v2
-  manifest_sha256: null
+  manifest_sha256: 0cc8bfbca2bbab99b6df086d7fe036bf2cf90cd6d76cd9fd4f565757e3305a92
   seeds: [1, 2, 3]
   escalation_seeds: [4, 5]
 # S0 item 8 measured the Windows RAPL collector's overhead at +0.56% (noise)

@@ -1,0 +1,8 @@
+{
+  "task_id": "ctl-04-train",
+  "text": "Exactly one record in this register states a Custody key of record. What is that key? Reply with the key itself and nothing else.",
+  "context_path": "../corpora/ctl-04-train.txt",
+  "category": "code_solvable",
+  "answer": "602dd96c-46b3-a056-ae19-e85b8a808de9",
+  "checker": "uuid_exact"
+}

@@ -1,0 +1,8 @@
+{
+  "task_id": "int-01-held_out",
+  "text": "This corpus is a set of 12 registers, each behind its own document id. Each record in every register files one Query. Count, across ALL registers together, the records whose Query asks about a thing, object or entity that is not a person or place. Reply with the integer only, nothing else.",
+  "context_path": "../corpora/int-01-held_out.txt",
+  "category": "interactive",
+  "answer": "517",
+  "checker": "int_exact"
+}
