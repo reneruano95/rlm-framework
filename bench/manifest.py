@@ -127,13 +127,24 @@ class BenchmarkManifest:
         return hashlib.sha256(self.to_json().encode("utf-8")).hexdigest()
 
     # --------------------------------------------------------- validation --
-    def validate(self, *, require_closed_book: bool = False) -> None:
+    def validate(self, *, require_closed_book: bool = False,
+                strict_adversaries: bool = False) -> None:
         """§8's authoring rules, as assertions. Raises on the first violation.
 
         `require_closed_book` is off while authoring and ON at freeze: the probe
         needs both models live, and §8 makes it a precondition that "must pass
         before freeze" rather than during it.
+
+        A manifest carrying `rules` is v2: it validates against §14's rules
+        instead of §8's v1 category split (v2 has 32 tasks across two
+        streams, not v1's pre-registered 30). The v1 branch below is
+        untouched by that split -- a manifest with no `rules` still runs the
+        original §8 assertions exactly as they were.
         """
+        if self.rules is not None:
+            self._validate_v2(strict_adversaries=strict_adversaries)
+            return
+
         errs: list[str] = []
 
         if len(self.tasks) != N_TASKS:
@@ -205,6 +216,86 @@ class BenchmarkManifest:
 
         if errs:
             raise AssertionError("benchmark manifest violates §8:\n  - "
+                                 + "\n  - ".join(errs))
+
+    # --------------------------------------------------------- v2 rules --
+    def _validate_v2(self, *, strict_adversaries: bool) -> None:
+        """spec §14's authoring rules, as assertions -- v1's `validate` body
+        above, unmodified, is what runs when `rules` is None.
+
+        `strict_adversaries` gates the two build-time adversary checks
+        (`min_windows > 40`, parser scores at chance): off by default, same
+        posture as `require_closed_book`, because `--small` test builds
+        legitimately produce a `min_windows` at or under 40 (the corpus is
+        too small for the self-read adversary to matter) and still need to
+        validate. The real freeze build passes `strict_adversaries=True`.
+        """
+        errs: list[str] = []
+        rules = self.rules or {}
+
+        scored = self.scored_tasks()
+        n_tasks = rules.get("n_tasks")
+        if n_tasks is not None and len(scored) != n_tasks:
+            errs.append(f"{len(scored)} scored tasks, rules['n_tasks'] is {n_tasks}")
+
+        by_stream: dict[str | None, list[TaskEntry]] = {}
+        for t in self.tasks:
+            by_stream.setdefault(t.stream, []).append(t)
+
+        expected_counts = {"linear_semantic": 6, "interactive": 6, "code_solvable": 4}
+        for stream in ("train", "held_out"):
+            tasks = by_stream.get(stream, [])
+            counts: dict[str, int] = {}
+            for t in tasks:
+                counts[t.category] = counts.get(t.category, 0) + 1
+            if counts != expected_counts:
+                errs.append(f"stream {stream!r}: category counts {counts} "
+                            f"!= {expected_counts}")
+
+        train_shapes = {t.shape_id for t in by_stream.get("train", [])}
+        held_shapes = {t.shape_id for t in by_stream.get("held_out", [])}
+        if train_shapes != held_shapes:
+            errs.append(f"train and held_out do not carry identical shape "
+                        f"sets: {sorted(train_shapes)} != {sorted(held_shapes)}")
+
+        for t in self.tasks:
+            if t.category in ("linear_semantic", "interactive"):
+                if strict_adversaries and (t.min_windows is None or t.min_windows <= 40):
+                    errs.append(f"{t.task_id}: min_windows={t.min_windows}, "
+                                f"self-read adversary requires > 40")
+                scores = dict(t.regex_at_chance or {})
+                chance = scores.pop("__chance__", None)
+                if chance is None:
+                    if strict_adversaries:
+                        errs.append(f"{t.task_id}: no regex_at_chance recorded")
+                else:
+                    beaten = {k: v for k, v in scores.items() if v > chance + 0.02}
+                    if beaten:
+                        errs.append(f"{t.task_id}: parser adversary beat "
+                                    f"chance {chance:.3f}: {beaten}")
+            if t.category == "interactive" and t.reference_actions is None:
+                errs.append(f"{t.task_id}: interactive task has no reference_actions")
+            if t.category == "code_solvable" and t.regex_solvable is not True:
+                errs.append(f"{t.task_id}: code-solvable task has "
+                            f"regex_solvable={t.regex_solvable!r}, must be True")
+
+        for stream in ("train", "held_out"):
+            tasks = by_stream.get(stream, [])
+            n_adv = sum(1 for t in tasks if t.adversarial)
+            if tasks and n_adv < MIN_ADVERSARIAL:
+                errs.append(f"stream {stream!r}: {n_adv} adversarial tasks "
+                            f"< {MIN_ADVERSARIAL}")
+
+        for t in self.tasks:
+            if t.checker not in CHECKERS:
+                errs.append(f"{t.task_id}: unknown checker {t.checker!r}")
+                continue
+            if len(near_miss_suite(t.checker)) < MIN_NEAR_MISSES:
+                errs.append(f"{t.task_id}: checker {t.checker!r} ships fewer "
+                            f"than {MIN_NEAR_MISSES} near-misses")
+
+        if errs:
+            raise AssertionError("benchmark manifest violates v2 rules:\n  - "
                                  + "\n  - ".join(errs))
 
 

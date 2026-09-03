@@ -623,3 +623,128 @@ def build_interactive(seed: int, target_tokens: int,
         question_kind=question_kind, target=target, answer=answer,
         checker=checker, reference_actions=reference_actions, seed=seed,
         measured_tokens=count(text), counter_name=counter_name)
+
+
+# --------------------------------------------------------------------------- #
+# The code-solvable controls (Task 18, spec §3: "keeps the root scored for
+# choosing code when code suffices -- without these, v2 is rigged in the
+# opposite direction"). Both shapes are drawn from the SAME register grammar
+# as `build_linear_semantic` (`_sample_register`/`_record`, the same filler
+# vocabulary, the same `Filed:` line), so the four control tasks read like the
+# other twelve and cannot be told apart by surface style -- unlike v1/v2's
+# other categories, their answer is deliberately reachable by one regex over
+# the RENDERED text, and `.regex` is that literal pattern, so a caller (the
+# builder, in `bench/build_v2.py`) can re-run it and prove `.answer` is what
+# it claims to be, rather than trust it.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class ControlCorpus:
+    text: str                      # question + "\n\n" + the rendered register
+    question: str                  # the question alone (== text's first paragraph)
+    answer: str
+    checker: str                   # "int_exact" | "uuid_exact"
+    regex: str                     # the intended solving pattern, verbatim
+    seed: int
+    measured_tokens: int
+    counter_name: str
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+
+
+def build_control_count(seed: int, target_tokens: int,
+                        count: Callable[[str], int], counter_name: str,
+                        items: list[Item], *, paraphrase: bool = True,
+                        ) -> ControlCorpus:
+    """`ctl-01`/`ctl-02`: "Count the records whose Filed line names the month
+    {M}." Every record's `Filed:` line already carries a coined month
+    (`_coined_date`); this shape asks nothing a header-regex over that one
+    line can't answer, on purpose -- unlike `count_label`, which needs the
+    `Query:` field's human-assigned TREC label. Same grow-then-drop register
+    (`_sample_register`) and the same structural budget discipline as
+    `build_linear_semantic`: `count` is monotone and ceil-subadditive, so
+    reserving the question's tokens up front bounds the total.
+    """
+    rng = random.Random(seed)
+    month = rng.choice(_MONTHS)
+    question = (f"Count the records whose Filed line names the month "
+                f"{month}. Reply with the integer only, nothing else.")
+    sep = "\n\n"
+    reserved = count(question + sep)
+    record_budget = target_tokens - reserved
+    if record_budget <= 0:
+        raise ValueError(
+            f"target_tokens={target_tokens} cannot fit the control-count "
+            f"question alone ({reserved} tokens reserved for it)")
+    body, _sampled, _record_ids = _sample_register(
+        rng, seed, items, record_budget, count, paraphrase=paraphrase)
+    full_text = question + sep + body
+    pattern = rf"Filed:\s*\d{{1,2}}\s+{re.escape(month)}\s+\d{{4}}"
+    answer = str(len(re.findall(pattern, full_text)))
+    return ControlCorpus(text=full_text, question=question, answer=answer,
+                         checker="int_exact", regex=pattern, seed=seed,
+                         measured_tokens=count(full_text), counter_name=counter_name)
+
+
+def build_control_needle(seed: int, target_tokens: int,
+                         count: Callable[[str], int], counter_name: str,
+                         items: list[Item], *, paraphrase: bool = True,
+                         position: float = 0.5) -> ControlCorpus:
+    """`ctl-03`/`ctl-04`: `bench.corpus.build_needle`'s pattern (one unique
+    custody key, planted at a fraction of the way through a filler register),
+    re-implemented over `LinearSemanticCorpus`'s register grammar instead of
+    v1's `AggregationCorpus` one -- so this control, like `build_control_count`,
+    reads as one more v2 register rather than a visibly different corpus
+    shape. Reserving the needle record's own tokens up front (alongside the
+    question's) keeps the same structural budget guarantee `build_needle`
+    itself does not need (v1's needle corpora are exempt from the 130K
+    aggregation cap) but v2's uniform-looking registers do.
+    """
+    rng = random.Random(seed)
+    key = "%08x-%04x-%04x-%04x-%012x" % (
+        rng.getrandbits(32), rng.getrandbits(16), rng.getrandbits(16),
+        rng.getrandbits(16), rng.getrandbits(48))
+    question = ("Exactly one record in this register states a Custody key of "
+               "record. What is that key? Reply with the key itself and "
+               "nothing else.")
+    org = organisation(rng)
+    date = _coined_date(rng)
+    needle_ref = f"ENT-9{seed % 10:01d}99999"
+    needle = (f"[{needle_ref}] {org}\n"
+             f"Filed: {date}\n"
+             f"Custody key of record: {key}.\n"
+             f"Notes: this key is issued once and is not reproduced elsewhere.\n")
+    sep = "\n\n"
+    reserved = count(question + sep) + count(needle + sep)
+    record_budget = target_tokens - reserved
+    if record_budget <= 0:
+        raise ValueError(
+            f"target_tokens={target_tokens} cannot fit the needle question "
+            f"and the needle record alone ({reserved} tokens reserved for them)")
+    body, _sampled, _record_ids = _sample_register(
+        rng, seed, items, record_budget, count, paraphrase=paraphrase)
+    parts = body.split(sep) if body else []
+    parts.insert(int(len(parts) * position), needle.rstrip("\n"))
+    full_text = question + sep + sep.join(parts)
+    # Structural budget can be broken by a real tokenizer's boundary effects
+    # around the splice point (unlike `approx_tokens`, whose count is pure
+    # length and is unaffected by where the needle lands) -- trim from the
+    # end, same discipline as `_sample_register`'s own trim loop, never
+    # touching the needle itself.
+    while len(parts) > 1 and count(full_text) > target_tokens:
+        drop = len(parts) - 1
+        if parts[drop] == needle.rstrip("\n"):
+            drop -= 1
+        parts.pop(drop)
+        full_text = question + sep + sep.join(parts)
+
+    pattern = r"Custody key of record:\s*([0-9a-f-]+)\."
+    m = re.search(pattern, full_text)
+    assert m, "needle regex failed to find the inserted key"
+    answer = m.group(1)
+    return ControlCorpus(text=full_text, question=question, answer=answer,
+                         checker="uuid_exact", regex=pattern, seed=seed,
+                         measured_tokens=count(full_text), counter_name=counter_name)

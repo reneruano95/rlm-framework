@@ -1,7 +1,10 @@
 import pytest
 
+import re
 from pathlib import Path
-from bench.corpus_v2 import build_interactive, load_trec, TREC_LABELS, build_linear_semantic
+from bench.corpus_v2 import (build_interactive, load_trec, TREC_LABELS,
+                             build_linear_semantic, build_control_count,
+                             build_control_needle)
 from bench.tokens import approx_tokens
 from rlm.context.chunker import ChunkConfig
 from rlm.context.interactive import InteractiveIndex
@@ -119,3 +122,38 @@ def test_which_doc_has_most_breaks_a_tie_to_the_lowest_doc_id():
     tied = [d for d in c.doc_ids if per_doc_count[d] == top]
     assert len(tied) > 1, "fixture drifted: seed 9200 no longer ties -- pick a new seed"
     assert c.answer == min(tied)
+
+
+# --------------------------------------------------------------------------- #
+# Task 18: the code-solvable controls. Both are provably regex-solvable: the
+# corpus's own `.answer` is computed BY running `.regex` over `.text`, so a
+# test that re-runs the same regex is checking the exact claim the builder
+# later asserts before it will emit either shape.
+# --------------------------------------------------------------------------- #
+
+
+def test_control_count_answer_is_reproduced_by_its_own_regex():
+    items = load_trec()
+    c = build_control_count(9601, 6_000, approx_tokens, "approx-offline", items=items)
+    assert c.answer == str(len(re.findall(c.regex, c.text)))
+    assert c.checker == "int_exact"
+    assert c.measured_tokens <= 6_000
+    assert "Count the records whose Filed line names the month" in c.question
+
+
+def test_control_needle_answer_is_reproduced_by_its_own_regex():
+    items = load_trec()
+    c = build_control_needle(9603, 6_000, approx_tokens, "approx-offline", items=items)
+    m = re.search(c.regex, c.text)
+    assert m is not None and m.group(1) == c.answer
+    assert c.checker == "uuid_exact"
+    assert c.measured_tokens <= 6_000
+    assert c.text.count("Custody key of record:") == 1
+
+
+def test_control_builders_are_deterministic_and_seed_sensitive():
+    items = load_trec()
+    a = build_control_count(9601, 6_000, approx_tokens, "approx-offline", items=items)
+    a2 = build_control_count(9601, 6_000, approx_tokens, "approx-offline", items=items)
+    b = build_control_count(9602, 6_000, approx_tokens, "approx-offline", items=items)
+    assert a.sha256 == a2.sha256 and a.sha256 != b.sha256

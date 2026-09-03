@@ -54,3 +54,40 @@ def test_scored_tasks_is_the_scored_stream_or_everything():
     v1like = BenchmarkManifest(benchmark_version="v1", built_at="", token_counter="",
                                assumed_training_cutoff="", tasks=[train, held])
     assert [t.task_id for t in v1like.scored_tasks()] == ["a", "b"]
+
+
+# --------------------------------------------------------------------------- #
+# Task 18: build_v2 emits the whole v2 artifact.
+# --------------------------------------------------------------------------- #
+
+
+def test_build_v2_emits_sixteen_shapes_in_two_frozen_streams(tmp_path, monkeypatch):
+    from bench import build_v2
+    monkeypatch.setattr(build_v2, "TASKS", tmp_path / "tasks")
+    monkeypatch.setattr(build_v2, "CORPORA", tmp_path / "corpora")
+    monkeypatch.setattr(build_v2, "MANIFEST", tmp_path / "manifest.v2.json")
+    rc = build_v2.main(["--stream", "both", "--small"])      # --small: 6K/20K tokens for tests
+    assert rc == 0
+    m = BenchmarkManifest.load(tmp_path / "manifest.v2.json")
+    assert len(m.tasks) == 32 and len(m.scored_tasks()) == 16
+    assert {t.shape_id for t in m.tasks if t.stream == "train"} == {t.shape_id for t in m.tasks if t.stream == "held_out"}
+    assert m.rules["margin"] == 2 and m.rules["abstentions"] == {"b2": ["interactive"]}
+    m.validate(require_closed_book=False)
+
+
+def test_build_v2_refuses_a_task_a_parser_can_solve(tmp_path, monkeypatch):
+    from bench import build_v2
+    monkeypatch.setattr(build_v2, "PARAPHRASE", False)     # disable the defence
+    monkeypatch.setattr(build_v2, "TASKS", tmp_path / "tasks")
+    monkeypatch.setattr(build_v2, "CORPORA", tmp_path / "corpora")
+    monkeypatch.setattr(build_v2, "MANIFEST", tmp_path / "manifest.v2.json")
+    with pytest.raises(SystemExit) as e:
+        build_v2.main(["--stream", "train", "--small"])
+    assert "parser adversary" in str(e.value)
+
+
+def test_practice_stream_writes_outside_bench_and_no_manifest(tmp_path):
+    from bench import build_v2
+    rc = build_v2.main(["--practice", "--seed", "7", "--out", str(tmp_path / "p"), "--small"])
+    assert rc == 0 and (tmp_path / "p" / "tasks" / "ls-01-practice.json").exists()
+    assert not (tmp_path / "p" / "manifest.v2.json").exists()
